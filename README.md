@@ -405,7 +405,7 @@ machine, report, err := b.Build()
 
 - **Finite state spaces only** - Cannot model unbounded domains (arbitrary strings, lists)
 - **Build-time cost** - Large state spaces (> 1M states) verification becomes slow
-- **Go only** - Not a cross-language protocol (though principles apply elsewhere)
+- **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
 - **Single-registry** - Federation (Section 7 of paper) not yet implemented
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
 
