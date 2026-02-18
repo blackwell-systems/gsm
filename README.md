@@ -122,14 +122,14 @@ This does **one table lookup**: `step[event_index][state_id]` returns the precom
 
 ## When to Use gsm
 
-✅ **Use gsm when:**
+**Use gsm when:**
 - Building event-sourced systems with out-of-order events
 - Operations can violate invariants (need compensation/repair)
 - State space is finite and enumerable (< ~1M states)
 - You want mathematical convergence guarantees
 - You're using Go
 
-❌ **Don't use gsm when:**
+**Don't use gsm when:**
 - Operations already commute (use CRDTs instead)
 - Operations preserve invariants in all orderings (use invariant confluence)
 - State space is unbounded or infinite
