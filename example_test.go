@@ -120,7 +120,10 @@ func ExampleMachine_Apply() {
 		}).
 		Add()
 
-	machine, _, _ := b.Build()
+	machine, _, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
 
 	s := machine.NewState()
 	fmt.Printf("Initial: power=%v\n", s.GetBool(power))
@@ -145,7 +148,10 @@ func ExampleState_String() {
 	count := b.Int("count", 0, 100)
 	enabled := b.Bool("enabled")
 
-	machine, _, _ := b.Build()
+	machine, _, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
 
 	s := machine.NewState()
 	s = s.Set(status, "active")
@@ -193,7 +199,10 @@ func ExampleBuilder_Invariant() {
 		}).
 		Add()
 
-	machine, _, _ := b.Build()
+	machine, _, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
 
 	s := machine.NewState()
 	s = s.SetInt(qty, 5)
@@ -217,10 +226,13 @@ func ExampleMachine_Export() {
 		}).
 		Add()
 
-	machine, _, _ := b.Build()
+	machine, _, err := b.Build()
+	if err != nil {
+		panic(err)
+	}
 
 	// Export to JSON (verification tables + metadata)
-	err := machine.Export("/tmp/simple.json")
+	err = machine.Export("/tmp/simple.json")
 	if err != nil {
 		panic(err)
 	}
