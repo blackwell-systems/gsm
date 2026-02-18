@@ -78,7 +78,6 @@ func (b *Builder) Build() (*Machine, *Report, error) {
 		return nil, nil, fmt.Errorf("gsm: state space %d exceeds limit %d", stateCount, maxStateSpace)
 	}
 
-	// Total bitpacked states (may include invalid encodings for non-power-of-2 domains)
 	packedCount := 1 << b.totalBits
 
 	report := &Report{
@@ -88,28 +87,54 @@ func (b *Builder) Build() (*Machine, *Report, error) {
 		EventCount: len(b.events),
 	}
 
-	// Build validity mask: which packed IDs correspond to real states
+	// Build validity mask
 	valid := make([]bool, packedCount)
 	for i := 0; i < packedCount; i++ {
 		valid[i] = b.isValidEncoding(uint64(i))
 	}
 
-	// Helper: make a State from a packed ID
 	mkState := func(id uint64) State {
 		return State{packed: id, vars: b.vars}
 	}
 
-	// -------------------------------------------------------
-	// Compute NF table: for each state, iterated compensation
-	// -------------------------------------------------------
+	// Phase 1: Verify WFC and compute normal forms
+	nf, err := b.computeNormalForms(packedCount, stateCount, valid, mkState, report)
+	if err != nil {
+		return nil, report, err
+	}
+
+	// Phase 2: Compute step tables
+	step := b.computeStepTables(packedCount, valid, nf, mkState)
+
+	// Phase 3: Verify CC
+	err = b.verifyCC(packedCount, valid, step, mkState, report)
+	if err != nil {
+		return nil, report, err
+	}
+
+	// Build immutable machine
+	m := &Machine{
+		name:   b.name,
+		vars:   b.vars,
+		events: make(map[string]int),
+		step:   step,
+		nf:     nf,
+	}
+	for i, ev := range b.events {
+		m.events[ev.name] = i
+	}
+
+	return m, report, nil
+}
+
+// computeNormalForms verifies WFC and computes the normal form table.
+func (b *Builder) computeNormalForms(packedCount, stateCount int, valid []bool, mkState func(uint64) State, report *Report) ([]uint64, error) {
 	nf := make([]uint64, packedCount)
-	repairLen := make([]int, packedCount)
-	wfcOk := true
 	maxRepair := 0
 
 	for i := 0; i < packedCount; i++ {
 		if !valid[i] {
-			nf[i] = uint64(i) // unused
+			nf[i] = uint64(i)
 			continue
 		}
 
@@ -122,74 +147,57 @@ func (b *Builder) Build() (*Machine, *Report, error) {
 			s = b.applyFirstRepair(s)
 			depth++
 
-			if seen[s.packed] {
-				// Cycle detected — WFC fails
-				wfcOk = false
-				break
+			if seen[s.packed] || depth > stateCount {
+				report.WFC = false
+				return nil, fmt.Errorf("gsm: WFC check failed — compensation does not terminate")
 			}
 			seen[s.packed] = true
-
-			if depth > stateCount {
-				wfcOk = false
-				break
-			}
 		}
 
 		nf[i] = s.packed
-		repairLen[i] = depth
 		if depth > maxRepair {
 			maxRepair = depth
 		}
 	}
 
-	report.WFC = wfcOk
+	report.WFC = true
 	report.MaxRepairLen = maxRepair
 
-	if !wfcOk {
-		return nil, report, fmt.Errorf("gsm: WFC check failed — compensation does not terminate")
-	}
-
-	// Verify NF(valid state) = same state (idempotence on valid)
+	// Verify idempotence on valid states
 	for i := 0; i < packedCount; i++ {
-		if !valid[i] {
-			continue
-		}
-		s := mkState(uint64(i))
-		if b.allInvariantsHold(s) && nf[i] != uint64(i) {
-			return nil, report, fmt.Errorf(
-				"gsm: compensation moves valid state %s — repair must be identity on valid states", s)
+		if valid[i] {
+			s := mkState(uint64(i))
+			if b.allInvariantsHold(s) && nf[i] != uint64(i) {
+				return nil, fmt.Errorf("gsm: compensation moves valid state %s — repair must be identity on valid states", s)
+			}
 		}
 	}
 
-	// -------------------------------------------------------
-	// Compute Step table: Step[e][s] = NF(apply(e, s))
-	// -------------------------------------------------------
+	return nf, nil
+}
+
+// computeStepTables builds the Step[e][s] = NF(apply(e, s)) tables.
+func (b *Builder) computeStepTables(packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) [][]uint64 {
 	step := make([][]uint64, len(b.events))
 	for ei, ev := range b.events {
 		step[ei] = make([]uint64, packedCount)
 		for i := 0; i < packedCount; i++ {
-			if !valid[i] {
-				continue
+			if valid[i] {
+				s := mkState(uint64(i))
+				after := b.applyEvent(ev, s)
+				after = b.clampState(after)
+				step[ei][i] = nf[after.packed]
 			}
-			s := mkState(uint64(i))
-			// Apply event (guard check — no-op if guard fails)
-			after := b.applyEvent(ev, s)
-			// Clamp to valid encoding
-			after = b.clampState(after)
-			// Normalize
-			step[ei][i] = nf[after.packed]
 		}
 	}
+	return step
+}
 
-	// -------------------------------------------------------
-	// Check CC: for independent event pairs, for all states
-	// -------------------------------------------------------
-	ccOk := true
-	var ccFail *CCFailure
+// verifyCC checks compensation commutativity for independent event pairs.
+func (b *Builder) verifyCC(packedCount int, valid []bool, step [][]uint64, mkState func(uint64) State, report *Report) error {
 	pairsDisjoint := 0
 	pairsBrute := 0
 
-	// Build list of pairs to check
 	type pair struct{ i, j int }
 	var pairsToCheck []pair
 
@@ -212,66 +220,42 @@ func (b *Builder) Build() (*Machine, *Report, error) {
 	for _, p := range pairsToCheck {
 		i, j := p.i, p.j
 
-		// Check footprint disjointness
 		if b.eventsDisjoint(i, j) {
 			pairsDisjoint++
 			continue
 		}
 
-		// Brute force: check all valid states
 		pairsBrute++
 		for s := 0; s < packedCount; s++ {
 			if !valid[s] {
 				continue
 			}
-			// Order 1: event i then event j
-			after_i := step[i][s]
-			after_ij := step[j][after_i]
 
-			// Order 2: event j then event i
-			after_j := step[j][s]
-			after_ji := step[i][after_j]
+			after_ij := step[j][step[i][s]]
+			after_ji := step[i][step[j][s]]
 
 			if after_ij != after_ji {
-				ccOk = false
-				ccFail = &CCFailure{
+				report.CC = false
+				report.PairsTotal = pairsDisjoint + pairsBrute
+				report.PairsDisjoint = pairsDisjoint
+				report.PairsBrute = pairsBrute
+				report.CCFailure = &CCFailure{
 					Event1:  b.events[i].name,
 					Event2:  b.events[j].name,
 					State:   mkState(uint64(s)),
 					Result1: mkState(after_ij),
 					Result2: mkState(after_ji),
 				}
-				goto ccDone
+				return fmt.Errorf("gsm: CC check failed")
 			}
 		}
 	}
-ccDone:
 
-	report.CC = ccOk
+	report.CC = true
 	report.PairsTotal = pairsDisjoint + pairsBrute
 	report.PairsDisjoint = pairsDisjoint
 	report.PairsBrute = pairsBrute
-	report.CCFailure = ccFail
-
-	if !ccOk {
-		return nil, report, fmt.Errorf("gsm: CC check failed")
-	}
-
-	// -------------------------------------------------------
-	// Build immutable machine
-	// -------------------------------------------------------
-	m := &Machine{
-		name:   b.name,
-		vars:   b.vars,
-		events: make(map[string]int),
-		step:   step,
-		nf:     nf,
-	}
-	for i, ev := range b.events {
-		m.events[ev.name] = i
-	}
-
-	return m, report, nil
+	return nil
 }
 
 // allInvariantsHold checks V_R(s).
