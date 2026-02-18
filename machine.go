@@ -79,7 +79,7 @@ type exportFormat struct {
 
 type varExport struct {
 	Name   string   `json:"name"`
-	Kind   string   `json:"kind"`   // "bool", "enum", "int"
+	Kind   string   `json:"kind"`             // "bool", "enum", "int"
 	Labels []string `json:"labels,omitempty"` // enum only
 	Min    int      `json:"min,omitempty"`    // int only
 	Max    int      `json:"max,omitempty"`    // int only
@@ -106,8 +106,8 @@ type verifyInfo struct {
 //   - Verification metadata (WFC/CC results, state count, etc.)
 //
 // Runtime libraries only need to:
-//   1. Load the JSON
-//   2. Implement Apply(state, event) as step[events[event]][state]
+//  1. Load the JSON
+//  2. Implement Apply(state, event) as step[events[event]][state]
 //
 // Example runtime (Python):
 //

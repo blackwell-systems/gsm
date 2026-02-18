@@ -8,13 +8,13 @@ import (
 // invariants, and events, call Build() to verify convergence properties
 // and produce an immutable Machine.
 type Builder struct {
-	name         string
-	vars         []Var
-	invariants   []invariantDef
-	events       []eventDef
-	totalBits    uint
-	independent  [][2]int // pairs of event indices declared independent
-	allIndependent bool  // if true, check all pairs
+	name           string
+	vars           []Var
+	invariants     []invariantDef
+	events         []eventDef
+	totalBits      uint
+	independent    [][2]int // pairs of event indices declared independent
+	allIndependent bool     // if true, check all pairs
 }
 
 // CheckFunc is a predicate over State.

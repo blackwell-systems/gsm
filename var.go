@@ -45,11 +45,6 @@ func bitsNeeded(n int) uint {
 	return b
 }
 
-// varDef is the internal definition used during building.
-type varDef struct {
-	v Var
-}
-
 // enumIndex returns the integer index for a named enum value, or error.
 func (v *Var) enumIndex(val string) (int, error) {
 	for i, l := range v.labels {

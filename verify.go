@@ -17,18 +17,18 @@ type Report struct {
 	MaxRepairLen int // longest compensation chain
 
 	// CC results
-	CC          bool
-	PairsTotal  int
-	PairsDisjoint int // proved by footprint disjointness
-	PairsBrute  int   // proved by exhaustive check
-	CCFailure   *CCFailure // non-nil if CC failed
+	CC            bool
+	PairsTotal    int
+	PairsDisjoint int        // proved by footprint disjointness
+	PairsBrute    int        // proved by exhaustive check
+	CCFailure     *CCFailure // non-nil if CC failed
 }
 
 // CCFailure describes a specific CC violation.
 type CCFailure struct {
-	Event1 string
-	Event2 string
-	State  State
+	Event1  string
+	Event2  string
+	State   State
 	Result1 State // apply e1 then e2
 	Result2 State // apply e2 then e1
 }
@@ -50,7 +50,7 @@ func (r *Report) String() string {
 		s += fmt.Sprintf("  CC:  PASS (%d pairs: %d disjoint, %d brute-force)\n",
 			r.PairsTotal, r.PairsDisjoint, r.PairsBrute)
 	} else if r.CCFailure != nil {
-		s += fmt.Sprintf("  CC:  FAIL\n")
+		s += "  CC:  FAIL\n"
 		s += fmt.Sprintf("    Events: (%s, %s)\n", r.CCFailure.Event1, r.CCFailure.Event2)
 		s += fmt.Sprintf("    State:  %s\n", r.CCFailure.State)
 		s += fmt.Sprintf("    %s→%s: %s\n", r.CCFailure.Event1, r.CCFailure.Event2, r.CCFailure.Result1)
