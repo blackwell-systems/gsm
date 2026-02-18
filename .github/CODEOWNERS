@@ -1,0 +1,16 @@
+# CODEOWNERS file for gsm repository
+# These owners will be automatically requested for review when PRs modify matching files.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for all files
+* @blackwell-systems
+
+# Workflow and CI configuration
+/.github/ @blackwell-systems
+
+# Core library files
+*.go @blackwell-systems
+
+# Documentation
+*.md @blackwell-systems
+/ARCHITECTURE.md @blackwell-systems
