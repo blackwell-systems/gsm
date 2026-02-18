@@ -1,0 +1,32 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-02-18
+
+### Added
+- Initial release of governed state machines library
+- Builder API for defining state machines with fluent interface
+- State variable types: Bool, Enum, Int with finite domains
+- Invariant declaration with footprint tracking and repair functions
+- Event declaration with write sets, guards, and effect functions
+- Build-time WFC verification via exhaustive state-space enumeration
+- Build-time CC verification (CC1 and CC2) with counterexample generation
+- Footprint-based optimization for disjoint event pairs
+- Immutable Machine type with precomputed lookup tables
+- O(1) runtime event application via Step table
+- State normalization and validity checking
+- Bitpacked state representation (uint64) for efficient table indexing
+- Comprehensive verification reports with WFC depth and CC pair statistics
+- Independence declarations for restricting CC checks to relevant pairs
+- JSON export format for portable multi-language runtime support
+- Full test suite covering WFC, CC, compensation, and failures
+- Documentation with usage examples, API reference, and design rationale
+
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/blackwell-systems/gsm/releases/tag/v0.1.0
