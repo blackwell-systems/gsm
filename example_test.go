@@ -2,6 +2,8 @@ package gsm_test
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 
 	"github.com/blackwell-systems/gsm"
 )
@@ -232,11 +234,16 @@ func ExampleMachine_Export() {
 	}
 
 	// Export to JSON (verification tables + metadata)
-	err = machine.Export("/tmp/simple.json")
+	tmpDir := "/tmp"
+	if runtime.GOOS == "windows" {
+		tmpDir = os.Getenv("TEMP")
+	}
+	path := fmt.Sprintf("%s/simple.json", tmpDir)
+	err = machine.Export(path)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println("Exported to /tmp/simple.json")
-	// Output: Exported to /tmp/simple.json
+	fmt.Println("Machine exported successfully")
+	// Output: Machine exported successfully
 }
