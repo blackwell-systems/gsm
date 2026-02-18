@@ -409,6 +409,58 @@ machine, report, err := b.Build()
 - **Single-registry** - Federation (Section 7 of paper) not yet implemented
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
 
+## Multi-Language Support
+
+While verification requires Go, **runtime is portable** to any language. Use `Machine.Export()` to serialize the verified machine to JSON:
+
+```go
+machine, _, err := builder.Build()
+if err != nil {
+    log.Fatal(err)
+}
+
+machine.Export("order.gsm.json")
+```
+
+The exported JSON contains:
+- Variable definitions (types, domains)
+- Event names (ordered)
+- Normal form table: `nf[stateID] → normalized stateID`
+- Step table: `step[eventID][stateID] → normalized result stateID`
+
+### Runtime Implementation (Python Example)
+
+```python
+import json
+
+class Machine:
+    def __init__(self, path):
+        with open(path) as f:
+            d = json.load(f)
+        self.events = {n: i for i, n in enumerate(d['events'])}
+        self.step = d['step']
+        self.nf = d['nf']
+
+    def apply(self, state, event):
+        """O(1) event application via table lookup"""
+        return self.step[self.events[event]][state]
+
+    def normalize(self, state):
+        return self.nf[state]
+
+# Use it
+m = Machine('order.gsm.json')
+s = 0
+s = m.apply(s, 'ship_item')
+s = m.apply(s, 'process_payment')
+```
+
+That's it - ~20 lines of code for a complete runtime. The same pattern works in JavaScript, Rust, Java, or any language that can:
+1. Load JSON
+2. Index arrays
+
+**Verification complexity** stays in Go. **Runtime simplicity** is universal.
+
 ## Installation
 
 ```bash
