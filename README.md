@@ -289,39 +289,6 @@ Event application: **O(1)** - single array lookup, no computation.
 
 Memory: One `uint64` per state for normal form table, plus one `uint64` per (event, state) pair for step table. For 1M states × 10 events = ~80MB.
 
-## Design Decisions
-
-### Why Finite State Spaces?
-
-Verification requires exhaustively checking all states. Unbounded domains (arbitrary strings, uncapped integers, lists) make this impossible.
-
-Finite domains force you to model "what actually matters" for convergence. An inventory count doesn't need the full range of `int64` - it needs `[0..maxStock]`.
-
-### Why Immutable States?
-
-States are values (bitpacked `uint64`), not mutable objects. This enables:
-- Use as table indices (identity = value)
-- Safe concurrent access
-- Functional event application (`Apply` returns new state, doesn't mutate)
-
-### Why Build-Time Verification?
-
-The alternative is runtime verification: check CC dynamically by recording traces and detecting divergence. Problems:
-- No upfront guarantee (discover failures in production)
-- Performance overhead (tracking, comparison)
-- Incomplete coverage (only checks observed traces)
-
-Build-time verification costs more upfront but gives complete coverage and zero runtime overhead.
-
-### Why Table Lookups?
-
-The step table precomputes **every possible (event, state) → normal form** transition. This seems expensive (space), but:
-- Avoids repeated compensation logic at runtime
-- Makes event application deterministic and fast
-- Enables proof of correctness (table is the witness)
-
-For small-to-medium state spaces (< 1M states, < 100 events), the table is tractable (~80MB).
-
 ## Relationship to the Paper
 
 This library implements the **single-registry governance model** from Section 3 of the paper:
