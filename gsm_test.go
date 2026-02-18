@@ -1,6 +1,8 @@
 package gsm_test
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/blackwell-systems/gsm"
@@ -309,4 +311,54 @@ func TestDisjointFootprintOptimization(t *testing.T) {
 	// restock only touches inventory; most order events touch status/paid
 	// So restock pairs should be proved by disjointness where footprints don't overlap
 	t.Logf("disjoint: %d, brute-force: %d", report.PairsDisjoint, report.PairsBrute)
+}
+
+func TestExport(t *testing.T) {
+	machine, _ := buildOrderMachine(t)
+
+	tmpfile := t.TempDir() + "/order.gsm.json"
+	if err := machine.Export(tmpfile); err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// Verify file exists and is valid JSON
+	data, err := os.ReadFile(tmpfile)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+
+	var export map[string]interface{}
+	if err := json.Unmarshal(data, &export); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	// Verify key fields
+	if export["name"] != "order_fulfillment" {
+		t.Errorf("wrong name: %v", export["name"])
+	}
+	if export["version"].(float64) != 1 {
+		t.Errorf("wrong version: %v", export["version"])
+	}
+
+	vars := export["vars"].([]interface{})
+	if len(vars) != 3 {
+		t.Errorf("wrong var count: %d", len(vars))
+	}
+
+	events := export["events"].([]interface{})
+	if len(events) != 5 {
+		t.Errorf("wrong event count: %d", len(events))
+	}
+
+	nf := export["nf"].([]interface{})
+	step := export["step"].([]interface{})
+	// NF table includes bitpacked padding states (64 = 2^6 bits)
+	if len(nf) < 48 {
+		t.Errorf("state count too small: %d", len(nf))
+	}
+	if len(step) != 5 {
+		t.Errorf("wrong step table size: %d", len(step))
+	}
+
+	t.Logf("Exported %d bytes to %s", len(data), tmpfile)
 }
