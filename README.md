@@ -6,7 +6,7 @@
 
 `gsm` is a Go library for constructing state machines where events may arrive out of order and violate business rules, but automatic compensation ensures all replicas converge to the same valid state. Convergence is **verified at build time** via exhaustive state-space enumeration. Runtime event application is **O(1) table lookup** with zero compensation overhead.
 
-Based on: [*Normalization Confluence in Federated Registry Networks*](https://doi.org/10.5281/zenodo.18677401) (Blackwell, 2026)
+Based on: [*Normalization Confluence in Federated Registry Networks*](https://doi.org/10.5281/zenodo.18677400) (Blackwell, 2026)
 
 ## Quick Example
 
@@ -492,8 +492,8 @@ MIT License - see LICENSE file
   title = {Normalization Confluence in Federated Registry Networks},
   year = {2026},
   publisher = {Zenodo},
-  doi = {10.5281/zenodo.18677401},
-  url = {https://doi.org/10.5281/zenodo.18677401}
+  doi = {10.5281/zenodo.18677400},
+  url = {https://doi.org/10.5281/zenodo.18677400}
 }
 ```
 
@@ -504,7 +504,7 @@ MIT License - see LICENSE file
 
 ## Further Reading
 
-- [Paper: Normalization Confluence in Federated Registry Networks](https://doi.org/10.5281/zenodo.18677401)
+- [Paper: Normalization Confluence in Federated Registry Networks](https://doi.org/10.5281/zenodo.18677400)
 - [Newman's Lemma](https://en.wikipedia.org/wiki/Newman%27s_lemma) - Foundation for confluence proofs
 - [CRDTs](https://crdt.tech/) - Alternative approach via operation commutativity
 - [Coordination Avoidance in Database Systems](https://dl.acm.org/doi/10.14778/2735508.2735509) - Invariant confluence (Bailis et al., VLDB 2014)
