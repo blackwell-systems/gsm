@@ -507,4 +507,4 @@ MIT License - see LICENSE file
 - [Paper: Normalization Confluence in Federated Registry Networks](https://doi.org/10.5281/zenodo.18671870)
 - [Newman's Lemma](https://en.wikipedia.org/wiki/Newman%27s_lemma) - Foundation for confluence proofs
 - [CRDTs](https://crdt.tech/) - Alternative approach via operation commutativity
-- [Invariant Confluence](https://www.bailis.org/papers/hat-hotos2013.pdf) - Alternative approach via invariant preservation
+- [Coordination Avoidance in Database Systems](https://dl.acm.org/doi/10.14778/2735508.2735509) - Invariant confluence (Bailis et al., VLDB 2014)
