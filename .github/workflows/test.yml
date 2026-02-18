@@ -26,9 +26,11 @@ jobs:
         go-version: ${{ matrix.go }}
 
     - name: Run tests
+      shell: bash
       run: go test -v -race -coverprofile=coverage.txt -covermode=atomic .
 
     - name: Run go vet
+      shell: bash
       run: go vet .
 
     - name: Upload coverage
