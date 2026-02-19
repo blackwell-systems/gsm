@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-02-19
+
+### Changed
+- **BREAKING**: Renamed `InvariantBuilder.Over()` to `Watches()` for better clarity
+- **BREAKING**: Renamed `InvariantBuilder.Check()` to `Holds()` to align with formal methods terminology
+- **BREAKING**: Renamed `Builder.DeclaredIndependence()` to `OnlyDeclaredPairs()` for clearer semantics
+- Expanded "CC" abbreviation to "Compensation Commutativity" in all user-facing messages and reports
+- Updated all code examples and documentation to use new API
+
+### Added
+- New "Core Concepts" section in README explaining invariants, compensation, events, and independence
+- Detailed explanations of WFC (Well-Founded Compensation) and CC requirements
+- Examples showing footprint usage and event declaration patterns
+
 ## [0.1.1] - 2026-02-19
 
 ### Added
@@ -36,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full test suite covering WFC, CC, compensation, and failures
 - Documentation with usage examples, API reference, and design rationale
 
-[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/blackwell-systems/gsm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/blackwell-systems/gsm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/blackwell-systems/gsm/releases/tag/v0.1.0
