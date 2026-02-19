@@ -31,8 +31,8 @@ func main() {
 
     // Business rule: can't ship unpaid orders
     b.Invariant("no_ship_unpaid").
-        Over(status, paid).
-        Check(func(s gsm.State) bool {
+        Watches(status, paid).
+        Holds(func(s gsm.State) bool {
             return s.Get(status) != "shipped" || s.GetBool(paid)
         }).
         Repair(func(s gsm.State) gsm.State {
@@ -67,7 +67,7 @@ func main() {
     //   States: 6
     //   Events: 2
     //   WFC: PASS (max repair depth: 1)
-    //   CC:  PASS (1 pairs: 1 disjoint, 0 brute-force)
+    //   CC (Compensation Commutativity): PASS (1 pairs: 1 disjoint, 0 brute-force)
     //   Convergence: GUARANTEED
 
     // Runtime usage (O(1) lookups)
@@ -124,6 +124,82 @@ This does **one table lookup**: `step[event_index][state_id]` returns the precom
 
 **No compensation logic runs at runtime.** All the complexity is resolved at build time.
 
+## Core Concepts
+
+### Invariants
+
+An **invariant** is a property that must always hold on valid states. Each invariant has three parts:
+
+- **`Watches(vars...)`**: Declares which variables the invariant depends on (its "footprint"). The repair function can only modify these variables.
+- **`Holds(func)`**: The boolean condition that must be true. When this returns false, compensation fires.
+- **`Repair(func)`**: How to fix states where the invariant is violated. This is the compensation function.
+
+```go
+b.Invariant("no_overdraft").
+    Watches(balance).
+    Holds(func(s gsm.State) bool {
+        return s.GetInt(balance) >= 0
+    }).
+    Repair(func(s gsm.State) gsm.State {
+        return s.SetInt(balance, 0)  // Prevent negative balance
+    }).
+    Add()
+```
+
+Invariants fire in **declaration order** (priority). If multiple invariants are violated, the first one repairs first, then the next, until all hold.
+
+### Compensation
+
+**Compensation** is the automatic repair process that fires when events violate invariants:
+
+1. Event modifies state (e.g., "withdraw $100")
+2. Invariant check fails (e.g., balance becomes -50)
+3. Repair function fires (e.g., set balance to 0)
+4. Repeat until all invariants hold
+
+For convergence, compensation must be:
+
+- **Well-Founded (WFC)**: Repairs must eventually terminate (no infinite loops)
+- **Commutative (CC)**: Event order shouldn't matter after compensation runs
+
+The library **verifies both properties at build time** by exhaustively checking all possible states and event orderings.
+
+### Events
+
+**Events** are operations that modify state. Each event declares:
+
+- **`Writes(vars...)`**: Which variables this event modifies
+- **`Guard(func)`**: Optional precondition - if false, event is a no-op
+- **`Apply(func)`**: The effect function that transforms the state
+
+```go
+b.Event("withdraw").
+    Writes(balance).
+    Guard(func(s gsm.State) bool {
+        return s.GetInt(balance) >= amount  // Can't withdraw if insufficient
+    }).
+    Apply(func(s gsm.State) gsm.State {
+        return s.SetInt(balance, s.GetInt(balance) - amount)
+    }).
+    Add()
+```
+
+Events can arrive **in any order**. The library verifies that different orderings converge to the same final state.
+
+### Independence Declarations
+
+By default, gsm checks **all event pairs** for commutativity. For large systems, you can optimize by declaring which pairs are independent:
+
+```go
+b.OnlyDeclaredPairs()  // Switch to declared-only mode
+b.Independent("deposit", "send_notification")
+b.Independent("withdraw", "send_notification")
+```
+
+**Independent events** can arrive in either order (they're not causally related). Only declared pairs will be checked for commutativity.
+
+**Tip**: Events with disjoint `Writes()` sets and non-overlapping invariant footprints are automatically proved commutative via footprint analysis (no exhaustive checking needed).
+
 ## When to Use gsm
 
 **Use gsm when:**
@@ -153,8 +229,8 @@ enabled := b.Bool("enabled")
 
 // Declare invariants with compensation
 b.Invariant("count_positive").
-    Over(count).                           // Footprint: which vars this constrains
-    Check(func(s gsm.State) bool {
+    Watches(count).                        // Footprint: which vars this watches
+    Holds(func(s gsm.State) bool {
         return s.GetInt(count) >= 0
     }).
     Repair(func(s gsm.State) gsm.State {
@@ -175,7 +251,7 @@ b.Event("increment").
 
 // Optional: declare which event pairs are independent
 // (if omitted, all pairs are checked)
-b.DeclaredIndependence()
+b.OnlyDeclaredPairs()
 b.Independent("increment", "enable")
 b.Independent("increment", "disable")
 
@@ -242,7 +318,7 @@ Machine: order_fulfillment
   Events: 5
 
   WFC: PASS (max repair depth: 1)
-  CC:  PASS (3 pairs: 3 disjoint, 0 brute-force)
+  CC (Compensation Commutativity): PASS (3 pairs: 3 disjoint, 0 brute-force)
 
   Convergence: GUARANTEED
 Checked in: 234µs
@@ -257,7 +333,7 @@ Checked in: 234µs
 If verification fails, you get a counterexample:
 
 ```
-CC:  FAIL
+CC (Compensation Commutativity): FAIL
   Events: (grant_read, grant_write)
   State:  {can_read=false, can_write=false}
   grant_read→grant_write: {can_read=true, can_write=true}
@@ -316,8 +392,8 @@ inventory := b.Int("inventory", 0, 5)
 
 // Invariant: can't ship unpaid orders
 b.Invariant("no_ship_unpaid").
-    Over(status, paid).
-    Check(func(s gsm.State) bool {
+    Watches(status, paid).
+    Holds(func(s gsm.State) bool {
         return s.Get(status) != "shipped" || s.GetBool(paid)
     }).
     Repair(func(s gsm.State) gsm.State {
@@ -327,8 +403,8 @@ b.Invariant("no_ship_unpaid").
 
 // Invariant: inventory can't go negative
 b.Invariant("stock_non_negative").
-    Over(inventory).
-    Check(func(s gsm.State) bool {
+    Watches(inventory).
+    Holds(func(s gsm.State) bool {
         return s.GetInt(inventory) >= 0
     }).
     Repair(func(s gsm.State) gsm.State {
@@ -364,7 +440,7 @@ b.Event("restock").
     Add()
 
 // Only check independent pairs (restock comes from different source)
-b.DeclaredIndependence()
+b.OnlyDeclaredPairs()
 b.Independent("process_payment", "restock")
 b.Independent("ship_item", "restock")
 

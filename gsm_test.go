@@ -22,8 +22,8 @@ func buildOrderMachine(t *testing.T) (*gsm.Machine, *gsm.Report) {
 
 	// Invariants with repair (priority order)
 	b.Invariant("no_ship_unpaid").
-		Over(status, paid).
-		Check(func(s gsm.State) bool {
+		Watches(status, paid).
+		Holds(func(s gsm.State) bool {
 			return s.Get(status) != "shipped" || s.GetBool(paid)
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -32,8 +32,8 @@ func buildOrderMachine(t *testing.T) (*gsm.Machine, *gsm.Report) {
 		Add()
 
 	b.Invariant("stock_non_negative").
-		Over(inventory).
-		Check(func(s gsm.State) bool {
+		Watches(inventory).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(inventory) >= 0
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -89,7 +89,7 @@ func buildOrderMachine(t *testing.T) (*gsm.Machine, *gsm.Report) {
 	// Only independent events need to commute.
 	// Restock comes from a different source than order lifecycle events.
 	// But ship_item and restock both write inventory — not independent.
-	b.DeclaredIndependence()
+	b.OnlyDeclaredPairs()
 	b.Independent("place_order", "restock")
 	b.Independent("process_payment", "restock")
 	b.Independent("cancel_order", "restock")
@@ -144,8 +144,8 @@ func TestCompensationFires(t *testing.T) {
 	paid := b.Bool("paid")
 
 	b.Invariant("no_ship_unpaid").
-		Over(status, paid).
-		Check(func(s gsm.State) bool {
+		Watches(status, paid).
+		Holds(func(s gsm.State) bool {
 			return s.Get(status) != "shipped" || s.GetBool(paid)
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -160,7 +160,7 @@ func TestCompensationFires(t *testing.T) {
 		}).
 		Add()
 
-	b.DeclaredIndependence() // single event, no pairs
+	b.OnlyDeclaredPairs() // single event, no pairs
 
 	machine, report, err := b.Build()
 	if err != nil {
@@ -192,8 +192,8 @@ func TestCCFailureDetected(t *testing.T) {
 	x := b.Int("x", 0, 4)
 
 	b.Invariant("x_bounded").
-		Over(x).
-		Check(func(s gsm.State) bool {
+		Watches(x).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(x) <= 3
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -239,8 +239,8 @@ func TestWFCFailureDetected(t *testing.T) {
 	x := b.Int("x", 0, 2)
 
 	b.Invariant("not_one").
-		Over(x).
-		Check(func(s gsm.State) bool {
+		Watches(x).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(x) != 1
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -249,8 +249,8 @@ func TestWFCFailureDetected(t *testing.T) {
 		Add()
 
 	b.Invariant("not_two").
-		Over(x).
-		Check(func(s gsm.State) bool {
+		Watches(x).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(x) != 2
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -265,7 +265,7 @@ func TestWFCFailureDetected(t *testing.T) {
 		}).
 		Add()
 
-	b.DeclaredIndependence()
+	b.OnlyDeclaredPairs()
 
 	_, report, err := b.Build()
 	if err == nil {

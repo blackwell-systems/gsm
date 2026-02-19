@@ -46,8 +46,9 @@ func NewBuilder(name string) *Builder {
 }
 
 // Independent declares that two events may arrive in either order
-// (they are not causally related). CC will be checked for this pair.
-// Call DeclaredIndependence() first to switch from all-pairs mode.
+// (they are not causally related). Compensation Commutativity (CC)
+// will be checked for this pair. Call OnlyDeclaredPairs() first to
+// switch from all-pairs mode.
 func (b *Builder) Independent(e1name, e2name string) *Builder {
 	b.independent = append(b.independent, [2]int{
 		b.eventIndex(e1name),
@@ -56,8 +57,9 @@ func (b *Builder) Independent(e1name, e2name string) *Builder {
 	return b
 }
 
-// DeclaredIndependence switches CC checking to only declared pairs.
-func (b *Builder) DeclaredIndependence() *Builder {
+// OnlyDeclaredPairs switches Compensation Commutativity (CC) checking
+// to only the event pairs explicitly declared via Independent().
+func (b *Builder) OnlyDeclaredPairs() *Builder {
 	b.allIndependent = false
 	return b
 }
@@ -143,17 +145,17 @@ func (b *Builder) Invariant(name string) *InvariantBuilder {
 	}
 }
 
-// Over declares the invariant's footprint — which variables it constrains
+// Watches declares the invariant's footprint — which variables it constrains
 // and which its repair may modify.
-func (ib *InvariantBuilder) Over(vars ...Var) *InvariantBuilder {
+func (ib *InvariantBuilder) Watches(vars ...Var) *InvariantBuilder {
 	for _, v := range vars {
 		ib.def.footprint = append(ib.def.footprint, v.index)
 	}
 	return ib
 }
 
-// Check sets the invariant predicate. Returns true if the invariant holds.
-func (ib *InvariantBuilder) Check(fn CheckFunc) *InvariantBuilder {
+// Holds sets the invariant predicate. Returns true if the invariant holds.
+func (ib *InvariantBuilder) Holds(fn CheckFunc) *InvariantBuilder {
 	ib.def.check = fn
 	return ib
 }

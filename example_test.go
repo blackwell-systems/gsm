@@ -19,8 +19,8 @@ func Example() {
 
 	// Business rule: count cannot exceed maximum
 	b.Invariant("cap_at_10").
-		Over(count).
-		Check(func(s gsm.State) bool {
+		Watches(count).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(count) <= 10
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -67,8 +67,8 @@ func ExampleBuilder_Build() {
 
 	// Invariant: count must stay <= 10
 	b.Invariant("cap_at_10").
-		Over(count).
-		Check(func(s gsm.State) bool {
+		Watches(count).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(count) <= 10
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -174,8 +174,8 @@ func ExampleBuilder_Invariant() {
 
 	// Invariant 1: reserved cannot exceed quantity (higher priority)
 	b.Invariant("reserved_lte_qty").
-		Over(qty, reserved).
-		Check(func(s gsm.State) bool {
+		Watches(qty, reserved).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(reserved) <= s.GetInt(qty)
 		}).
 		Repair(func(s gsm.State) gsm.State {
@@ -185,8 +185,8 @@ func ExampleBuilder_Invariant() {
 
 	// Invariant 2: quantity cannot be negative (lower priority)
 	b.Invariant("qty_gte_zero").
-		Over(qty).
-		Check(func(s gsm.State) bool {
+		Watches(qty).
+		Holds(func(s gsm.State) bool {
 			return s.GetInt(qty) >= 0
 		}).
 		Repair(func(s gsm.State) gsm.State {

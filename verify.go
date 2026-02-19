@@ -47,10 +47,10 @@ func (r *Report) String() string {
 	}
 
 	if r.CC {
-		s += fmt.Sprintf("  CC:  PASS (%d pairs: %d disjoint, %d brute-force)\n",
+		s += fmt.Sprintf("  CC (Compensation Commutativity): PASS (%d pairs: %d disjoint, %d brute-force)\n",
 			r.PairsTotal, r.PairsDisjoint, r.PairsBrute)
 	} else if r.CCFailure != nil {
-		s += "  CC:  FAIL\n"
+		s += "  CC (Compensation Commutativity): FAIL\n"
 		s += fmt.Sprintf("    Events: (%s, %s)\n", r.CCFailure.Event1, r.CCFailure.Event2)
 		s += fmt.Sprintf("    State:  %s\n", r.CCFailure.State)
 		s += fmt.Sprintf("    %s→%s: %s\n", r.CCFailure.Event1, r.CCFailure.Event2, r.CCFailure.Result1)
@@ -246,7 +246,7 @@ func (b *Builder) verifyCC(packedCount int, valid []bool, step [][]uint64, mkSta
 					Result1: mkState(after_ij),
 					Result2: mkState(after_ji),
 				}
-				return fmt.Errorf("gsm: CC check failed")
+				return fmt.Errorf("gsm: Compensation Commutativity (CC) check failed")
 			}
 		}
 	}
