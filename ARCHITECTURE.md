@@ -1,6 +1,7 @@
 # Architecture
 
-This document explains the internal design of gsm, how convergence verification works, and why runtime event application is O(1) with zero compensation overhead.
+This document explains the internal design of gsm, how convergence verification works, and why runtime event application
+is O(1) with zero compensation overhead.
 
 ## Overview
 
@@ -101,7 +102,8 @@ Step[e1][Step[e2][s]] == Step[e2][Step[e1][s]]
 
 Check if different orderings converge to the same normal form.
 
-**Optimization:** If events have disjoint write sets AND their triggered invariants have disjoint footprints, skip exhaustive check (proven by structure).
+**Optimization:** If events have disjoint write sets AND their triggered invariants have disjoint footprints,
+skip exhaustive check (proven by structure).
 
 #### CC2: Compensation Stability (Implicit)
 
@@ -111,7 +113,8 @@ The normal form computation already ensures:
 NF(apply(e, NF(s))) == NF(apply(e, s))
 ```
 
-Because `NF(s)` is a valid state and applying `e` then normalizing produces the same result regardless of whether we start from valid or invalid states.
+Because `NF(s)` is a valid state and applying `e` then normalizing produces the same result regardless of whether we
+start from valid or invalid states.
 
 **CC passes if:** All independent event pairs commute in all states.
 
@@ -257,7 +260,8 @@ The `Export()` method serializes verification tables to JSON for multi-language 
 }
 ```
 
-Runtimes in Python, JavaScript, Rust, etc. can load this JSON and implement O(1) event application with the same convergence guarantees.
+Runtimes in Python, JavaScript, Rust, etc. can load this JSON and implement O(1) event application with the same
+convergence guarantees.
 
 ## Scalability
 
