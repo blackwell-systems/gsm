@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-02-19
+
+### Added
+- CODEOWNERS file for automatic review assignments on pull requests
+
+### Changed
+- Improved documentation formatting
+
 ## [0.1.0] - 2026-02-18
 
 ### Added
@@ -28,5 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full test suite covering WFC, CC, compensation, and failures
 - Documentation with usage examples, API reference, and design rationale
 
-[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/blackwell-systems/gsm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/blackwell-systems/gsm/releases/tag/v0.1.0
