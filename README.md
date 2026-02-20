@@ -124,7 +124,7 @@ An **invariant** is a property that must always hold on valid states. Each invar
 - **`Repair(func)`**: How to fix states where the invariant is violated. This is the compensation function.
 
 ```go
-b.Invariant("no_overdraft").
+r.Invariant("no_overdraft").
     Watches(balance).
     Holds(func(s gsm.State) bool {
         return s.GetInt(balance) >= 0
@@ -162,7 +162,7 @@ The library **verifies both properties at build time** by exhaustively checking 
 - **`Apply(func)`**: The effect function that transforms the state
 
 ```go
-b.Event("withdraw").
+r.Event("withdraw").
     Writes(balance).
     Guard(func(s gsm.State) bool {
         return s.GetInt(balance) >= amount  // Can't withdraw if insufficient
@@ -180,7 +180,7 @@ Events can arrive **in any order**. The library verifies that different ordering
 By default, gsm checks **all event pairs** for commutativity. For large systems, you can optimize by declaring which pairs are independent:
 
 ```go
-// Calling Independent() automatically switches to declared-only mode  // Switch to declared-only mode
+// Calling Independent() automatically switches to declared-only mode
 r.Independent("deposit", "send_notification")
 r.Independent("withdraw", "send_notification")
 ```
@@ -217,7 +217,7 @@ count := r.Int("count", 0, 100)           // range [0, 100] inclusive
 enabled := r.Bool("enabled")
 
 // Declare invariants with compensation
-b.Invariant("count_positive").
+r.Invariant("count_positive").
     Watches(count).                        // Footprint: which vars this watches
     Holds(func(s gsm.State) bool {
         return s.GetInt(count) >= 0
@@ -228,7 +228,7 @@ b.Invariant("count_positive").
     Add()
 
 // Declare events
-b.Event("increment").
+r.Event("increment").
     Writes(count).                         // Which vars this modifies
     Guard(func(s gsm.State) bool {        // Optional precondition
         return s.GetInt(count) < 100
@@ -380,7 +380,7 @@ paid := r.Bool("paid")
 inventory := r.Int("inventory", 0, 5)
 
 // Invariant: can't ship unpaid orders
-b.Invariant("no_ship_unpaid").
+r.Invariant("no_ship_unpaid").
     Watches(status, paid).
     Holds(func(s gsm.State) bool {
         return s.Get(status) != "shipped" || s.GetBool(paid)
@@ -391,7 +391,7 @@ b.Invariant("no_ship_unpaid").
     Add()
 
 // Invariant: inventory can't go negative
-b.Invariant("stock_non_negative").
+r.Invariant("stock_non_negative").
     Watches(inventory).
     Holds(func(s gsm.State) bool {
         return s.GetInt(inventory) >= 0
@@ -401,7 +401,7 @@ b.Invariant("stock_non_negative").
     }).
     Add()
 
-b.Event("process_payment").
+r.Event("process_payment").
     Writes(status, paid).
     Guard(func(s gsm.State) bool {
         return s.Get(status) == "pending"
@@ -411,7 +411,7 @@ b.Event("process_payment").
     }).
     Add()
 
-b.Event("ship_item").
+r.Event("ship_item").
     Writes(status, inventory).
     Guard(func(s gsm.State) bool {
         return s.Get(status) == "paid" && s.GetInt(inventory) > 0
@@ -421,7 +421,7 @@ b.Event("ship_item").
     }).
     Add()
 
-b.Event("restock").
+r.Event("restock").
     Writes(inventory).
     Apply(func(s gsm.State) gsm.State {
         return s.SetInt(inventory, s.GetInt(inventory)+1)
