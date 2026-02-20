@@ -86,18 +86,11 @@ func main() {
 >
 > **Want rigorous mathematical foundations?** See [THEORY.md](THEORY.md) for formal definitions, proofs, and connections to rewriting theory.
 
-You're building an event-driven system where:
-- Events arrive **out of order** (network delays, async processing, replays)
-- Events can **violate business rules** (ship before payment, withdraw beyond balance)
-- You have **compensation logic** that fixes violations (rollbacks, adjustments)
-- You need **replicas to converge** (same events → same final state, regardless of order)
+Events arrive out of order. A "ship" event arrives before "pay". Your compensation logic rolls back the shipment. Another replica sees "pay" then "ship" and completes the order. Same events, different final states. Your system has diverged.
 
-Traditional solutions:
-- **Total ordering** (Kafka partitions, sequential processing) - slow, not fault-tolerant
-- **CRDTs** - require operations to commute (doesn't fit business rules)
-- **Hope and pray** - test heavily, debug divergence in production
+You can enforce total ordering (Kafka partitions), but that's slow and fragile. You can use CRDTs, but they only work when operations naturally commute. Most business logic doesn't commute - you need compensation to fix violations.
 
-`gsm` gives you a different solution: **build-time proof that your compensation strategy converges**.
+`gsm` verifies at build time that your compensation strategy converges. If verification passes, all replicas reach the same state regardless of event order. No coordination at runtime.
 
 ## How It Works
 
