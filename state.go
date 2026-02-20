@@ -57,17 +57,22 @@ func (s State) SetInt(v Var, val int) State {
 }
 
 // getRaw extracts the raw (offset-adjusted) integer for a variable.
+// Example: For a 3-bit variable at offset 2:
+//
+//	state = ...0001_1010 → (shift right 2) → ...0000_0110 → (mask 0b111) → 6
 func (s State) getRaw(v Var) uint64 {
-	mask := uint64((1 << v.bits) - 1)
+	mask := uint64((1 << v.bits) - 1) // Create bitmask for v.bits: (1 << 3) - 1 = 0b111
 	return (s.packed >> v.offset) & mask
 }
 
 // setRaw returns a new State with a variable's raw integer set.
+// This does three steps: (1) clear the variable's bits, (2) mask the new value
+// to its bit width, (3) shift and OR the masked value into position.
 func (s State) setRaw(v Var, val uint64) State {
 	mask := uint64((1 << v.bits) - 1)
-	cleared := s.packed &^ (mask << v.offset)
+	cleared := s.packed &^ (mask << v.offset) // Clear old value: AND with inverted mask
 	return State{
-		packed: cleared | ((val & mask) << v.offset),
+		packed: cleared | ((val & mask) << v.offset), // Set new value: OR with shifted bits
 		vars:   s.vars,
 	}
 }

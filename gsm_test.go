@@ -13,7 +13,7 @@ import (
 func buildOrderMachine(t *testing.T) (*gsm.Machine, *gsm.Report) {
 	t.Helper()
 
-	b := gsm.NewBuilder("order_fulfillment")
+	b := gsm.NewRegistry("order_fulfillment")
 
 	// State variables
 	status := b.Enum("status", "pending", "paid", "shipped", "cancelled")
@@ -89,7 +89,7 @@ func buildOrderMachine(t *testing.T) (*gsm.Machine, *gsm.Report) {
 	// Only independent events need to commute.
 	// Restock comes from a different source than order lifecycle events.
 	// But ship_item and restock both write inventory — not independent.
-	b.OnlyDeclaredPairs()
+	// Note: OnlyDeclaredPairs() is no longer needed - automatically enabled by calling Independent()
 	b.Independent("place_order", "restock")
 	b.Independent("process_payment", "restock")
 	b.Independent("cancel_order", "restock")
@@ -138,7 +138,7 @@ func TestApplyOrderIndependence(t *testing.T) {
 }
 
 func TestCompensationFires(t *testing.T) {
-	b := gsm.NewBuilder("test_compensation")
+	b := gsm.NewRegistry("test_compensation")
 
 	status := b.Enum("status", "pending", "paid", "shipped")
 	paid := b.Bool("paid")
@@ -187,7 +187,7 @@ func TestCCFailureDetected(t *testing.T) {
 	//     B→A: 2→4→repair→0→1.               Result: 1
 	//     0 ≠ 1
 
-	b := gsm.NewBuilder("bad_machine")
+	b := gsm.NewRegistry("bad_machine")
 
 	x := b.Int("x", 0, 4)
 
@@ -234,7 +234,7 @@ func TestWFCFailureDetected(t *testing.T) {
 	//   Invariant 2: x != 2, repair: x = 1
 	//   From x=1: repair1→2, repair2→1, cycle
 
-	b := gsm.NewBuilder("cycling_machine")
+	b := gsm.NewRegistry("cycling_machine")
 
 	x := b.Int("x", 0, 2)
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING**: Renamed `Builder` to `Registry` and `NewBuilder()` to `NewRegistry()`
+  - The registry is the central authority that holds invariants, compensation rules, and events
+  - This naming better reflects the conceptual model: the registry governs convergent state
+  - Update your code: `gsm.NewBuilder(name)` → `gsm.NewRegistry(name)`
+  - File renamed: `builder.go` → `registry.go`
+- **API simplification**: `Independent()` now automatically switches to declared-only mode
+  - No need to call `OnlyDeclaredPairs()` first
+  - `OnlyDeclaredPairs()` still exists for explicitness but is no longer required
+  - Old: `r.OnlyDeclaredPairs(); r.Independent("e1", "e2")`
+  - New: `r.Independent("e1", "e2")` (auto-switches)
+
 ## [0.1.2] - 2026-02-19
 
 ### Changed

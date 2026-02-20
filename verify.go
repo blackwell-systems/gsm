@@ -65,62 +65,62 @@ func (r *Report) String() string {
 }
 
 // Build verifies WFC and CC, then returns an immutable Machine.
-func (b *Builder) Build() (*Machine, *Report, error) {
-	if b.totalBits > 20 {
-		return nil, nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", b.totalBits)
+func (r *Registry) Build() (*Machine, *Report, error) {
+	if r.totalBits > 20 {
+		return nil, nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
 
 	stateCount := 1
-	for _, v := range b.vars {
+	for _, v := range r.vars {
 		stateCount *= v.domain
 	}
 	if stateCount > maxStateSpace {
 		return nil, nil, fmt.Errorf("gsm: state space %d exceeds limit %d", stateCount, maxStateSpace)
 	}
 
-	packedCount := 1 << b.totalBits
+	packedCount := 1 << r.totalBits
 
 	report := &Report{
-		Name:       b.name,
+		Name:       r.name,
 		StateCount: stateCount,
-		VarCount:   len(b.vars),
-		EventCount: len(b.events),
+		VarCount:   len(r.vars),
+		EventCount: len(r.events),
 	}
 
 	// Build validity mask
 	valid := make([]bool, packedCount)
 	for i := 0; i < packedCount; i++ {
-		valid[i] = b.isValidEncoding(uint64(i))
+		valid[i] = r.isValidEncoding(uint64(i))
 	}
 
 	mkState := func(id uint64) State {
-		return State{packed: id, vars: b.vars}
+		return State{packed: id, vars: r.vars}
 	}
 
 	// Phase 1: Verify WFC and compute normal forms
-	nf, err := b.computeNormalForms(packedCount, stateCount, valid, mkState, report)
+	nf, err := r.computeNormalForms(packedCount, stateCount, valid, mkState, report)
 	if err != nil {
 		return nil, report, err
 	}
 
 	// Phase 2: Compute step tables
-	step := b.computeStepTables(packedCount, valid, nf, mkState)
+	step := r.computeStepTables(packedCount, valid, nf, mkState)
 
 	// Phase 3: Verify CC
-	err = b.verifyCC(packedCount, valid, step, mkState, report)
+	err = r.verifyCC(packedCount, valid, step, mkState, report)
 	if err != nil {
 		return nil, report, err
 	}
 
 	// Build immutable machine
 	m := &Machine{
-		name:   b.name,
-		vars:   b.vars,
+		name:   r.name,
+		vars:   r.vars,
 		events: make(map[string]int),
 		step:   step,
 		nf:     nf,
 	}
-	for i, ev := range b.events {
+	for i, ev := range r.events {
 		m.events[ev.name] = i
 	}
 
@@ -128,7 +128,7 @@ func (b *Builder) Build() (*Machine, *Report, error) {
 }
 
 // computeNormalForms verifies WFC and computes the normal form table.
-func (b *Builder) computeNormalForms(packedCount, stateCount int, valid []bool, mkState func(uint64) State, report *Report) ([]uint64, error) {
+func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool, mkState func(uint64) State, report *Report) ([]uint64, error) {
 	nf := make([]uint64, packedCount)
 	maxRepair := 0
 
@@ -143,10 +143,12 @@ func (b *Builder) computeNormalForms(packedCount, stateCount int, valid []bool, 
 		seen := make(map[uint64]bool)
 		seen[s.packed] = true
 
-		for !b.allInvariantsHold(s) {
-			s = b.applyFirstRepair(s)
+		for !r.allInvariantsHold(s) {
+			s = r.applyFirstRepair(s)
 			depth++
 
+			// Detect non-termination: if we've seen this state before, we have a repair cycle.
+			// Also fail if depth exceeds state count (impossible in a terminating machine).
 			if seen[s.packed] || depth > stateCount {
 				report.WFC = false
 				return nil, fmt.Errorf("gsm: WFC check failed — compensation does not terminate")
@@ -167,7 +169,7 @@ func (b *Builder) computeNormalForms(packedCount, stateCount int, valid []bool, 
 	for i := 0; i < packedCount; i++ {
 		if valid[i] {
 			s := mkState(uint64(i))
-			if b.allInvariantsHold(s) && nf[i] != uint64(i) {
+			if r.allInvariantsHold(s) && nf[i] != uint64(i) {
 				return nil, fmt.Errorf("gsm: compensation moves valid state %s — repair must be identity on valid states", s)
 			}
 		}
@@ -177,15 +179,15 @@ func (b *Builder) computeNormalForms(packedCount, stateCount int, valid []bool, 
 }
 
 // computeStepTables builds the Step[e][s] = NF(apply(e, s)) tables.
-func (b *Builder) computeStepTables(packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) [][]uint64 {
-	step := make([][]uint64, len(b.events))
-	for ei, ev := range b.events {
+func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) [][]uint64 {
+	step := make([][]uint64, len(r.events))
+	for ei, ev := range r.events {
 		step[ei] = make([]uint64, packedCount)
 		for i := 0; i < packedCount; i++ {
 			if valid[i] {
 				s := mkState(uint64(i))
-				after := b.applyEvent(ev, s)
-				after = b.clampState(after)
+				after := r.applyEvent(ev, s)
+				after = r.clampState(after)
 				step[ei][i] = nf[after.packed]
 			}
 		}
@@ -194,21 +196,21 @@ func (b *Builder) computeStepTables(packedCount int, valid []bool, nf []uint64, 
 }
 
 // verifyCC checks compensation commutativity for independent event pairs.
-func (b *Builder) verifyCC(packedCount int, valid []bool, step [][]uint64, mkState func(uint64) State, report *Report) error {
+func (r *Registry) verifyCC(packedCount int, valid []bool, step [][]uint64, mkState func(uint64) State, report *Report) error {
 	pairsDisjoint := 0
 	pairsBrute := 0
 
 	type pair struct{ i, j int }
 	var pairsToCheck []pair
 
-	if b.allIndependent {
-		for i := 0; i < len(b.events); i++ {
-			for j := i + 1; j < len(b.events); j++ {
+	if r.allIndependent {
+		for i := 0; i < len(r.events); i++ {
+			for j := i + 1; j < len(r.events); j++ {
 				pairsToCheck = append(pairsToCheck, pair{i, j})
 			}
 		}
 	} else {
-		for _, p := range b.independent {
+		for _, p := range r.independent {
 			i, j := p[0], p[1]
 			if i > j {
 				i, j = j, i
@@ -220,7 +222,7 @@ func (b *Builder) verifyCC(packedCount int, valid []bool, step [][]uint64, mkSta
 	for _, p := range pairsToCheck {
 		i, j := p.i, p.j
 
-		if b.eventsDisjoint(i, j) {
+		if r.eventsDisjoint(i, j) {
 			pairsDisjoint++
 			continue
 		}
@@ -240,8 +242,8 @@ func (b *Builder) verifyCC(packedCount int, valid []bool, step [][]uint64, mkSta
 				report.PairsDisjoint = pairsDisjoint
 				report.PairsBrute = pairsBrute
 				report.CCFailure = &CCFailure{
-					Event1:  b.events[i].name,
-					Event2:  b.events[j].name,
+					Event1:  r.events[i].name,
+					Event2:  r.events[j].name,
 					State:   mkState(uint64(s)),
 					Result1: mkState(after_ij),
 					Result2: mkState(after_ji),
@@ -259,8 +261,8 @@ func (b *Builder) verifyCC(packedCount int, valid []bool, step [][]uint64, mkSta
 }
 
 // allInvariantsHold checks V_R(s).
-func (b *Builder) allInvariantsHold(s State) bool {
-	for _, inv := range b.invariants {
+func (r *Registry) allInvariantsHold(s State) bool {
+	for _, inv := range r.invariants {
 		if !inv.check(s) {
 			return false
 		}
@@ -269,8 +271,8 @@ func (b *Builder) allInvariantsHold(s State) bool {
 }
 
 // applyFirstRepair fires the first violated invariant's repair (priority order).
-func (b *Builder) applyFirstRepair(s State) State {
-	for _, inv := range b.invariants {
+func (r *Registry) applyFirstRepair(s State) State {
+	for _, inv := range r.invariants {
 		if !inv.check(s) {
 			return inv.repair(s)
 		}
@@ -279,7 +281,7 @@ func (b *Builder) applyFirstRepair(s State) State {
 }
 
 // applyEvent applies an event's effect (or no-op if guard fails).
-func (b *Builder) applyEvent(ev eventDef, s State) State {
+func (r *Registry) applyEvent(ev eventDef, s State) State {
 	if ev.guard != nil && !ev.guard(s) {
 		return s
 	}
@@ -289,8 +291,8 @@ func (b *Builder) applyEvent(ev eventDef, s State) State {
 // clampState ensures all variable values are within their domains.
 // This handles cases where arithmetic produces out-of-range values
 // before the bitpacking truncates them.
-func (b *Builder) clampState(s State) State {
-	for _, v := range b.vars {
+func (r *Registry) clampState(s State) State {
+	for _, v := range r.vars {
 		raw := s.getRaw(v)
 		max := uint64(v.domain - 1)
 		if raw > max {
@@ -302,8 +304,8 @@ func (b *Builder) clampState(s State) State {
 
 // isValidEncoding checks that all variable values in a packed ID
 // are within their domains (rejects padding-bit waste).
-func (b *Builder) isValidEncoding(packed uint64) bool {
-	for _, v := range b.vars {
+func (r *Registry) isValidEncoding(packed uint64) bool {
+	for _, v := range r.vars {
 		mask := uint64((1 << v.bits) - 1)
 		raw := (packed >> v.offset) & mask
 		if int(raw) >= v.domain {
@@ -315,10 +317,10 @@ func (b *Builder) isValidEncoding(packed uint64) bool {
 
 // eventsDisjoint returns true if two events have disjoint write sets
 // AND the invariants they can trigger have disjoint footprints.
-func (b *Builder) eventsDisjoint(ei, ej int) bool {
+func (r *Registry) eventsDisjoint(ei, ej int) bool {
 	// Get invariant footprint vars for each event
-	fp1 := b.eventFootprint(ei)
-	fp2 := b.eventFootprint(ej)
+	fp1 := r.eventFootprint(ei)
+	fp2 := r.eventFootprint(ej)
 
 	for v := range fp1 {
 		if fp2[v] {
@@ -330,14 +332,19 @@ func (b *Builder) eventsDisjoint(ei, ej int) bool {
 
 // eventFootprint returns the union of footprints of all invariants
 // whose footprint overlaps with the event's write set.
-func (b *Builder) eventFootprint(ei int) map[int]bool {
+//
+// This computes the transitive closure: if event E writes variable V,
+// and invariant I watches V, then I's entire footprint is included
+// (because E can trigger I, and I's repair may modify other variables in its footprint).
+// Two events have disjoint footprints only if no invariant watches both.
+func (r *Registry) eventFootprint(ei int) map[int]bool {
 	writes := make(map[int]bool)
-	for _, vi := range b.events[ei].writes {
+	for _, vi := range r.events[ei].writes {
 		writes[vi] = true
 	}
 
 	fp := make(map[int]bool)
-	for _, inv := range b.invariants {
+	for _, inv := range r.invariants {
 		overlaps := false
 		for _, vi := range inv.footprint {
 			if writes[vi] {

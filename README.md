@@ -23,14 +23,14 @@ import (
 )
 
 func main() {
-    b := gsm.NewBuilder("order_system")
+    r := gsm.NewRegistry("order_system")
 
     // State variables (finite domains)
-    status := b.Enum("status", "pending", "paid", "shipped")
-    paid := b.Bool("paid")
+    status := r.Enum("status", "pending", "paid", "shipped")
+    paid := r.Bool("paid")
 
     // Business rule: can't ship unpaid orders
-    b.Invariant("no_ship_unpaid").
+    r.Invariant("no_ship_unpaid").
         Watches(status, paid).
         Holds(func(s gsm.State) bool {
             return s.Get(status) != "shipped" || s.GetBool(paid)
@@ -41,14 +41,14 @@ func main() {
         Add()
 
     // Events
-    b.Event("pay").
+    r.Event("pay").
         Writes(status, paid).
         Apply(func(s gsm.State) gsm.State {
             return s.Set(status, "paid").SetBool(paid, true)
         }).
         Add()
 
-    b.Event("ship").
+    r.Event("ship").
         Writes(status).
         Apply(func(s gsm.State) gsm.State {
             return s.Set(status, "shipped")
@@ -56,7 +56,7 @@ func main() {
         Add()
 
     // Build with verification
-    machine, report, err := b.Build()
+    machine, report, err := r.Build()
     if err != nil {
         panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
     }
@@ -82,6 +82,10 @@ func main() {
 
 ## The Problem
 
+> **New to convergent systems?** See [CONCEPTS.md](CONCEPTS.md) for foundational definitions, theory explanations, and a glossary mapping paper terms to code.
+>
+> **Want rigorous mathematical foundations?** See [THEORY.md](THEORY.md) for formal definitions, proofs, and connections to rewriting theory.
+
 You're building an event-driven system where:
 - Events arrive **out of order** (network delays, async processing, replays)
 - Events can **violate business rules** (ship before payment, withdraw beyond balance)
@@ -99,7 +103,7 @@ Traditional solutions:
 
 ### Build Time (Verification)
 
-When you call `builder.Build()`:
+When you call `registry.Build()`:
 
 1. **Enumerate state space** - All combinations of variable values (must be finite)
 2. **Compute normal forms** - For every state, apply compensation until valid
@@ -191,9 +195,9 @@ Events can arrive **in any order**. The library verifies that different ordering
 By default, gsm checks **all event pairs** for commutativity. For large systems, you can optimize by declaring which pairs are independent:
 
 ```go
-b.OnlyDeclaredPairs()  // Switch to declared-only mode
-b.Independent("deposit", "send_notification")
-b.Independent("withdraw", "send_notification")
+// Calling Independent() automatically switches to declared-only mode  // Switch to declared-only mode
+r.Independent("deposit", "send_notification")
+r.Independent("withdraw", "send_notification")
 ```
 
 **Independent events** can arrive in either order (they're not causally related). Only declared pairs will be checked for commutativity.
@@ -220,12 +224,12 @@ b.Independent("withdraw", "send_notification")
 ### Building Machines
 
 ```go
-b := gsm.NewBuilder("machine_name")
+r := gsm.NewRegistry("machine_name")
 
 // Declare state variables (finite domains required)
-status := b.Enum("status", "draft", "active", "archived")
-count := b.Int("count", 0, 100)           // range [0, 100] inclusive
-enabled := b.Bool("enabled")
+status := r.Enum("status", "draft", "active", "archived")
+count := r.Int("count", 0, 100)           // range [0, 100] inclusive
+enabled := r.Bool("enabled")
 
 // Declare invariants with compensation
 b.Invariant("count_positive").
@@ -251,12 +255,12 @@ b.Event("increment").
 
 // Optional: declare which event pairs are independent
 // (if omitted, all pairs are checked)
-b.OnlyDeclaredPairs()
-b.Independent("increment", "enable")
-b.Independent("increment", "disable")
+// Calling Independent() automatically switches to declared-only mode
+r.Independent("increment", "enable")
+r.Independent("increment", "disable")
 
 // Build with verification
-machine, report, err := b.Build()
+machine, report, err := r.Build()
 ```
 
 ### Using Machines
@@ -384,11 +388,11 @@ This library verifies: **does your machine satisfy WFC and CC?**
 Full example from the paper (see `gsm_test.go`):
 
 ```go
-b := gsm.NewBuilder("order_fulfillment")
+r := gsm.NewRegistry("order_fulfillment")
 
-status := b.Enum("status", "pending", "paid", "shipped", "cancelled")
-paid := b.Bool("paid")
-inventory := b.Int("inventory", 0, 5)
+status := r.Enum("status", "pending", "paid", "shipped", "cancelled")
+paid := r.Bool("paid")
+inventory := r.Int("inventory", 0, 5)
 
 // Invariant: can't ship unpaid orders
 b.Invariant("no_ship_unpaid").
@@ -440,11 +444,11 @@ b.Event("restock").
     Add()
 
 // Only check independent pairs (restock comes from different source)
-b.OnlyDeclaredPairs()
-b.Independent("process_payment", "restock")
-b.Independent("ship_item", "restock")
+// Calling Independent() automatically switches to declared-only mode
+r.Independent("process_payment", "restock")
+r.Independent("ship_item", "restock")
 
-machine, report, err := b.Build()
+machine, report, err := r.Build()
 // Convergence: GUARANTEED
 ```
 
@@ -461,7 +465,7 @@ machine, report, err := b.Build()
 While verification requires Go, **runtime is portable** to any language. Use `Machine.Export()` to serialize the verified machine to JSON:
 
 ```go
-machine, _, err := builder.Build()
+machine, _, err := registry.Build()
 if err != nil {
     log.Fatal(err)
 }

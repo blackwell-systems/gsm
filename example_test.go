@@ -12,7 +12,7 @@ import (
 // invariants, and events, then verify convergence guarantees at build time.
 // Runtime event application is O(1) table lookup with zero overhead.
 func Example() {
-	b := gsm.NewBuilder("counter")
+	b := gsm.NewRegistry("counter")
 
 	// State variable with bounded domain
 	count := b.Int("count", 0, 10)
@@ -56,11 +56,11 @@ func Example() {
 	// Count: 10
 }
 
-// ExampleBuilder_Build shows the verification process and report output.
-// The builder exhaustively enumerates the state space and verifies
+// ExampleRegistry_Build shows the verification process and report output.
+// The registry exhaustively enumerates the state space and verifies
 // WFC (well-founded compensation) and CC (compensation commutativity).
-func ExampleBuilder_Build() {
-	b := gsm.NewBuilder("counter")
+func ExampleRegistry_Build() {
+	b := gsm.NewRegistry("counter")
 
 	// Single integer variable
 	count := b.Int("count", 0, 10)
@@ -110,7 +110,7 @@ func ExampleBuilder_Build() {
 // ExampleMachine_Apply demonstrates O(1) event application at runtime.
 // All compensation is precomputed during Build() - no runtime overhead.
 func ExampleMachine_Apply() {
-	b := gsm.NewBuilder("light")
+	b := gsm.NewRegistry("light")
 
 	// State machine: off -> on -> off
 	power := b.Bool("power")
@@ -144,7 +144,7 @@ func ExampleMachine_Apply() {
 
 // ExampleState_String shows the human-readable state representation.
 func ExampleState_String() {
-	b := gsm.NewBuilder("example")
+	b := gsm.NewRegistry("example")
 
 	status := b.Enum("status", "pending", "active", "done")
 	count := b.Int("count", 0, 100)
@@ -164,10 +164,10 @@ func ExampleState_String() {
 	// Output: {status=active, count=42, enabled=true}
 }
 
-// ExampleBuilder_Invariant demonstrates the priority-ordered compensation system.
+// ExampleRegistry_Invariant demonstrates the priority-ordered compensation system.
 // When multiple invariants are violated, repairs fire in declaration order.
-func ExampleBuilder_Invariant() {
-	b := gsm.NewBuilder("stock")
+func ExampleRegistry_Invariant() {
+	b := gsm.NewRegistry("stock")
 
 	qty := b.Int("qty", 0, 100)
 	reserved := b.Int("reserved", 0, 100)
@@ -218,7 +218,7 @@ func ExampleBuilder_Invariant() {
 
 // ExampleMachine_Export demonstrates JSON export for multi-language runtimes.
 func ExampleMachine_Export() {
-	b := gsm.NewBuilder("simple")
+	b := gsm.NewRegistry("simple")
 	state := b.Bool("state")
 
 	b.Event("toggle").

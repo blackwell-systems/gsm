@@ -3,6 +3,11 @@
 This document explains the internal design of gsm, how convergence verification works, and why runtime event application
 is O(1) with zero compensation overhead.
 
+For other documentation:
+- **Usage guide**: [README.md](README.md)
+- **Conceptual introduction**: [CONCEPTS.md](CONCEPTS.md)
+- **Mathematical foundations**: [THEORY.md](THEORY.md)
+
 ## Overview
 
 gsm separates verification (build-time) from execution (runtime):
