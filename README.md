@@ -80,17 +80,9 @@ func main() {
 }
 ```
 
-## The Problem
-
 > **New to convergent systems?** See [CONCEPTS.md](CONCEPTS.md) for foundational definitions, theory explanations, and a glossary mapping paper terms to code.
 >
 > **Want rigorous mathematical foundations?** See [THEORY.md](THEORY.md) for formal definitions, proofs, and connections to rewriting theory.
-
-Events arrive out of order. A "ship" event arrives before "pay". Your compensation logic rolls back the shipment. Another replica sees "pay" then "ship" and completes the order. Same events, different final states. Your system has diverged.
-
-You can enforce total ordering (Kafka partitions), but that's slow and fragile. You can use CRDTs, but they only work when operations naturally commute. Most business logic doesn't commute - you need compensation to fix violations.
-
-`gsm` verifies at build time that your compensation strategy converges. If verification passes, all replicas reach the same state regardless of event order. No coordination at runtime.
 
 ## How It Works
 
