@@ -6,83 +6,58 @@
 [![CI](https://github.com/blackwell-systems/gsm/actions/workflows/test.yml/badge.svg)](https://github.com/blackwell-systems/gsm/actions/workflows/test.yml)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18677400.svg)](https://doi.org/10.5281/zenodo.18677400)
 
-**Build event-driven systems with mathematical convergence guarantees.**
+**Act like UDP, receive like TCP.**
+
+What if distributed systems don't have to coordinate — because they agree on the rules ahead of time, so ordering and compensations are deterministic?
 
 `gsm` is a Go library for constructing state machines where events may arrive out of order and violate business rules, but automatic compensation ensures all replicas converge to the same valid state. Convergence is **verified at build time** via exhaustive state-space enumeration. Runtime event application is **O(1) table lookup** with zero compensation overhead.
 
-Based on: [*Normalization Confluence in Federated Registry Networks*](https://doi.org/10.5281/zenodo.18677400) (Blackwell, 2026)
+CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants — shipping an unpaid order, overdrawing an account — commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
 ## Quick Example
 
 ```go
-package main
+r := gsm.NewRegistry("order_system")
 
-import (
-    "fmt"
-    "github.com/blackwell-systems/gsm"
-)
+status := r.Enum("status", "pending", "paid", "shipped")
+paid := r.Bool("paid")
 
-func main() {
-    r := gsm.NewRegistry("order_system")
+// Business rule: can't ship unpaid orders. Repair: roll back.
+r.Invariant("no_ship_unpaid").
+    Watches(status, paid).
+    Holds(func(s gsm.State) bool {
+        return s.Get(status) != "shipped" || s.GetBool(paid)
+    }).
+    Repair(func(s gsm.State) gsm.State {
+        return s.Set(status, "pending")
+    }).
+    Add()
 
-    // State variables (finite domains)
-    status := r.Enum("status", "pending", "paid", "shipped")
-    paid := r.Bool("paid")
+r.Event("pay").Writes(status, paid).Apply(func(s gsm.State) gsm.State {
+    return s.Set(status, "paid").SetBool(paid, true)
+}).Add()
 
-    // Business rule: can't ship unpaid orders
-    r.Invariant("no_ship_unpaid").
-        Watches(status, paid).
-        Holds(func(s gsm.State) bool {
-            return s.Get(status) != "shipped" || s.GetBool(paid)
-        }).
-        Repair(func(s gsm.State) gsm.State {
-            return s.Set(status, "pending") // Roll back
-        }).
-        Add()
+r.Event("ship").Writes(status).Apply(func(s gsm.State) gsm.State {
+    return s.Set(status, "shipped")
+}).Add()
 
-    // Events
-    r.Event("pay").
-        Writes(status, paid).
-        Apply(func(s gsm.State) gsm.State {
-            return s.Set(status, "paid").SetBool(paid, true)
-        }).
-        Add()
-
-    r.Event("ship").
-        Writes(status).
-        Apply(func(s gsm.State) gsm.State {
-            return s.Set(status, "shipped")
-        }).
-        Add()
-
-    // Build with verification
-    machine, report, err := r.Build()
-    if err != nil {
-        panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
-    }
-
-    fmt.Printf("%s", report)
-    // Machine: order_system
-    //   Variables: 2
-    //   States: 6
-    //   Events: 2
-    //   WFC: PASS (max repair depth: 1)
-    //   CC (Compensation Commutativity): PASS (1 pairs: 1 disjoint, 0 brute-force)
-    //   Convergence: GUARANTEED
-
-    // Runtime usage (O(1) lookups)
-    s := machine.NewState()
-    s = machine.Apply(s, "ship") // Arrives before payment
-    s = machine.Apply(s, "pay")  // Arrives after shipment
-
-    fmt.Printf("Final: %s\n", s) // {status=paid, paid=true}
-    // Compensation fired automatically - shipment was rolled back
+machine, report, err := r.Build() // Verifies convergence
+if err != nil {
+    panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
 }
+
+// Runtime: O(1) table lookup, no compensation logic runs
+s := machine.NewState()
+s = machine.Apply(s, "ship") // Arrives before payment
+s = machine.Apply(s, "pay")  // Arrives after shipment
+// → {status=paid, paid=true} — compensation fired automatically
 ```
 
 > **New to convergent systems?** See [CONCEPTS.md](CONCEPTS.md) for foundational definitions, theory explanations, and a glossary mapping paper terms to code.
 >
 > **Want rigorous mathematical foundations?** See [THEORY.md](THEORY.md) for formal definitions, proofs, and connections to rewriting theory.
+>
+> **Research paper:** [*Normalization Confluence in Federated Registry Networks*](https://doi.org/10.5281/zenodo.18677400) (Blackwell, 2026)
 
 ## How It Works
 
@@ -286,13 +261,13 @@ count := s.GetInt(countVar)          // returns int (adjusted for min offset)
 ### Writing State
 
 ```go
-// Enum
+// Enum (panics if value not in declared set)
 s = s.Set(statusVar, "active")
 
 // Bool
 s = s.SetBool(enabledVar, true)
 
-// Int (automatically clamped to declared range)
+// Int (silently clamped to declared range — SetInt(countVar, 999) on [0,100] becomes 100)
 s = s.SetInt(countVar, 42)
 ```
 

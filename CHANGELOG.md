@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Export() file permissions**: Changed from 0644 (world-readable) to 0600 (owner-only)
+- **State space overflow**: Added overflow guard before multiplication in Build() to prevent silent int overflow on large variable domains
+- **Var ownership validation**: getRaw/setRaw now panic with a clear message if a Var from a different Machine is used on a State, preventing silent data corruption
+
+### Added
+- `State.TrySet()` — error-returning alternative to `Set()` for use with user input or external values
+- Clearer panic message in `Set()` showing variable name and invalid value
+
+### Changed
+- README: Added "Act like UDP, receive like TCP" tagline and CRDT positioning paragraph
+- README: Trimmed quick example for scannability
+- README: Documented `Set()` panic and `SetInt()` clamping behavior in Writing State section
+
 ## [0.1.5] - 2026-02-20
 
 ### Changed

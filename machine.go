@@ -161,7 +161,7 @@ func (m *Machine) Export(path string) error {
 		return fmt.Errorf("gsm: marshal failed: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("gsm: write failed: %w", err)
 	}
 

@@ -72,6 +72,9 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 
 	stateCount := 1
 	for _, v := range r.vars {
+		if v.domain > 0 && stateCount > maxStateSpace/v.domain {
+			return nil, nil, fmt.Errorf("gsm: state space overflow (exceeds limit %d)", maxStateSpace)
+		}
 		stateCount *= v.domain
 	}
 	if stateCount > maxStateSpace {
