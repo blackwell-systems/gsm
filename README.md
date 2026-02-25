@@ -8,7 +8,7 @@
 
 **Act like UDP, receive like TCP.**
 
-What if distributed systems don't have to coordinate - because they agree on the rules ahead of time, so ordering and compensations are deterministic?
+What if distributed systems don't have to coordinate - because they agree on the rules ahead of time, so ordering and compensations are deterministic? The underlying theory - normalization confluence - proves that compensation is sufficient for convergence when two algebraic properties hold, without the expressiveness limits of CRDTs or the latency cost of consensus.
 
 `gsm` is a Go library for constructing state machines where events may arrive out of order and violate business rules, but automatic compensation ensures all replicas converge to the same valid state. Convergence is **verified at build time** via exhaustive state-space enumeration. Runtime event application is **O(1) table lookup** with zero compensation overhead.
 
