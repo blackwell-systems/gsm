@@ -96,6 +96,21 @@ s = machine.Apply(s, "process_payment") // Arrives after shipment
 >
 > **Research paper:** [*Normalization Confluence in Federated Registry Networks*](https://doi.org/10.5281/zenodo.18677400) (Blackwell, 2026)
 
+## When to Use gsm
+
+**Use gsm when:**
+- Building event-sourced systems with out-of-order events
+- Operations can violate invariants (need compensation/repair)
+- State space is finite and enumerable (< ~1M states)
+- You want mathematical convergence guarantees
+- You're using Go
+
+**Don't use gsm when:**
+- Operations already commute (use CRDTs instead)
+- Operations preserve invariants in all orderings (use invariant confluence)
+- State space is unbounded or infinite
+- Real-time latency requirements conflict with build-time verification cost
+
 ## How It Works
 
 ### Build Time (Verification)
@@ -176,21 +191,6 @@ r.Independent("withdraw", "send_notification")
 **Independent events** can arrive in either order (they're not causally related). Only declared pairs will be checked for commutativity.
 
 **Tip**: Events with disjoint `Writes()` sets and non-overlapping invariant footprints are automatically proved commutative via footprint analysis (no exhaustive checking needed).
-
-## When to Use gsm
-
-**Use gsm when:**
-- Building event-sourced systems with out-of-order events
-- Operations can violate invariants (need compensation/repair)
-- State space is finite and enumerable (< ~1M states)
-- You want mathematical convergence guarantees
-- You're using Go
-
-**Don't use gsm when:**
-- Operations already commute (use CRDTs instead)
-- Operations preserve invariants in all orderings (use invariant confluence)
-- State space is unbounded or infinite
-- Real-time latency requirements conflict with build-time verification cost
 
 ## API Overview
 
