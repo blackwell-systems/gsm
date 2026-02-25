@@ -14,15 +14,18 @@ What if distributed systems don't have to coordinate - because they agree on the
 
 CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
-## Quick Example
+## Example: Order Fulfillment
+
+Full example from the paper (see `gsm_test.go`):
 
 ```go
-r := gsm.NewRegistry("order_system")
+r := gsm.NewRegistry("order_fulfillment")
 
-status := r.Enum("status", "pending", "paid", "shipped")
+status := r.Enum("status", "pending", "paid", "shipped", "cancelled")
 paid := r.Bool("paid")
+inventory := r.Int("inventory", 0, 5)
 
-// Business rule: can't ship unpaid orders. Repair: roll back.
+// Invariant: can't ship unpaid orders
 r.Invariant("no_ship_unpaid").
     Watches(status, paid).
     Holds(func(s gsm.State) bool {
@@ -33,13 +36,47 @@ r.Invariant("no_ship_unpaid").
     }).
     Add()
 
-r.Event("pay").Writes(status, paid).Apply(func(s gsm.State) gsm.State {
-    return s.Set(status, "paid").SetBool(paid, true)
-}).Add()
+// Invariant: inventory can't go negative
+r.Invariant("stock_non_negative").
+    Watches(inventory).
+    Holds(func(s gsm.State) bool {
+        return s.GetInt(inventory) >= 0
+    }).
+    Repair(func(s gsm.State) gsm.State {
+        return s.SetInt(inventory, 0)
+    }).
+    Add()
 
-r.Event("ship").Writes(status).Apply(func(s gsm.State) gsm.State {
-    return s.Set(status, "shipped")
-}).Add()
+r.Event("process_payment").
+    Writes(status, paid).
+    Guard(func(s gsm.State) bool {
+        return s.Get(status) == "pending"
+    }).
+    Apply(func(s gsm.State) gsm.State {
+        return s.Set(status, "paid").SetBool(paid, true)
+    }).
+    Add()
+
+r.Event("ship_item").
+    Writes(status, inventory).
+    Guard(func(s gsm.State) bool {
+        return s.Get(status) == "paid" && s.GetInt(inventory) > 0
+    }).
+    Apply(func(s gsm.State) gsm.State {
+        return s.Set(status, "shipped").SetInt(inventory, s.GetInt(inventory)-1)
+    }).
+    Add()
+
+r.Event("restock").
+    Writes(inventory).
+    Apply(func(s gsm.State) gsm.State {
+        return s.SetInt(inventory, s.GetInt(inventory)+1)
+    }).
+    Add()
+
+// Only check independent pairs (restock comes from different source)
+r.Independent("process_payment", "restock")
+r.Independent("ship_item", "restock")
 
 machine, report, err := r.Build() // Verifies convergence
 if err != nil {
@@ -48,9 +85,9 @@ if err != nil {
 
 // Runtime: O(1) table lookup, no compensation logic runs
 s := machine.NewState()
-s = machine.Apply(s, "ship") // Arrives before payment
-s = machine.Apply(s, "pay")  // Arrives after shipment
-// → {status=paid, paid=true} - compensation fired automatically
+s = machine.Apply(s, "ship_item")       // Arrives before payment
+s = machine.Apply(s, "process_payment") // Arrives after shipment
+// Compensation fired automatically - converges to valid state
 ```
 
 > **New to convergent systems?** See [CONCEPTS.md](CONCEPTS.md) for foundational definitions, theory explanations, and a glossary mapping paper terms to code.
@@ -98,18 +135,6 @@ An **invariant** is a property that must always hold on valid states. Each invar
 - **`Holds(func)`**: The boolean condition that must be true. When this returns false, compensation fires.
 - **`Repair(func)`**: How to fix states where the invariant is violated. This is the compensation function.
 
-```go
-r.Invariant("no_overdraft").
-    Watches(balance).
-    Holds(func(s gsm.State) bool {
-        return s.GetInt(balance) >= 0
-    }).
-    Repair(func(s gsm.State) gsm.State {
-        return s.SetInt(balance, 0)  // Prevent negative balance
-    }).
-    Add()
-```
-
 Invariants fire in **declaration order** (priority). If multiple invariants are violated, the first one repairs first, then the next, until all hold.
 
 ### Compensation
@@ -135,18 +160,6 @@ The library **verifies both properties at build time** by exhaustively checking 
 - **`Writes(vars...)`**: Which variables this event modifies
 - **`Guard(func)`**: Optional precondition - if false, event is a no-op
 - **`Apply(func)`**: The effect function that transforms the state
-
-```go
-r.Event("withdraw").
-    Writes(balance).
-    Guard(func(s gsm.State) bool {
-        return s.GetInt(balance) >= amount  // Can't withdraw if insufficient
-    }).
-    Apply(func(s gsm.State) gsm.State {
-        return s.SetInt(balance, s.GetInt(balance) - amount)
-    }).
-    Add()
-```
 
 Events can arrive **in any order**. The library verifies that different orderings converge to the same final state.
 
@@ -180,48 +193,6 @@ r.Independent("withdraw", "send_notification")
 - Real-time latency requirements conflict with build-time verification cost
 
 ## API Overview
-
-### Building Machines
-
-```go
-r := gsm.NewRegistry("machine_name")
-
-// Declare state variables (finite domains required)
-status := r.Enum("status", "draft", "active", "archived")
-count := r.Int("count", 0, 100)           // range [0, 100] inclusive
-enabled := r.Bool("enabled")
-
-// Declare invariants with compensation
-r.Invariant("count_positive").
-    Watches(count).                        // Footprint: which vars this watches
-    Holds(func(s gsm.State) bool {
-        return s.GetInt(count) >= 0
-    }).
-    Repair(func(s gsm.State) gsm.State {
-        return s.SetInt(count, 0)         // Clamp to zero
-    }).
-    Add()
-
-// Declare events
-r.Event("increment").
-    Writes(count).                         // Which vars this modifies
-    Guard(func(s gsm.State) bool {        // Optional precondition
-        return s.GetInt(count) < 100
-    }).
-    Apply(func(s gsm.State) gsm.State {
-        return s.SetInt(count, s.GetInt(count)+1)
-    }).
-    Add()
-
-// Optional: declare which event pairs are independent
-// (if omitted, all pairs are checked)
-// Calling Independent() automatically switches to declared-only mode
-r.Independent("increment", "enable")
-r.Independent("increment", "disable")
-
-// Build with verification
-machine, report, err := r.Build()
-```
 
 ### Using Machines
 
@@ -342,75 +313,6 @@ This library implements the **single-registry governance model** from Section 3 
 The paper proves: **if WFC and CC hold, all processors consuming the same events converge to the same valid state regardless of application order.**
 
 This library verifies: **does your machine satisfy WFC and CC?**
-
-## Example: Order Fulfillment
-
-Full example from the paper (see `gsm_test.go`):
-
-```go
-r := gsm.NewRegistry("order_fulfillment")
-
-status := r.Enum("status", "pending", "paid", "shipped", "cancelled")
-paid := r.Bool("paid")
-inventory := r.Int("inventory", 0, 5)
-
-// Invariant: can't ship unpaid orders
-r.Invariant("no_ship_unpaid").
-    Watches(status, paid).
-    Holds(func(s gsm.State) bool {
-        return s.Get(status) != "shipped" || s.GetBool(paid)
-    }).
-    Repair(func(s gsm.State) gsm.State {
-        return s.Set(status, "pending")
-    }).
-    Add()
-
-// Invariant: inventory can't go negative
-r.Invariant("stock_non_negative").
-    Watches(inventory).
-    Holds(func(s gsm.State) bool {
-        return s.GetInt(inventory) >= 0
-    }).
-    Repair(func(s gsm.State) gsm.State {
-        return s.SetInt(inventory, 0)
-    }).
-    Add()
-
-r.Event("process_payment").
-    Writes(status, paid).
-    Guard(func(s gsm.State) bool {
-        return s.Get(status) == "pending"
-    }).
-    Apply(func(s gsm.State) gsm.State {
-        return s.Set(status, "paid").SetBool(paid, true)
-    }).
-    Add()
-
-r.Event("ship_item").
-    Writes(status, inventory).
-    Guard(func(s gsm.State) bool {
-        return s.Get(status) == "paid" && s.GetInt(inventory) > 0
-    }).
-    Apply(func(s gsm.State) gsm.State {
-        return s.Set(status, "shipped").SetInt(inventory, s.GetInt(inventory)-1)
-    }).
-    Add()
-
-r.Event("restock").
-    Writes(inventory).
-    Apply(func(s gsm.State) gsm.State {
-        return s.SetInt(inventory, s.GetInt(inventory)+1)
-    }).
-    Add()
-
-// Only check independent pairs (restock comes from different source)
-// Calling Independent() automatically switches to declared-only mode
-r.Independent("process_payment", "restock")
-r.Independent("ship_item", "restock")
-
-machine, report, err := r.Build()
-// Convergence: GUARANTEED
-```
 
 ## Limitations
 
