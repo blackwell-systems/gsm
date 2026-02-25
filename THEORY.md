@@ -13,15 +13,14 @@ For other audiences, see:
 1. [Abstract Rewriting Systems](#1-abstract-rewriting-systems)
 2. [Confluence and the Church-Rosser Property](#2-confluence-and-the-church-rosser-property)
 3. [Newman's Lemma](#3-newmans-lemma)
-4. [Labeled Transition Systems](#4-labeled-transition-systems)
-5. [Governed State Machines as Rewriting Systems](#5-governed-state-machines-as-rewriting-systems)
-6. [Well-Founded Compensation (WFC)](#6-well-founded-compensation-wfc)
-7. [Compensation Commutativity (CC)](#7-compensation-commutativity-cc)
-8. [The Convergence Theorem](#8-the-convergence-theorem)
-9. [Footprint Calculus](#9-footprint-calculus)
-10. [Verification Algorithm](#10-verification-algorithm)
-11. [Comparison to Related Formalisms](#11-comparison-to-related-formalisms)
-12. [Limitations and Extensions](#12-limitations-and-extensions)
+4. [Governed State Machines as Rewriting Systems](#4-governed-state-machines-as-rewriting-systems)
+5. [Well-Founded Compensation (WFC)](#5-well-founded-compensation-wfc)
+6. [Compensation Commutativity (CC)](#6-compensation-commutativity-cc)
+7. [The Convergence Theorem](#7-the-convergence-theorem)
+8. [Footprint Calculus](#8-footprint-calculus)
+9. [Verification Algorithm](#9-verification-algorithm)
+10. [Comparison to Related Formalisms](#10-comparison-to-related-formalisms)
+11. [Limitations and Extensions](#11-limitations-and-extensions)
 
 ---
 
@@ -133,9 +132,9 @@ This is fundamental to gsm's convergence guarantee.
 
 ### 3.2 Proof Sketch
 
-**Proof by Noetherian induction** (induction on terminating systems):
+The proof uses **Noetherian induction**, a generalization of mathematical induction to well-founded relations. In a terminating ARS, define a ≻ b when a → b (one rewrite step). Since the system terminates, ≻ is well-founded: there are no infinite descending chains a₀ ≻ a₁ ≻ a₂ ≻ ... To prove a property P(a) for all elements, it suffices to show: if P(b) holds for all b with a ≻ b (all one-step successors of a), then P(a) holds. This is the inductive step - we assume the property for "smaller" elements (closer to normal form) and prove it for "larger" ones.
 
-Assume the ARS is terminating and locally confluent. We prove confluence by induction on the number of rewrite steps.
+Assume the ARS is terminating and locally confluent. We prove confluence by Noetherian induction.
 
 **Base case**: If a →⁰ b and a →⁰ c (zero steps), then b = a = c, so they trivially join.
 
@@ -167,48 +166,9 @@ Both properties are typically easier to verify than global confluence.
 
 ---
 
-## 4. Labeled Transition Systems
+## 4. Governed State Machines as Rewriting Systems
 
-### 4.1 Definition
-
-A **labeled transition system** (LTS) is a tuple (S, L, →) where:
-- **S** is a set of states
-- **L** is a set of labels (events, actions)
-- **→** ⊆ S × L × S is the transition relation
-
-We write s →ᵉ s′ for (s, e, s′) ∈ →, meaning "state s transitions to s′ via event e."
-
-### 4.2 Paths and Traces
-
-A **path** is a sequence s₀ →^e₁ s₁ →^e₂ s₂ ... →^eₙ sₙ.
-
-A **trace** is the sequence of labels [e₁, e₂, ..., eₙ] (abstracting away intermediate states).
-
-### 4.3 Reachability
-
-State s′ is **reachable** from state s if there exists a path from s to s′.
-
-The **reachable state space** from s₀ is:
-
-```
-Reach(s₀) = {s | s₀ →* s}
-```
-
-### 4.4 Determinism
-
-An LTS is **deterministic** if for all s, e:
-
-```
-s →ᵉ s₁ ∧ s →ᵉ s₂  ⟹  s₁ = s₂
-```
-
-In other words, each (state, event) pair determines a unique successor state.
-
----
-
-## 5. Governed State Machines as Rewriting Systems
-
-### 5.1 Registry Definition
+### 4.1 Registry Definition
 
 A **registry** R is a tuple (V, I, ρ) where:
 - **V** is a finite set of variables, each with finite domain
@@ -219,7 +179,7 @@ Each invariant invᵢ is a predicate invᵢ : S → {true, false}.
 
 Each repair ρᵢ : S → S modifies only variables in invᵢ's footprint.
 
-### 5.2 State Space
+### 4.2 State Space
 
 The **state space** S is the Cartesian product of variable domains:
 
@@ -229,7 +189,7 @@ S = Dom(v₁) × Dom(v₂) × ... × Dom(vₙ)
 
 Since each domain is finite, |S| is finite.
 
-### 5.3 Validity Predicate
+### 4.3 Validity Predicate
 
 A state s ∈ S is **valid** if all invariants hold:
 
@@ -239,7 +199,7 @@ Vᵣ(s) = ⋀ᵢ invᵢ(s)
 
 The set of valid states: Validᵣ = {s ∈ S | Vᵣ(s)}.
 
-### 5.4 Compensation as Rewriting
+### 4.4 Compensation as Rewriting
 
 Define the **compensation relation** →ᵣ as:
 
@@ -251,7 +211,7 @@ where i is the smallest index such that ¬invᵢ(s).
 
 This creates an abstract rewriting system (S, →ᵣ).
 
-### 5.5 Normal Forms
+### 4.5 Normal Forms
 
 The **normal forms** of (S, →ᵣ) are exactly the valid states:
 
@@ -265,7 +225,7 @@ Conversely, if s is not valid, then some invᵢ(s) is false, so s →ᵣ ρᵢ(s
 
 Therefore, s is in normal form iff s is valid.
 
-### 5.6 Normalization Function
+### 4.6 Normalization Function
 
 For a registry R, the **normalization function** NFᵣ : S → S is defined as:
 
@@ -273,19 +233,19 @@ For a registry R, the **normalization function** NFᵣ : S → S is defined as:
 NFᵣ(s) = the unique normal form of s (if it exists)
 ```
 
-This is well-defined only if (S, →ᵣ) is terminating and confluent (guaranteed by WFC + CC).
+This is well-defined only if (S, →ᵣ) is terminating and confluent. WFC provides termination (Section 5) and CC provides local confluence (Section 6); together they yield confluence via Newman's Lemma, proven in Section 7.
 
 ---
 
-## 6. Well-Founded Compensation (WFC)
+## 5. Well-Founded Compensation (WFC)
 
-### 6.1 Definition
+### 5.1 Definition
 
 A registry R satisfies **Well-Founded Compensation** (WFC) if the compensation relation (S, →ᵣ) is terminating.
 
 **Formally**: There is no infinite sequence s₀ →ᵣ s₁ →ᵣ s₂ →ᵣ ...
 
-### 6.2 Well-Founded Orderings
+### 5.2 Well-Founded Orderings
 
 A binary relation < on a set X is **well-founded** if there is no infinite descending chain:
 
@@ -300,7 +260,7 @@ Examples of well-founded orderings:
 - Lexicographic ordering on finite tuples
 - Multiset ordering
 
-### 6.3 WFC via Well-Founded Measure
+### 5.3 WFC via Well-Founded Measure
 
 To prove WFC, we can define a **measure function** μ : S → ℕ such that:
 
@@ -320,7 +280,7 @@ This doesn't always work because a repair might violate other invariants.
 
 **Better measure**: Lexicographic tuple (depth, violated count), but in general, proving termination requires invariant-specific reasoning.
 
-### 6.4 Verification Algorithm
+### 5.4 Verification Algorithm
 
 The gsm library verifies WFC by **exhaustive simulation**:
 
@@ -337,9 +297,9 @@ If all states reach validity, WFC passes.
 
 ---
 
-## 7. Compensation Commutativity (CC)
+## 6. Compensation Commutativity (CC)
 
-### 7.1 Event Application
+### 6.1 Event Application
 
 Given a registry R and event set E, each event e ∈ E has:
 - Write set Wₑ ⊆ V (variables it modifies)
@@ -354,7 +314,7 @@ s →ₑ s′  ⟺  gₑ(s) ∧ s′ = φₑ(s)
 
 If ¬gₑ(s), then s →ₑ s (no-op).
 
-### 7.2 Normalized Event Application
+### 6.2 Normalized Event Application
 
 Define the **normalized step** relation:
 
@@ -366,7 +326,7 @@ In words: apply event e, then normalize via compensation.
 
 This is what the `step` table precomputes.
 
-### 7.3 CC1: Event Commutativity
+### 6.3 CC1: Event Commutativity
 
 **CC1** requires that for all independent events e₁, e₂ and all valid states s:
 
@@ -393,7 +353,7 @@ s ⇒ₑ₁ ⇒ₑ₂ t₁  ∧  s ⇒ₑ₂ ⇒ₑ₁ t₂  ⟹  t₁ = t₂
       must be equal
 ```
 
-### 7.4 CC2: Compensation Stability
+### 6.4 CC2: Compensation Absorption
 
 **CC2** requires that for all events e and all states s:
 
@@ -405,78 +365,90 @@ In words: Normalizing before applying an event gives the same result as normaliz
 
 **Intuition**: Once normalized, subsequent events should behave "the same" as if applied to the original state (modulo normalization).
 
-### 7.5 Why CC2 Matters
+### 6.5 Why CC2 Is Needed
 
-CC2 ensures that the order of normalization doesn't matter:
+CC2 closes a specific critical pair in the convergence proof. The governance rewrite system has two kinds of steps: apply steps (consume an event) and compensation steps (repair an invalid state). When a configuration (σ, B) is both invalid and has enabled events, two rewrites are possible:
 
-```
-s → (apply e₁) → (normalize) → (apply e₂) → (normalize)
+1. **Apply first**: apply event e to get (apply(e, σ), B\{e}), then compensate to validity
+2. **Compensate first**: compensate to get (ρ(σ), B), then apply event e, then compensate to validity
 
-vs.
+For local confluence, these must reach the same configuration. Path 1 produces NFᵣ(apply(e, σ)). Path 2 produces NFᵣ(apply(e, ρ(σ))). CC2 states exactly that these are equal.
 
-s → (normalize) → (apply e₁) → (normalize) → (apply e₂) → (normalize)
-```
-
-Both must yield the same result.
+Without CC2, the convergence proof breaks: a processor that eagerly compensates before applying an event could reach a different state than one that applies first and compensates after. CC1 alone only handles the case where two different events are applied from the same state - it says nothing about the apply-vs-compensate choice.
 
 **Note**: The gsm implementation enforces CC2 implicitly. Since the `step` table stores NFᵣ(s →ₑ ·), and we always look up from this table, we're always computing normalized steps.
 
-### 7.6 Local Confluence
+### 6.6 Local Confluence
 
-CC1 + CC2 together ensure that the system (S, ⇒) with multiple events is **locally confluent**:
+CC1 and CC2 together close all critical pairs of the governance rewrite system:
 
-For any valid state s and events e₁, e₂:
-```
-s ⇒ₑ₁ s₁  ∧  s ⇒ₑ₂ s₂  ⟹  ∃t. s₁ ⇒ₑ₂ t ∧ s₂ ⇒ₑ₁ t
-```
+- **Two apply steps** (different events e₁, e₂ both enabled): closed by CC1
+- **Apply step vs compensation step** (state is invalid and event is enabled): closed by CC2
+- **Two compensation steps**: impossible (ρ is deterministic, so both steps produce the same successor)
 
-This is the "one-step diamond" required by Newman's Lemma.
-
----
-
-## 8. The Convergence Theorem
-
-### 8.1 Statement
-
-**Theorem (Convergence Guarantee)**: Let R be a registry with event set E. If R satisfies WFC and CC, then for any initial state s₀ and any two sequences of events [e₁, ..., eₘ] = [f₁, ..., fₘ] (as multisets), the final states are equal.
-
-**Formally**:
-
-```
-s₀ ⇒ₑ₁ ... ⇒ₑₘ sₐ
-s₀ ⇒f₁ ... ⇒fₘ sᵦ
-⟹  sₐ = sᵦ
-```
-
-### 8.2 Proof
-
-The proof follows from Newman's Lemma applied to the normalized event system.
-
-**Step 1**: Define the event system (S, ⇒) where s ⇒ s′ if s ⇒ₑ s′ for some event e.
-
-**Step 2**: WFC implies (S, →ᵣ) terminates. Combined with the fact that |S| is finite and events always produce valid normal forms, (S, ⇒) terminates.
-
-**Step 3**: CC implies (S, ⇒) is locally confluent. Any one-step divergence (via different events) can be joined.
-
-**Step 4**: By Newman's Lemma, (S, ⇒) is confluent.
-
-**Step 5**: Two sequences of events [e₁, ..., eₘ] and [f₁, ..., fₘ] (same multiset) are equivalent modulo reordering. By confluence, they must reach the same final state.
-
-Therefore, convergence is guaranteed. ∎
-
-### 8.3 Eventual Consistency
-
-The convergence theorem provides **strong eventual consistency**:
-
-All replicas processing the same set of events (in any order) reach the same state, assuming WFC and CC hold.
-
-This is stronger than weak eventual consistency (which only guarantees convergence after quiescence).
+This establishes local confluence of the full rewrite system.
 
 ---
 
-## 9. Footprint Calculus
+## 7. The Convergence Theorem
 
-### 9.1 Variable Footprints
+### 7.1 The Governance Rewrite System
+
+The proof operates on **configurations** (σ, B) where σ is a state and B is a set of received-but-unapplied events. The governance rewrite system G has two rewrite rules:
+
+1. **Apply step**: (σ, B) → (apply(e, σ), B\{e}) when event e ∈ B is enabled (all causal dependencies already applied)
+2. **Compensation step**: (σ, B) → (ρ(σ), B) when Vᵣ(σ) = false
+
+A configuration is in **normal form** when B = ∅ and Vᵣ(σ) = true.
+
+The nondeterminism is genuine: when multiple events are enabled and the state is invalid, the system can step via different apply rules or via compensation. Confluence means the choice doesn't affect the final result.
+
+### 7.2 Termination
+
+**Lemma**: Under WFC, G is terminating.
+
+**Proof**: Define the measure μ(σ, B) = (|B|, Φ(σ)) taking values in N x N under the **lexicographic order**.
+
+The lexicographic order on N x N is **well-founded**: there is no infinite descending chain. This is because the first component is bounded below by 0, and for any fixed first component, the second component is also bounded below by 0. Any infinite descending chain would require the first component to decrease infinitely (impossible in N) or stay constant while the second decreases infinitely (also impossible in N).
+
+- An apply step decreases the first component (|B| drops by 1), so μ strictly decreases regardless of the second component.
+- A compensation step leaves the first component unchanged but strictly decreases the second by WFC.
+
+Since μ maps into a well-ordered set and strictly decreases at every step, every reduction sequence is finite. ∎
+
+### 7.3 Local Confluence
+
+**Lemma**: Under CC, G is locally confluent.
+
+**Proof**: Three critical pair types arise:
+
+**Case 1 (apply/apply)**: Events e₁, e₂ both enabled from (σ, B). Since both are in B and both are enabled, neither is a causal dependency of the other, so they are causally independent. From X₁ = (apply(e₁, σ), B\{e₁}), compensate to validity and apply e₂. From X₂ = (apply(e₂, σ), B\{e₂}), compensate to validity and apply e₁. By CC1, the state components agree. The buffer components are both B\{e₁, e₂}.
+
+**Case 2 (apply/compensate)**: State σ is invalid and event e is enabled. X₁ = (apply(e, σ), B\{e}) and X₂ = (ρ(σ), B). From X₁, compensate to reach (NFᵣ(apply(e, σ)), B\{e}). From X₂, apply e to get (apply(e, ρ(σ)), B\{e}), then compensate to reach (NFᵣ(apply(e, ρ(σ))), B\{e}). By CC2, the state components are equal.
+
+**Case 3 (compensate/compensate)**: Both steps apply ρ to the same state, producing the same successor. Trivial. ∎
+
+### 7.4 Unique Normal Forms
+
+**Corollary**: Under WFC and CC, every configuration (σ₀, E) has a unique normal form.
+
+**Proof**: By the termination lemma, G is terminating. By the local confluence lemma, G is locally confluent. By Newman's Lemma (Section 3), G is confluent. A terminating, confluent rewrite system has unique normal forms. ∎
+
+### 7.5 Stream Convergence
+
+**Theorem**: Let R satisfy WFC and CC. Let P₁, P₂ be processors consuming the same event set E from initial state σ₀, each applying events in some causality-respecting order and compensating after each application. Then P₁ and P₂ reach the same valid state.
+
+**Proof**: Each processor's computation is a reduction sequence in G from (σ₀, E) to some normal form (σ*, ∅). Different causality-respecting orders correspond to different reduction sequences. By the unique normal forms corollary, all reduction sequences from (σ₀, E) reach the same normal form. Therefore σ* depends only on E, not on the order. ∎
+
+### 7.6 Eventual Consistency
+
+The convergence theorem provides **strong eventual consistency**: all replicas processing the same set of events (in any order) reach the same valid state, assuming WFC and CC hold. This is stronger than weak eventual consistency (which only guarantees convergence after quiescence).
+
+---
+
+## 8. Footprint Calculus
+
+### 8.1 Variable Footprints
 
 Each invariant invᵢ has a **footprint** Fᵢ ⊆ V, the set of variables it constrains.
 
@@ -488,7 +460,7 @@ The repair ρᵢ may only modify variables in Fᵢ.
 ρᵢ(s)(v) = s(v)
 ```
 
-### 9.2 Event Write Sets
+### 8.2 Event Write Sets
 
 Each event e has a **write set** Wₑ ⊆ V, the variables it modifies.
 
@@ -498,13 +470,13 @@ Each event e has a **write set** Wₑ ⊆ V, the variables it modifies.
 φₑ(s)(v) = s(v)
 ```
 
-### 9.3 Triggered Invariants
+### 8.3 Triggered Invariants
 
 Event e **triggers** invariant invᵢ if Wₑ ∩ Fᵢ ≠ ∅.
 
 **Intuition**: If an event modifies a variable that an invariant watches, the invariant might be violated.
 
-### 9.4 Event Footprints
+### 8.4 Event Footprints
 
 The **footprint** of an event e is the union of footprints of all invariants it can trigger:
 
@@ -514,7 +486,7 @@ Footprint(e) = ⋃{Fᵢ | Wₑ ∩ Fᵢ ≠ ∅}
 
 This is the transitive closure: if e writes v, and invᵢ watches v, then invᵢ's repair can modify other variables in Fᵢ.
 
-### 9.5 Disjointness Theorem
+### 8.5 Disjointness Theorem
 
 **Theorem**: If two events e₁ and e₂ have disjoint footprints, then they commute.
 
@@ -533,7 +505,7 @@ Since the footprints are disjoint, repairs from e₁ don't affect variables rele
 
 Therefore, the normalized results are independent, so they commute. ∎
 
-### 9.6 Optimization
+### 8.6 Optimization
 
 The disjointness theorem allows the verifier to skip exhaustive checking for event pairs with disjoint footprints.
 
@@ -545,9 +517,9 @@ This is the "footprint optimization" mentioned in the verification report.
 
 ---
 
-## 10. Verification Algorithm
+## 9. Verification Algorithm
 
-### 10.1 Phase 1: Normal Form Computation (WFC Check)
+### 9.1 Phase 1: Normal Form Computation (WFC Check)
 
 **Algorithm**:
 ```
@@ -574,7 +546,7 @@ return WFC_SUCCESS(max_depth)
 
 **Complexity**: O(|S|²) - for each of |S| states, may need up to |S| repair steps.
 
-### 10.2 Phase 2: Step Table Construction
+### 9.2 Phase 2: Step Table Construction
 
 **Algorithm**:
 ```
@@ -586,7 +558,7 @@ for each event e in E:
 
 **Complexity**: O(|E| × |S|) - one event application and one table lookup per (event, state) pair.
 
-### 10.3 Phase 3: CC Verification
+### 9.3 Phase 3: CC Verification
 
 **Algorithm**:
 ```
@@ -612,7 +584,7 @@ return CC_SUCCESS(disjoint_count, brute_force_count)
 
 **Complexity**: O(|E|² × |S|) worst case, but typically much better due to disjointness optimization.
 
-### 10.4 Soundness and Completeness
+### 9.4 Soundness and Completeness
 
 **Soundness**: If the verification algorithm reports success, then WFC and CC hold.
 
@@ -624,9 +596,9 @@ return CC_SUCCESS(disjoint_count, brute_force_count)
 
 ---
 
-## 11. Comparison to Related Formalisms
+## 10. Comparison to Related Formalisms
 
-### 11.1 Conflict-Free Replicated Data Types (CRDTs)
+### 10.1 Conflict-Free Replicated Data Types (CRDTs)
 
 **CRDTs** require operations to commute directly:
 
@@ -646,7 +618,7 @@ op₁ ; op₂ = op₂ ; op₁
 - CRDTs: stronger requirement (hard to express business rules)
 - gsm: weaker requirement (can enforce invariants, but requires verification)
 
-### 11.2 Operational Transformation (OT)
+### 10.2 Operational Transformation (OT)
 
 **OT** transforms concurrent operations to maintain convergence:
 
@@ -662,7 +634,7 @@ op₁ ; transform(op₂, op₁) = op₂ ; transform(op₁, op₂)
 - OT: flexible (infinite state spaces), but transform correctness is hard to verify
 - gsm: verified (finite state spaces), but requires enumeration
 
-### 11.3 Invariant Confluence (I-confluence)
+### 10.3 Invariant Confluence (I-confluence)
 
 **I-confluence** (Bailis et al., 2014) allows operations that preserve invariants to execute without coordination:
 
@@ -678,7 +650,7 @@ If inv(s) and op₁(s), op₂(s) both preserve inv, then they commute
 - I-confluence: no compensation needed (faster), but restrictive
 - gsm: compensation required (slower build), but more flexible
 
-### 11.4 Transaction Processing
+### 10.4 Transaction Processing
 
 **ACID transactions** use locking/2PC to ensure linearizability:
 
@@ -694,7 +666,7 @@ Serialize all transactions to avoid conflicts
 - Transactions: strong consistency, but poor availability
 - gsm: eventual consistency, high availability
 
-### 11.5 Abstract State Machines (ASMs)
+### 10.5 Abstract State Machines (ASMs)
 
 **ASMs** (Gurevich) model state transitions with update rules:
 
@@ -710,9 +682,9 @@ if cond(s) then s' = update(s)
 
 ---
 
-## 12. Limitations and Extensions
+## 11. Limitations and Extensions
 
-### 12.1 Finite State Spaces
+### 11.1 Finite State Spaces
 
 **Limitation**: gsm requires finite state spaces for exhaustive verification.
 
@@ -725,7 +697,7 @@ if cond(s) then s' = update(s)
 - Bound domains to reasonable ranges (e.g., balance ∈ [0, 1000000])
 - Use symbolic verification for unbounded domains (future work)
 
-### 12.2 State Space Explosion
+### 11.2 State Space Explosion
 
 **Limitation**: State space grows as product of variable domains.
 
@@ -738,7 +710,7 @@ if cond(s) then s' = update(s)
 
 Current limit: 2²⁰ ≈ 1M states.
 
-### 12.3 Dynamic Event Sets
+### 11.3 Dynamic Event Sets
 
 **Limitation**: Event set is fixed at build time.
 
@@ -748,7 +720,7 @@ Current limit: 2²⁰ ≈ 1M states.
 
 **Future work**: Incremental verification when adding events.
 
-### 12.4 Multi-Registry Systems
+### 11.4 Multi-Registry Systems
 
 **Limitation**: gsm currently models single-registry systems.
 
@@ -758,7 +730,7 @@ Current limit: 2²⁰ ≈ 1M states.
 
 **Future work**: Implement federation with partial synchronization.
 
-### 12.5 Probabilistic and Timed Events
+### 11.5 Probabilistic and Timed Events
 
 **Limitation**: Events are discrete and untimed.
 
@@ -769,7 +741,7 @@ Current limit: 2²⁰ ≈ 1M states.
 
 **Challenge**: Verification becomes undecidable or requires approximation.
 
-### 12.6 Non-Deterministic Repairs
+### 11.6 Non-Deterministic Repairs
 
 **Limitation**: Repairs are deterministic functions.
 
@@ -777,7 +749,7 @@ Current limit: 2²⁰ ≈ 1M states.
 
 **Consequence**: Normal forms may not be unique, weakening convergence guarantee to "converge to equivalent states" rather than "identical states."
 
-### 12.7 Partial Order Relations
+### 11.7 Partial Order Relations
 
 **Limitation**: Invariants fire in declaration order (total order).
 
