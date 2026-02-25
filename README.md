@@ -1,4 +1,4 @@
-# gsm — Governed State Machines
+# gsm - Governed State Machines
 
 [![Blackwell Systems™](https://raw.githubusercontent.com/blackwell-systems/blackwell-docs-theme/main/badge-trademark.svg)](https://github.com/blackwell-systems)
 [![Go Reference](https://pkg.go.dev/badge/github.com/blackwell-systems/gsm.svg)](https://pkg.go.dev/github.com/blackwell-systems/gsm)
@@ -8,11 +8,11 @@
 
 **Act like UDP, receive like TCP.**
 
-What if distributed systems don't have to coordinate — because they agree on the rules ahead of time, so ordering and compensations are deterministic?
+What if distributed systems don't have to coordinate - because they agree on the rules ahead of time, so ordering and compensations are deterministic?
 
 `gsm` is a Go library for constructing state machines where events may arrive out of order and violate business rules, but automatic compensation ensures all replicas converge to the same valid state. Convergence is **verified at build time** via exhaustive state-space enumeration. Runtime event application is **O(1) table lookup** with zero compensation overhead.
 
-CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants — shipping an unpaid order, overdrawing an account — commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
+CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
 ## Quick Example
 
@@ -50,7 +50,7 @@ if err != nil {
 s := machine.NewState()
 s = machine.Apply(s, "ship") // Arrives before payment
 s = machine.Apply(s, "pay")  // Arrives after shipment
-// → {status=paid, paid=true} — compensation fired automatically
+// → {status=paid, paid=true} - compensation fired automatically
 ```
 
 > **New to convergent systems?** See [CONCEPTS.md](CONCEPTS.md) for foundational definitions, theory explanations, and a glossary mapping paper terms to code.
@@ -267,7 +267,7 @@ s = s.Set(statusVar, "active")
 // Bool
 s = s.SetBool(enabledVar, true)
 
-// Int (silently clamped to declared range — SetInt(countVar, 999) on [0,100] becomes 100)
+// Int (silently clamped to declared range - SetInt(countVar, 999) on [0,100] becomes 100)
 s = s.SetInt(countVar, 42)
 ```
 
