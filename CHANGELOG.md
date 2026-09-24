@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-23
+
+Multi-source federation: the tree restriction is lifted to any acyclic network. A target with several sources declares a resolution operator that deterministically merges them — convergence guaranteed by the paper's *Federated Convergence with Resolution* theorem, whose preconditions gsm verifies exhaustively at build time. Additive over v0.2.0; single-source (tree) federations are unchanged.
+
 ### Added
 - **Multi-source federation via resolvers** (`Resolver`, `Federation.Resolve`): a federation target may now have more than one source (an acyclic DAG, not just a tree). Such a target declares a `Resolver(dst, sources)` that deterministically merges its sources' states into its shared component (priority, AND/OR, most-restrictive, etc.) — a merge no single-authority morphism can express. Convergence is the paper's *Federated Convergence with Resolution* theorem (Section 8), which holds whenever the resolver is source-determined (R1) and validity-preserving (R2) — the multi-source generalization of the single-source M1 condition, with single-source authority as the special case. gsm certifies exactly those hypotheses: `Build` **exhaustively verifies** (over every reachable combination of valid source states) that the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same verify-the-preconditions contract gsm applies to single-registry WFC/CC and tree-federation M1. A multi-source target without a resolver — or a resolver that violates R1/R2 (reads local state, can produce an invalid target, or writes non-shared variables) — is rejected. Single-source (tree) federations are unchanged.
 
