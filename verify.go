@@ -24,8 +24,9 @@ type Report struct {
 	CCFailure     *CCFailure // non-nil if CC failed
 
 	// Compositional (BuildCompositional) results
-	Components         int // number of footprint components verified
-	MaxComponentStates int // largest component subspace enumerated
+	Components         int  // number of footprint components verified
+	MaxComponentStates int  // largest component subspace enumerated
+	FootprintChecked   bool // closures verified to respect declared footprints
 }
 
 // CCFailure describes a specific CC violation.

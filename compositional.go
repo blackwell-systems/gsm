@@ -13,11 +13,11 @@ import "fmt"
 // the subspace of ITS OWN variables. Certification cost is then exponential in
 // the largest component, not in the whole machine.
 //
-// Trust model: this relies on the declared footprints being honest (an
-// invariant's repair modifies only its Watches() vars and reads only those; an
-// event's effect touches only its Writes() vars). Build's disjointness path
-// already assumes exactly this; BuildCompositional extends it to WFC and to the
-// brute-force CC path. A component is verified with all other variables held at
+// Footprint conformance is VERIFIED, not assumed: verifyFootprints (footprint.go)
+// checks that each invariant repair/check and event effect actually respects its
+// declared footprint (writes no undeclared variable, and its declared outputs do
+// not depend on any variable outside the footprint) before the disjointness
+// certificate is used. A component is verified with all other variables held at
 // zero, so BuildCompositional requires the zero state to be valid.
 
 // maxComponentBits caps a single component's subspace so enumeration stays cheap.
@@ -209,6 +209,12 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 			report.MaxComponentStates = count
 		}
 
+		// Footprint conformance: the closures actually respect their declared
+		// footprints, which the disjointness certificate depends on.
+		if err := r.verifyFootprints(c); err != nil {
+			return nil, report, err
+		}
+
 		// WFC: repair terminates from every sub-state of this component.
 		depth, err := r.verifyComponentWFC(c, count)
 		if err != nil {
@@ -232,6 +238,7 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 
 	report.WFC = true
 	report.CC = true
+	report.FootprintChecked = true
 	report.MaxRepairLen = maxRepair
 	report.PairsDisjoint = pairsDisjoint
 	report.PairsBrute = pairsBrute

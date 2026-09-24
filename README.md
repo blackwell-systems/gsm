@@ -370,7 +370,7 @@ m := syn.Machine()      // a ready-to-use, verified-convergent Machine
 
 Synthesis reframes convergence as a search for a **normal-form map** on invalid states that
 satisfies CC. It uses backtracking with forward-checking (pure Go, no solver dependency), so it
-scales well past naive enumeration, and it is honest about the boundary:
+scales well past naive enumeration, and it is precise about the boundary:
 
 - **Convergent** — a repair was found; `Machine()` is ready, `Repairs()` shows it.
 - **Impossible** (`Exhaustive`, not convergent) — no compensation converges. `Witness()` gives
