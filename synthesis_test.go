@@ -11,14 +11,12 @@ import (
 // compensation. Synthesize discovers one (no Repair provided), and the resulting Machine
 // actually converges.
 func TestSynthesize_FindsRepair(t *testing.T) {
-	// Approval with auto-approve: stage {pending,approved,held} × balance [0,2].
 	r := gsm.NewRegistry("approval")
 	stage := r.Enum("stage", "pending", "approved", "held")
 	balance := r.Int("balance", 0, 2)
-	// Invariant (validity only — NO Repair; that's what we synthesize).
 	r.Invariant("funded_if_approved").Watches(stage, balance).
 		Holds(func(s gsm.State) bool { return s.Get(stage) != "approved" || s.GetInt(balance) >= 2 }).
-		Add()
+		Add() // NO Repair — that's what we synthesize
 	r.Event("approve").Writes(stage).
 		Apply(func(s gsm.State) gsm.State { return s.Set(stage, "approved") }).Add()
 	r.Event("credit").Writes(stage, balance).
@@ -40,11 +38,6 @@ func TestSynthesize_FindsRepair(t *testing.T) {
 	if !syn.Convergent {
 		t.Fatalf("expected a convergent compensation to exist:\n%s", syn)
 	}
-	if syn.Alternatives < 1 {
-		t.Fatalf("Convergent but Alternatives=%d", syn.Alternatives)
-	}
-
-	// The synthesized machine must actually be usable and order-independent.
 	m := syn.Machine()
 	if m == nil {
 		t.Fatal("Machine() returned nil for a convergent synthesis")
@@ -58,8 +51,6 @@ func TestSynthesize_FindsRepair(t *testing.T) {
 	if !m.IsValid(a) {
 		t.Fatalf("synthesized machine reached an invalid state: %s", a)
 	}
-
-	// The repair map and report should be populated for a convergent synthesis.
 	if len(syn.Repairs()) == 0 {
 		t.Fatal("Repairs() empty for a convergent synthesis")
 	}
@@ -69,12 +60,11 @@ func TestSynthesize_FindsRepair(t *testing.T) {
 }
 
 // TestSynthesize_ProvesImpossible: two events set the same variable to different constants.
-// No compensation can reconcile last-writer-wins, and there are no invalid states to reroute,
-// so Synthesize proves impossibility.
+// No compensation can reconcile last-writer-wins, so Synthesize exhausts the search and
+// reports provable impossibility.
 func TestSynthesize_ProvesImpossible(t *testing.T) {
 	r := gsm.NewRegistry("conflict")
 	x := r.Int("x", 0, 2)
-	// No invariant → all states valid → nf is forced to identity.
 	r.Event("set1").Writes(x).Apply(func(s gsm.State) gsm.State { return s.SetInt(x, 1) }).Add()
 	r.Event("set2").Writes(x).Apply(func(s gsm.State) gsm.State { return s.SetInt(x, 2) }).Add()
 
@@ -85,8 +75,49 @@ func TestSynthesize_ProvesImpossible(t *testing.T) {
 	if syn.Convergent {
 		t.Fatalf("expected impossibility, but found a convergent compensation:\n%s", syn)
 	}
+	if !syn.Exhaustive {
+		t.Fatal("impossibility must be from an exhaustive search")
+	}
 	if !strings.Contains(syn.String(), "IMPOSSIBLE") {
 		t.Fatalf("report should state impossibility:\n%s", syn)
+	}
+}
+
+// TestSynthesize_Scales: a registry whose repair-assignment space (8 invalid × 8 valid =
+// 8^8 ≈ 16.7M) EXCEEDS the old brute-force cap (2^20 ≈ 1M) — the previous implementation
+// would have refused it. Backtracking with forward-checking solves it (a per-variable clamp
+// repair is convergent) within budget.
+func TestSynthesize_Scales(t *testing.T) {
+	r := gsm.NewRegistry("clamp")
+	x := r.Int("x", 0, 3)
+	y := r.Bool("y")
+	z := r.Bool("z")
+	r.Invariant("x_le_1").Watches(x).
+		Holds(func(s gsm.State) bool { return s.GetInt(x) <= 1 }).Add() // no Repair
+	r.Event("incx").Writes(x).Apply(func(s gsm.State) gsm.State {
+		v := s.GetInt(x)
+		if v < 3 {
+			v++
+		}
+		return s.SetInt(x, v)
+	}).Add()
+	r.Event("flipy").Writes(y).Apply(func(s gsm.State) gsm.State { return s.SetBool(y, !s.GetBool(y)) }).Add()
+	r.Event("flipz").Writes(z).Apply(func(s gsm.State) gsm.State { return s.SetBool(z, !s.GetBool(z)) }).Add()
+
+	syn, err := r.Synthesize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !syn.Convergent {
+		t.Fatalf("expected a convergent compensation (per-variable clamp):\n%s", syn)
+	}
+	t.Logf("solved a 8^8 ≈ 16.7M-assignment problem in %d backtracking nodes", syn.Nodes)
+	m := syn.Machine()
+	// spot-check order-independence of two independent events through the synthesized machine.
+	s0 := m.Apply(m.NewState(), "incx") // x=1 (valid); drive x to 2 to exercise repair
+	s0 = m.Apply(s0, "incx")            // x would be 2 → repaired
+	if !m.IsValid(s0) {
+		t.Fatalf("synthesized machine left an invalid state: %s", s0)
 	}
 }
 

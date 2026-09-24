@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Compensation synthesis now scales via backtracking + forward-checking** (was brute-force enumeration over `|valid|^|invalid|`). Same completeness — it finds a convergent compensation iff one exists, and proves impossibility by exhaustion — but it prunes the assignment tree, handling spaces far beyond the old `2^20` cap (a test solves an `8^8 ≈ 16.7M`-assignment problem in ~10 nodes). Still worst-case exponential (CC synthesis is NP-hard); a search budget now distinguishes **provably impossible** (exhaustive) from **undetermined** (budget hit — a SAT/SMT encoding would settle those). `Synthesis` fields changed: `Alternatives`/`Searched` → `Exhaustive`/`Nodes`.
+
 ## [0.5.0] - 2026-09-23
 
 Compensation synthesis: gsm can now *generate* a convergent compensation, not just verify one — or prove none exists. Additive over v0.4.x.

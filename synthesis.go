@@ -6,39 +6,37 @@ import (
 	"strings"
 )
 
-// maxSynthAssignments bounds the brute-force synthesis search. The candidate space is
-// |valid|^|invalid|, which grows fast; beyond this, synthesis returns an error rather than
-// hang. (A SAT/SMT encoding would lift this ceiling — a natural next step.)
-const maxSynthAssignments = 1 << 20
+// maxSynthNodes bounds the backtracking search. If the search hits this budget before
+// completing, Synthesis reports Exhaustive=false (undetermined) rather than a false verdict.
+const maxSynthNodes = 20_000_000
 
-// Synthesis is the result of Registry.Synthesize: whether a convergent compensation exists
-// for the registry's invariants and events, how many distinct ones the search found, and a
-// representative one (as a ready-to-use Machine and an inspectable repair map).
+// Synthesis is the result of Registry.Synthesize.
 type Synthesis struct {
-	Convergent   bool // does any compensation make this registry converge?
-	Alternatives int  // number of distinct convergent compensations found
-	Searched     int  // candidate assignments examined
+	Convergent bool // a convergent compensation was found
+	Exhaustive bool // the search completed; !Convergent && Exhaustive ⇒ provably impossible
+	Nodes      int  // backtracking nodes explored (transparency)
 
 	r        *Registry
-	nf       []uint64 // representative convergent normal-form table (nil if not convergent)
+	nf       []uint64 // representative convergent normal-form table (nil if none)
 	step     [][]uint64
 	invalids []uint64 // packed invalid states (for Repairs())
 }
 
-// Synthesize searches for a compensation (a normal-form map on invalid states) that makes
-// the registry converge — satisfying WFC and CC — from the invariants' validity predicates
-// and the events alone. Any Repair functions already on the invariants are IGNORED: the
-// point is to generate one. It returns a representative convergent compensation if one
-// exists, reports how many alternatives were found, or reports that none exists (the
-// invariants and events cannot converge under any compensation).
+// Synthesize searches for a compensation (a normal-form map on invalid states) that makes the
+// registry converge — satisfying WFC and CC — from the invariants' validity predicates and
+// the events alone. Any Repair functions on the invariants are IGNORED: the point is to
+// generate one. It returns a representative convergent compensation if one exists (as a
+// ready-to-use Machine and inspectable Repairs), reports provable impossibility when the
+// search is exhaustive and finds nothing, or reports Exhaustive=false when it hit its search
+// budget without a verdict.
 //
 // Convergent does not mean desirable: the synthesized repair merely makes orderings agree.
-// Inspect Repairs() (or enumerate alternatives) and judge whether the repair is acceptable;
-// if the only convergent repairs are unacceptable, the events — not the compensation — need
-// redesign.
+// Inspect Repairs() and judge acceptability; if the only convergent repairs are unacceptable,
+// the events — not the compensation — need redesign.
 //
-// The search is brute force over |valid|^|invalid| assignments, bounded by an internal cap;
-// it errors rather than hang on larger registries.
+// The search is backtracking with forward-checking (pure Go, no solver dependency); it prunes
+// the assignment tree but is worst-case exponential (as CC synthesis is NP-hard). A SAT/SMT
+// encoding would push the ceiling further.
 func (r *Registry) Synthesize() (*Synthesis, error) {
 	if r.totalBits > 20 {
 		return nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
@@ -46,7 +44,7 @@ func (r *Registry) Synthesize() (*Synthesis, error) {
 	packedCount := 1 << r.totalBits
 	mk := func(id int) State { return State{packed: uint64(id), vars: r.vars} }
 
-	// Partition the encodable states into valid and invalid.
+	// Partition encodable states into valid and invalid.
 	validEnc := make([]bool, packedCount)
 	isValidState := make([]bool, packedCount)
 	var valids, invalids []int
@@ -66,18 +64,8 @@ func (r *Registry) Synthesize() (*Synthesis, error) {
 		return nil, fmt.Errorf("gsm: no valid states — invariants are unsatisfiable")
 	}
 
-	// Bound the search: |valids|^|invalids|.
-	total := 1
-	for range invalids {
-		if total > maxSynthAssignments/len(valids) {
-			return nil, fmt.Errorf("gsm: synthesis space too large (%d invalid states over %d valid); "+
-				"brute-force synthesis is bounded at %d assignments", len(invalids), len(valids), maxSynthAssignments)
-		}
-		total *= len(valids)
-	}
-
 	// Precompute the raw post-event state for every (event, encodable state) — independent of
-	// the candidate compensation.
+	// the candidate compensation. clampState keeps results within valid encodings.
 	rawStep := make([][]uint64, len(r.events))
 	for ei, ev := range r.events {
 		rawStep[ei] = make([]uint64, packedCount)
@@ -87,57 +75,71 @@ func (r *Registry) Synthesize() (*Synthesis, error) {
 			}
 		}
 	}
-
 	pairs := r.ccPairs()
 
-	// Search every assignment of invalid states to valid repair targets.
-	var repr []uint64
-	working := 0
-	idx := make([]int, len(invalids))
+	// nf starts as identity; valid and non-encoding states are permanently "assigned".
 	nf := make([]uint64, packedCount)
-	for {
-		// Build candidate nf: identity everywhere, then reroute invalid states.
-		for s := 0; s < packedCount; s++ {
-			nf[s] = uint64(s)
-		}
-		for k, inv := range invalids {
-			nf[inv] = uint64(valids[idx[k]])
-		}
-
-		if ccHolds(nf, rawStep, validEnc, isValidState, pairs) {
-			working++
-			if repr == nil {
-				repr = append([]uint64(nil), nf...)
-			}
-		}
-
-		// advance mixed-radix counter over invalid states
-		k := len(invalids) - 1
-		for k >= 0 {
-			idx[k]++
-			if idx[k] < len(valids) {
-				break
-			}
-			idx[k] = 0
-			k--
-		}
-		if k < 0 {
-			break
-		}
+	assigned := make([]bool, packedCount)
+	for s := 0; s < packedCount; s++ {
+		nf[s] = uint64(s)
+		assigned[s] = validEnc[s] && isValidState[s] || !validEnc[s]
 	}
 
-	out := &Synthesis{Convergent: repr != nil, Alternatives: working, Searched: total, r: r}
+	// Order the decision variables most-constrained-first is a nice-to-have; index order is
+	// fine and deterministic. Backtracking with forward-checking prunes the tree.
+	nodes := 0
+	budgetHit := false
+	var solution []uint64
+	var bt func(k int) bool
+	bt = func(k int) bool {
+		if nodes >= maxSynthNodes {
+			budgetHit = true
+			return false
+		}
+		nodes++
+		if k == len(invalids) {
+			if ccHolds(nf, rawStep, validEnc, isValidState, pairs) {
+				solution = append([]uint64(nil), nf...)
+				return true
+			}
+			return false
+		}
+		inv := invalids[k]
+		for _, target := range valids {
+			nf[inv] = uint64(target)
+			assigned[inv] = true
+			if forwardCheck(nf, assigned, rawStep, validEnc, isValidState, pairs) {
+				if bt(k + 1) {
+					return true
+				}
+			}
+			if budgetHit {
+				break
+			}
+		}
+		nf[inv] = uint64(inv)
+		assigned[inv] = false
+		return false
+	}
+	found := bt(0)
+
+	out := &Synthesis{
+		Convergent: found,
+		Exhaustive: !budgetHit,
+		Nodes:      nodes,
+		r:          r,
+	}
 	for _, s := range invalids {
 		out.invalids = append(out.invalids, uint64(s))
 	}
-	if repr != nil {
-		out.nf = repr
+	if found {
+		out.nf = solution
 		out.step = make([][]uint64, len(r.events))
 		for ei := range r.events {
 			out.step[ei] = make([]uint64, packedCount)
 			for s := 0; s < packedCount; s++ {
 				if validEnc[s] {
-					out.step[ei][s] = repr[rawStep[ei][s]]
+					out.step[ei][s] = solution[rawStep[ei][s]]
 				}
 			}
 		}
@@ -166,8 +168,8 @@ func (r *Registry) ccPairs() [][2]int {
 	return pairs
 }
 
-// ccHolds checks CC1 (order independence, all encodable states, declared pairs) and CC2
-// (compensation absorption, invalid states) for a candidate normal-form map.
+// ccHolds checks CC1 (order independence, all encodable states) and CC2 (compensation
+// absorption, invalid states) for a complete normal-form map.
 func ccHolds(nf []uint64, rawStep [][]uint64, validEnc, isValidState []bool, pairs [][2]int) bool {
 	step := func(e int, s uint64) uint64 { return nf[rawStep[e][s]] }
 	for s := 0; s < len(validEnc); s++ {
@@ -175,13 +177,11 @@ func ccHolds(nf []uint64, rawStep [][]uint64, validEnc, isValidState []bool, pai
 			continue
 		}
 		u := uint64(s)
-		// CC1
 		for _, p := range pairs {
 			if step(p[1], step(p[0], u)) != step(p[0], step(p[1], u)) {
 				return false
 			}
 		}
-		// CC2 on invalid states
 		if !isValidState[s] {
 			for e := range rawStep {
 				if step(e, u) != nf[rawStep[e][nf[u]]] {
@@ -193,8 +193,54 @@ func ccHolds(nf []uint64, rawStep [][]uint64, validEnc, isValidState []bool, pai
 	return true
 }
 
+// forwardCheck prunes: it fails a partial assignment if any CC constraint whose referenced
+// nf lookups are ALL assigned is already violated. Constraints touching an unassigned nf
+// entry are skipped (not yet determined).
+func forwardCheck(nf []uint64, assigned []bool, rawStep [][]uint64, validEnc, isValidState []bool, pairs [][2]int) bool {
+	// eval returns (nf[x], ready): ready is false if nf[x] is not yet assigned.
+	eval := func(x uint64) (uint64, bool) {
+		if !assigned[x] {
+			return 0, false
+		}
+		return nf[x], true
+	}
+	step := func(e int, s uint64) (uint64, bool) { return eval(rawStep[e][s]) }
+	for s := 0; s < len(validEnc); s++ {
+		if !validEnc[s] {
+			continue
+		}
+		u := uint64(s)
+		for _, p := range pairs {
+			a, ra := step(p[0], u)
+			b, rb := step(p[1], u)
+			if !ra || !rb {
+				continue
+			}
+			lhs, rl := step(p[1], a)
+			rhs, rr := step(p[0], b)
+			if rl && rr && lhs != rhs {
+				return false
+			}
+		}
+		if !isValidState[s] {
+			nu, rnu := eval(u)
+			if !rnu {
+				continue
+			}
+			for e := range rawStep {
+				l, rlok := step(e, u)
+				rv, rrok := step(e, nu)
+				if rlok && rrok && l != rv {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 // Machine returns a ready-to-use Machine built from the synthesized compensation, or nil if
-// the registry has no convergent compensation.
+// no convergent compensation was found.
 func (s *Synthesis) Machine() *Machine {
 	if !s.Convergent {
 		return nil
@@ -206,9 +252,9 @@ func (s *Synthesis) Machine() *Machine {
 	return m
 }
 
-// Repairs returns the synthesized repair for each invalid state as {invalid, target} pairs,
-// sorted, for inspection. Empty if not convergent. (State is not comparable — it carries a
-// variable list — so this is a slice, not a map.)
+// Repairs returns the synthesized repair for each invalid state as sorted {invalid, target}
+// pairs, for inspection. Empty if no convergent compensation was found. (State carries a
+// variable list and is not comparable, so this is a slice, not a map.)
 func (s *Synthesis) Repairs() [][2]State {
 	var out [][2]State
 	if !s.Convergent {
@@ -225,15 +271,19 @@ func (s *Synthesis) Repairs() [][2]State {
 // String renders a human-readable synthesis report.
 func (s *Synthesis) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Synthesis: %s\n", s.r.name)
-	if !s.Convergent {
-		fmt.Fprintf(&b, "  IMPOSSIBLE — no compensation converges (searched %d assignments).\n", s.Searched)
+	fmt.Fprintf(&b, "Synthesis: %s (%d nodes)\n", s.r.name, s.Nodes)
+	switch {
+	case s.Convergent:
+		fmt.Fprintf(&b, "  CONVERGENT — synthesized a compensation. Representative repair:\n")
+		for _, rp := range s.Repairs() {
+			fmt.Fprintf(&b, "    repair %s → %s\n", rp[0], rp[1])
+		}
+	case s.Exhaustive:
+		fmt.Fprintf(&b, "  IMPOSSIBLE — no compensation converges (search exhausted).\n")
 		fmt.Fprintf(&b, "  These invariants and events cannot converge under any compensation; redesign the events.\n")
-		return b.String()
-	}
-	fmt.Fprintf(&b, "  CONVERGENT — %d of %d compensations work. Representative repair:\n", s.Alternatives, s.Searched)
-	for _, rp := range s.Repairs() {
-		fmt.Fprintf(&b, "    repair %s → %s\n", rp[0], rp[1])
+	default:
+		fmt.Fprintf(&b, "  UNDETERMINED — no compensation found within the search budget (%d nodes); one may exist.\n", maxSynthNodes)
+		fmt.Fprintf(&b, "  A SAT/SMT encoding would settle it.\n")
 	}
 	return b.String()
 }
