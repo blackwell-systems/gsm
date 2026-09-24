@@ -471,7 +471,7 @@ Verification cost depends on state space size:
 
 State space grows as the **product** of variable domains: 5 enums × 100 ints = 500 states.
 
-Default limit: 2²⁰ ≈ 1M states. Configurable but exhaustive verification becomes slow beyond this.
+Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather than attempt an intractable enumeration; use `BuildCompositional` (or federation) to go beyond it.
 
 ### Runtime
 
@@ -499,8 +499,8 @@ This library verifies: **does your machine satisfy WFC and CC?**
 
 ## Limitations
 
-- **Finite variable domains** - Each variable's domain must be finite (no arbitrary strings or lists). The *global* state space need not be small: `BuildCompositional` certifies astronomically large product spaces when the machine decomposes into small footprint components, so "finite" is a per-variable constraint, not a ceiling on the whole state space
-- **Build-time cost** - Global `Build` enumerates the state space, so it slows past ~1M states; use `BuildCompositional` for machines that decompose into small footprint components (see [Compositional Verification](#compositional-verification)), where cost scales with the largest component rather than the whole machine
+- **Finite variable domains** - Each variable's domain must be finite (no arbitrary strings or lists). This is a per-variable constraint, not a global ceiling: `BuildCompositional` certifies machines whose product state space is astronomically large, as long as each footprint component is small
+- **Build-time cost** - Global `Build` enumerates the state space and hard-errors above 2²⁰ (~1M) states (a fixed cap, not configurable), so it does not degrade gracefully past that wall; use `BuildCompositional` for machines that decompose into small footprint components (see [Compositional Verification](#compositional-verification)), where cost scales with the largest component rather than the whole machine
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
 - **Federation** - Tree networks, multi-source acyclic DAGs (resolution operators), and monotone *cyclic* networks are all covered by the paper's proofs (Section 8). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2, monotonicity) by exhaustive build-time verification. Only *non-monotone* cycles and multi-source targets without a resolver are rejected at build
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
