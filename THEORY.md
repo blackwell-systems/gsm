@@ -627,10 +627,12 @@ a machine that applies events by computing at runtime rather than by table looku
 
 ### 9.6 Machine-checked meta-theory
 
-The Convergence Theorem (Newman's Lemma plus the WFC/CC discharge) and the soundness of gsm's
-own certification (footprint disjointness implies commutation; potential-decreasing repair
-terminates) are mechanized in Coq/Rocq, axiom-free (`Print Assumptions` reports "Closed under the
-global context"), with CI that gates on the axiom-free property. See the
+The Convergence Theorem (Newman's Lemma plus the WFC/CC discharge), the soundness of gsm's own
+certification (footprint disjointness implies commutation; potential-decreasing repair
+terminates), and the federated monotone-cycles result in full (the least fixed point by Kleene
+iteration, and asynchronous chaotic order-independent convergence to it) are mechanized in
+Coq/Rocq, axiom-free (`Print Assumptions` reports "Closed under the global context"), with CI
+that gates on the axiom-free property. See the
 [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq).
 
 ---
@@ -738,16 +740,20 @@ if cond(s) then s' = update(s)
 
 ### 11.2 State Space Explosion
 
-**Limitation**: State space grows as product of variable domains.
+**Limitation**: The global state space grows as the product of variable domains, so `Build`'s
+exhaustive enumeration is capped (currently 2²⁰ ≈ 1M states).
 
-**Example**: 10 variables with 10 values each = 10¹⁰ states (too large).
+**Example**: 10 variables with 10 values each = 10¹⁰ states, too large for `Build`.
 
-**Mitigation**:
-- Modular verification (verify subsystems independently)
-- Symmetry reduction (exploit equivalent states)
-- Partial order reduction (ignore irrelevant interleavings)
+**Mitigation (implemented)**: `Registry.BuildCompositional` verifies each **footprint component**
+independently over its own subspace, so certification cost is exponential in the largest
+component rather than the whole machine (see §9.5). The 10-variable example above certifies
+instantly when its invariants are footprint-local, even though the global space is 10¹⁰. This is
+the modular-verification mitigation, made sound by the mechanized footprint-disjointness result
+and by a build-time check that each closure respects its declared footprint.
 
-Current limit: 2²⁰ ≈ 1M states.
+**Further mitigations (future work)**: symmetry reduction (exploit equivalent states); partial
+order reduction (ignore irrelevant interleavings); symbolic verification for unbounded domains.
 
 ### 11.3 Dynamic Event Sets
 
