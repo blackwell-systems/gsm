@@ -17,6 +17,12 @@ gsm separates verification (build-time) from execution (runtime):
 
 All compensation is precomputed during `Build()`. The runtime `Machine` contains only lookup tables.
 
+There is also a build-time *synthesis* path (`synthesis.go`, `Registry.Synthesize`): the
+inverse of verification. Instead of checking a compensation you supplied, it searches — via
+backtracking with forward-checking — for a normal-form map on invalid states that satisfies CC,
+generating a convergent compensation (or proving none exists, with a witness). It shares the
+state-space enumeration and CC machinery with `Build`.
+
 ## State Representation
 
 ### Bitpacked Encoding

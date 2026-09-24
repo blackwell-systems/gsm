@@ -594,6 +594,24 @@ return CC_SUCCESS(disjoint_count, brute_force_count)
 
 **Proof**: By definition. If WFC holds, compensation terminates, so Phase 1 succeeds. If CC holds, all event pairs commute, so Phase 3 succeeds.
 
+### 9.4 Synthesis (the inverse problem)
+
+Verification asks: *does this compensation satisfy CC?* The inverse asks: *is there any
+compensation that does?* Since one-step compensation is WLOG for the convergence question
+(ρ* is a retraction of Σ onto the valid states, and any retraction is realized by a one-step
+ρ), synthesis reduces to searching for a **normal-form map** N: Σ_invalid → V such that the
+induced step tables satisfy CC1 and CC2. This is a finite CSP: each invalid state's repair
+target is a variable over V; CC1/CC2 are the constraints.
+
+`Registry.Synthesize` (see `synthesis.go`) solves it by backtracking with forward-checking —
+pruning partial assignments as soon as a fully-determined CC constraint is violated — returning
+a convergent compensation or, by exhaustion, proving none exists (with a witness: a critical
+pair of already-valid states no repair can reconcile). Because it chooses *among* the many
+convergent maps, a preference orders candidates (least-invasive by default) and branch-and-bound
+returns the provably minimum-cost one. The problem is NP-hard in general (worst-case
+exponential), but the finite state space makes it decidable, and pruning handles registries far
+beyond naive enumeration.
+
 ---
 
 ## 10. Comparison to Related Formalisms

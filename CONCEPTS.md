@@ -425,6 +425,16 @@ WFC failure: compensation does not terminate
 | **Footprint** | `Watches(vars...)` | Variables an invariant constrains |
 | **Write set** | `Writes(vars...)` | Variables an event modifies |
 | **Step table** | `step[e][s]` | Precomputed NF(apply(e, s)) |
+| **Synthesis** | `Registry.Synthesize` | Generate a CC-satisfying compensation from invariants + events (the inverse of verifying one) |
+| **Repair target** | `Synthesis.Repairs` | Where each invalid state is repaired to, in a synthesized compensation |
+| **Impossibility witness** | `Synthesis.Witness` | A critical pair no compensation can reconcile (why synthesis returned IMPOSSIBLE) |
+
+> **Synthesis vs. verification.** `Build` *checks* the compensation you supplied (WFC + CC).
+> `Synthesize` does the inverse: given only the invariants (validity) and events, it *searches*
+> for a normal-form map on invalid states that satisfies CC — returning a convergent
+> compensation (least-invasive by default; steer it with `Prefer`, or get the provably minimal
+> one with `Optimal`), or proving that none converges. Convergent is not the same as desirable:
+> it only makes orderings agree, so inspect or steer the repair.
 
 ---
 

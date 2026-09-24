@@ -106,6 +106,7 @@ s = machine.Apply(s, "process_payment") // Arrives after shipment
 - State space is finite and enumerable (< ~1M states)
 - You want mathematical convergence guarantees
 - Multiple registries share constraints across organizational boundaries (federated registry networks)
+- You want gsm to **synthesize** the compensation from your invariants + events (or prove none converges)
 - You're using Go
 
 **Don't use gsm when:**
@@ -346,6 +347,54 @@ CC (Compensation Commutativity): FAIL
 
 This shows the exact state and event pair where CC fails, plus the divergent traces.
 
+## Compensation Synthesis
+
+You don't have to *design* the compensation. Declare the invariants (what "valid" means) and
+the events, **omit `Repair`**, and gsm will **generate** a convergent compensation — or prove
+none exists.
+
+```go
+r := gsm.NewRegistry("order")
+// ... variables, invariants (Holds only — no Repair), events ...
+
+syn, _ := r.Synthesize()
+if !syn.Convergent {
+    fmt.Println(syn)   // if impossible, includes a witness: the critical pair no repair fixes
+    return
+}
+m := syn.Machine()      // a ready-to-use, verified-convergent Machine
+```
+
+Synthesis reframes convergence as a search for a **normal-form map** on invalid states that
+satisfies CC. It uses backtracking with forward-checking (pure Go, no solver dependency), so it
+scales well past naive enumeration, and it is honest about the boundary:
+
+- **Convergent** — a repair was found; `Machine()` is ready, `Repairs()` shows it.
+- **Impossible** (`Exhaustive`, not convergent) — no compensation converges. `Witness()` gives
+  a concrete reason (e.g. two events reaching *distinct already-valid states* — no repair can
+  reconcile them), so you know to redesign the **events**.
+- **Undetermined** (search budget hit) — none found within budget; one may exist. (A SAT/SMT
+  backend would settle these.)
+
+**Convergent ≠ desirable.** A synthesized repair only makes orderings agree. By default
+synthesis returns the **least-invasive** repair (fewest variables changed). Steer it with a
+policy, or get the provably minimum-cost repair:
+
+```go
+// bias toward a policy (ordering):
+syn, _ := r.SynthesizeWith(gsm.Prefer(func(from, to gsm.State) int {
+    if to.Get(status) == "cancelled" { return 5 } // avoid cancelling
+    return 1
+}))
+
+// or the provably minimum-cost convergent repair (branch-and-bound):
+syn, _ := r.SynthesizeWith(gsm.Prefer(cost), gsm.Optimal())
+```
+
+Synthesis is the inverse of `Build`: `Build` **verifies** a compensation you wrote;
+`Synthesize` **generates** one (or proves impossibility). It's a natural fit for tooling or
+LLM-authored policy — describe the rules, get a convergent machine with a proof.
+
 ## Performance
 
 ### Build Time
@@ -394,6 +443,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
 - **Federation** - Tree networks, multi-source acyclic DAGs (resolution operators), and monotone *cyclic* networks are all covered by the paper's proofs (Section 8). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2, monotonicity) by exhaustive build-time verification. Only *non-monotone* cycles and multi-source targets without a resolver are rejected at build
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
+- **Synthesis is worst-case exponential** - CC synthesis is NP-hard; the backtracking search prunes hard but can return UNDETERMINED beyond its budget (a SAT/SMT encoding would extend the reach). `Optimal` (branch-and-bound) is more expensive than the default first-found repair
 
 ## Multi-Language Support
 

@@ -15,6 +15,12 @@
 // without coordination. See Federation and FedMachine; the federated normal
 // form is constructive and never materializes the product state space.
 //
+// Beyond verifying a compensation you wrote, gsm can also SYNTHESIZE one:
+// Registry.Synthesize takes the invariants (validity) and events and generates a
+// convergent compensation — or proves none exists (with a witness). SynthesizeWith
+// lets a preference steer the choice, and Optimal returns the provably minimum-cost
+// repair. See Synthesize and Synthesis.
+//
 // This implements the single-registry model (Section 3) and the federated
 // convergence model (Section 8) of "Normalization Confluence in Federated
 // Registry Networks" (Blackwell, 2026).
