@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,8 @@ type Machine struct {
 	events map[string]int // event name → index
 	step   [][]uint64     // step[event][stateID] → normal form stateID
 	nf     []uint64       // nf[stateID] → normal form stateID
+
+	valid []bool // valid[stateID]: encoding is in-domain and satisfies all invariants
 
 	// Lazy path (BuildCompositional): for machines whose global state space is too
 	// large to tabulate, Apply/Normalize compute at runtime from the rules instead
@@ -252,4 +255,45 @@ func (m *Machine) Export(path string) error {
 	}
 
 	return nil
+}
+
+// WriteConvergenceTables writes the machine's step tables in the plain-text format
+// the external verified checker consumes (normalization-confluence coq/extraction):
+//
+//	V nE
+//	<event 0: V next-state ids>
+//	...
+//
+// It emits only VALID states, remapped to a compact 0..V-1 index (a valid state's
+// event-step is always a valid state, so the remapped tables are self-contained;
+// the invalid bit-encodings carry no real dynamics and are excluded). The
+// machine-checked checker then re-certifies, independently of this Go code, that
+// these tables converge (the per-event step functions commute and stay in range).
+// This is the differential-testing oracle for gsm's verification. Only available
+// for Build machines (compositional machines have no global tables).
+func (m *Machine) WriteConvergenceTables(path string) error {
+	if m.lazy {
+		return fmt.Errorf("gsm: WriteConvergenceTables needs global step tables (a Build machine), not a compositional one")
+	}
+	newID := make(map[uint64]int)
+	var order []uint64
+	for s := 0; s < len(m.nf); s++ {
+		if m.valid[s] {
+			newID[uint64(s)] = len(order)
+			order = append(order, uint64(s))
+		}
+	}
+	nE := len(m.step)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %d\n", len(order), nE)
+	for e := 0; e < nE; e++ {
+		for i, old := range order {
+			if i > 0 {
+				b.WriteByte(' ')
+			}
+			fmt.Fprintf(&b, "%d", newID[m.step[e][old]])
+		}
+		b.WriteByte('\n')
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }

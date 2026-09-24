@@ -133,6 +133,7 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 		events: make(map[string]int),
 		step:   step,
 		nf:     nf,
+		valid:  valid,
 	}
 	for i, ev := range r.events {
 		m.events[ev.name] = i
