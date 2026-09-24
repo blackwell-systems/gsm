@@ -635,6 +635,14 @@ Coq/Rocq, axiom-free (`Print Assumptions` reports "Closed under the global conte
 that gates on the axiom-free property. See the
 [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq).
 
+Beyond the meta-theory, gsm's own per-machine verification is **differentially tested** against
+the proof. A convergence checker is extracted from the Coq development (`coq/extraction`) to a
+runnable binary; `Machine.WriteConvergenceTables` emits a built machine's step tables, and the
+extracted, machine-checked checker re-certifies that they converge (the per-event step functions
+commute and stay in range) independently of gsm's Go. This catches the class of bug where gsm's
+hand-written verifier would wrongly accept a non-convergent machine: the extracted oracle,
+compiled from an axiom-free proof, would reject it.
+
 ---
 
 ## 10. Comparison to Related Formalisms
