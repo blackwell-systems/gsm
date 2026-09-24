@@ -253,6 +253,56 @@ func TestFederation_ResolverNonSharedWriteRejected(t *testing.T) {
 	}
 }
 
+// TestFederation_EmbedComposition demonstrates compositionality: a pricing→catalog
+// subsystem is defined and verified in isolation, then embedded into a larger system and
+// connected to an order registry. Upgrading pricing propagates through the embedded
+// subsystem and across the boundary — the composed federation is the flat convergent machine.
+func TestFederation_EmbedComposition(t *testing.T) {
+	// A reusable sub-federation, verified on its own first.
+	pricing := NewRegistry("pricing")
+	tier := pricing.Enum("tier", "free", "pro")
+	pricing.Event("upgrade").Writes(tier).
+		Guard(func(s State) bool { return s.Get(tier) == "free" }).
+		Apply(func(s State) State { return s.Set(tier, "pro") }).Add()
+	catalog := NewRegistry("catalog")
+	badge := catalog.Enum("badge", "none", "star")
+	badgeOf := map[string]string{"free": "none", "pro": "star"}
+	sub := NewFederation("pricing-sub").
+		Morphism(pricing, catalog).Shared(badge).
+		Map(func(srcNF, d State) State { return d.Set(badge, badgeOf[srcNF.Get(tier)]) }).Add()
+	if _, _, err := sub.Build(); err != nil {
+		t.Fatalf("sub-federation must verify in isolation: %v", err)
+	}
+
+	// Embed the verified subsystem into a larger system and connect it to an order registry.
+	order := NewRegistry("order")
+	perk := order.Enum("perk", "basic", "premium")
+	perkOf := map[string]string{"none": "basic", "star": "premium"}
+	outer := NewFederation("system").
+		Embed(sub).
+		Morphism(catalog, order).Shared(perk).
+		Map(func(srcNF, d State) State { return d.Set(perk, perkOf[srcNF.Get(badge)]) }).Add()
+	m, rep, err := outer.Build()
+	if err != nil {
+		t.Fatalf("embedded federation failed to build: %v\n%s", err, rep)
+	}
+	if len(m.Registries()) != 3 {
+		t.Fatalf("composed federation has %d components, want 3", len(m.Registries()))
+	}
+
+	// Pricing upgrade propagates pricing → catalog (embedded) → order (boundary).
+	s := m.Apply(m.NewState(), pricing, "upgrade")
+	if got := m.Of(s, catalog).Get(badge); got != "star" {
+		t.Fatalf("catalog badge = %s, want star (propagated inside the embedded subsystem)", got)
+	}
+	if got := m.Of(s, order).Get(perk); got != "premium" {
+		t.Fatalf("order perk = %s, want premium (propagated across the embed boundary)", got)
+	}
+	if !m.IsValid(s) {
+		t.Fatal("composed state is not federally valid")
+	}
+}
+
 // TestFederation_TenRegistryChain shows a federation scales to many registries: a 10-deep
 // chain r0→r1→…→r9 where each morphism copies its parent's flag. Turning the root on
 // propagates through all ten levels in a single ρ_Fed (topological order finalizes each

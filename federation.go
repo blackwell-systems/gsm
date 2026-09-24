@@ -82,6 +82,31 @@ func (f *Federation) AllowMonotoneCycles() *Federation {
 	return f
 }
 
+// Embed composes a sub-federation into this one: it brings in the sub-federation's component
+// registries, internal morphisms, and resolvers so that a subsystem can be defined and
+// verified independently (via its own Build) and then reused as a unit. After embedding,
+// connect the subsystem to the rest of the network with additional morphisms as usual.
+//
+// This realizes the compositionality of federated convergence (a convergent sub-federation
+// collapses to an effective registry): the composed federation's runtime is the flat
+// convergent machine over all components — no product state space is materialized, since a
+// FedState holds one State per component — and Build re-checks the (local) conditions on the
+// combined network. If boundary morphisms introduce a cycle, the usual rules apply: Build
+// rejects it unless AllowMonotoneCycles is set and the repair is monotone.
+func (f *Federation) Embed(sub *Federation) *Federation {
+	for _, r := range sub.comps {
+		f.register(r)
+	}
+	f.edges = append(f.edges, sub.edges...)
+	for r, res := range sub.resolvers {
+		f.resolvers[r] = res
+	}
+	if sub.allowCycles {
+		f.allowCycles = true
+	}
+	return f
+}
+
 // Add registers a component registry. Idempotent. Morphism also auto-registers its
 // endpoints, so Add is only needed for isolated components.
 func (f *Federation) Add(r *Registry) *Federation {

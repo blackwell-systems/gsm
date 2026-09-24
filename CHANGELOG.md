@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-23
+
+Federation beyond trees: monotone cyclic networks (`AllowMonotoneCycles`) and compositional construction (`Embed`). Additive over v0.3.0.
+
 ### Added
+- **Compositionality** (`Federation.Embed`): compose a sub-federation into a larger one — its component registries, internal morphisms, and resolvers are brought in as a unit, so a subsystem can be defined and verified independently (its own `Build`) and reused. Realizes the paper's compositional-collapse result: the composed federation runs as the flat convergent machine (a `FedState` holds one `State` per component, so no product state space is materialized), and `Build` re-checks the local conditions on the combined network. Cycles introduced across an embed boundary follow the usual rules (rejected unless `AllowMonotoneCycles` and monotone).
 - **Monotone cycles** (`Federation.AllowMonotoneCycles`): cyclic morphism networks are now supported when repair is monotone. By default the network must be acyclic; with this opt-in, `Build` instead requires every morphism/resolver to be **monotone** with respect to the componentwise order on variable values (verified per-node by finite enumeration), and `Normalize` computes the federated normal form by **Kleene iteration to the least fixed point** (reset shared components to ⊥, iterate repair to a fixed point) rather than a one-shot topological pass. This is the paper's *Monotone Convergence Despite Cycles* theorem (Knaster–Tarski + chaotic iteration): on ordered shared domains a monotone repair operator converges order-independently even on arbitrary cyclic graphs. Non-monotone cyclic networks (e.g. the negation counterexample) are rejected, as are cycles without the opt-in. State-based CRDTs are the compensation-free special case of this regime.
 
 ## [0.3.0] - 2026-09-23
