@@ -247,3 +247,67 @@ func ExampleMachine_Export() {
 	fmt.Println("Machine exported successfully")
 	// Output: Machine exported successfully
 }
+
+// ExampleFederation shows a worked federated registry network: two independently-governed
+// registries connected by a directed morphism. A manufacturer is authoritative over a
+// supplier's product listing (the "shared" component), while the supplier keeps its own
+// local state (whether the product is "featured"). The morphism re-derives the listing from
+// the manufacturer's status on every step, so the supplier can never override it — but the
+// supplier's local choices survive. gsm proves the whole network converges at build time.
+func ExampleFederation() {
+	// Manufacturer (authoritative source): a product's lifecycle status.
+	mfr := gsm.NewRegistry("manufacturer")
+	status := mfr.Enum("status", "draft", "active", "discontinued")
+	mfr.Event("publish").
+		Guard(func(s gsm.State) bool { return s.Get(status) == "draft" }).
+		Apply(func(s gsm.State) gsm.State { return s.Set(status, "active") }).
+		Add()
+
+	// Supplier (target): `listing` is controlled by the manufacturer (shared); `featured`
+	// is the supplier's own local flag (not controlled by the morphism).
+	sup := gsm.NewRegistry("supplier")
+	listing := sup.Enum("listing", "unlisted", "listed", "delisted")
+	featured := sup.Bool("featured")
+	sup.Event("feature").Writes(featured).
+		Apply(func(s gsm.State) gsm.State { return s.SetBool(featured, true) }).
+		Add()
+	sup.Event("mark_stale").Writes(listing).
+		Apply(func(s gsm.State) gsm.State { return s.Set(listing, "delisted") }).
+		Add()
+
+	// Morphism: the manufacturer's status deterministically fixes the supplier's listing.
+	image := map[string]string{"draft": "unlisted", "active": "listed", "discontinued": "delisted"}
+	fed := gsm.NewFederation("catalog").
+		Morphism(mfr, sup).
+		Shared(listing).
+		Map(func(srcNF, dst gsm.State) gsm.State { return dst.Set(listing, image[srcNF.Get(status)]) }).
+		Add()
+
+	m, _, err := fed.Build() // proves the whole network converges
+	if err != nil {
+		panic(err)
+	}
+
+	show := func(label string, fs gsm.FedState) {
+		fmt.Printf("%-27s status=%-12s listing=%-9s featured=%v\n",
+			label, m.Of(fs, mfr).Get(status), m.Of(fs, sup).Get(listing), m.Of(fs, sup).GetBool(featured))
+	}
+
+	s := m.NewState()
+	show("initial:", s)
+
+	s = m.Apply(s, sup, "feature") // supplier's own local choice
+	show("supplier features:", s)
+
+	s = m.Apply(s, sup, "mark_stale") // supplier tries to delist...
+	show("supplier delists:", s)      // ...ignored: manufacturer is authoritative (still draft)
+
+	s = m.Apply(s, mfr, "publish") // manufacturer publishes → listing becomes listed
+	show("manufacturer publishes:", s)
+
+	// Output:
+	// initial:                    status=draft        listing=unlisted  featured=false
+	// supplier features:          status=draft        listing=unlisted  featured=true
+	// supplier delists:           status=draft        listing=unlisted  featured=true
+	// manufacturer publishes:     status=active       listing=listed    featured=true
+}
