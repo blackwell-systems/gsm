@@ -177,6 +177,80 @@ func TestSynthesize_PreferenceOrdering(t *testing.T) {
 	}
 }
 
+// TestSynthesize_Optimal: branch-and-bound returns the provably minimum-cost convergent
+// repair. It must minimize the cost (flip with the cost function, not just follow order),
+// report proven optimality (Exhaustive), and never cost more than the first-found repair.
+func TestSynthesize_Optimal(t *testing.T) {
+	build := func() (*gsm.Registry, gsm.Var) {
+		r := gsm.NewRegistry("twochoice")
+		st := r.Enum("state", "ok1", "ok2", "broken")
+		r.Invariant("nb").Watches(st).Holds(func(s gsm.State) bool { return s.Get(st) != "broken" }).Add()
+		r.Event("noop").Apply(func(s gsm.State) gsm.State { return s }).Add()
+		return r, st
+	}
+	target := func(syn *gsm.Synthesis, st gsm.Var) string {
+		for _, rp := range syn.Repairs() {
+			if rp[0].Get(st) == "broken" {
+				return rp[1].Get(st)
+			}
+		}
+		return ""
+	}
+
+	// Cost favors ok2 → optimal picks ok2.
+	r, st := build()
+	o, err := r.SynthesizeWith(gsm.Prefer(func(_, to gsm.State) int {
+		if to.Get(st) == "ok2" {
+			return 1
+		}
+		return 3
+	}), gsm.Optimal())
+	if err != nil || !o.Convergent || !o.Exhaustive {
+		t.Fatalf("expected a proven-optimal convergent repair: %v\n%s", err, o)
+	}
+	if target(o, st) != "ok2" || o.Cost != 1 {
+		t.Fatalf("optimal repair = %s (cost %d), want ok2 (cost 1)", target(o, st), o.Cost)
+	}
+
+	// Flip the cost → optimal must flip to ok1 (proves it minimizes cost, not ordering).
+	r2, st2 := build()
+	o2, _ := r2.SynthesizeWith(gsm.Prefer(func(_, to gsm.State) int {
+		if to.Get(st2) == "ok1" {
+			return 1
+		}
+		return 3
+	}), gsm.Optimal())
+	if target(o2, st2) != "ok1" || o2.Cost != 1 {
+		t.Fatalf("optimal repair = %s (cost %d), want ok1 (cost 1)", target(o2, st2), o2.Cost)
+	}
+
+	// Guarantee on a bigger registry (the clamp): optimal cost ≤ first-found cost, proven.
+	rc := gsm.NewRegistry("clamp")
+	x := rc.Int("x", 0, 3)
+	y := rc.Bool("y")
+	z := rc.Bool("z")
+	rc.Invariant("x_le_1").Watches(x).Holds(func(s gsm.State) bool { return s.GetInt(x) <= 1 }).Add()
+	rc.Event("incx").Writes(x).Apply(func(s gsm.State) gsm.State {
+		v := s.GetInt(x)
+		if v < 3 {
+			v++
+		}
+		return s.SetInt(x, v)
+	}).Add()
+	rc.Event("flipy").Writes(y).Apply(func(s gsm.State) gsm.State { return s.SetBool(y, !s.GetBool(y)) }).Add()
+	rc.Event("flipz").Writes(z).Apply(func(s gsm.State) gsm.State { return s.SetBool(z, !s.GetBool(z)) }).Add()
+
+	def, _ := rc.Synthesize()
+	opt, _ := rc.SynthesizeWith(gsm.Optimal())
+	if !opt.Exhaustive {
+		t.Fatal("clamp optimal search should complete (proven optimal)")
+	}
+	if opt.Cost > def.Cost {
+		t.Fatalf("optimal cost %d exceeds first-found %d — optimal must be ≤", opt.Cost, def.Cost)
+	}
+	t.Logf("clamp: first-found cost=%d, optimal cost=%d (%d nodes)", def.Cost, opt.Cost, opt.Nodes)
+}
+
 // TestBuild_MissingRepairErrors: an invariant without a Repair is fine for Synthesize but
 // Build must refuse it with a clear message (not panic).
 func TestBuild_MissingRepairErrors(t *testing.T) {

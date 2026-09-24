@@ -15,6 +15,7 @@ type Synthesis struct {
 	Convergent bool // a convergent compensation was found
 	Exhaustive bool // the search completed; !Convergent && Exhaustive ⇒ provably impossible
 	Nodes      int  // backtracking nodes explored (transparency)
+	Cost       int  // total cost of the representative repair (min-cost when Optimal + Exhaustive)
 
 	r        *Registry
 	nf       []uint64 // representative convergent normal-form table (nil if none)
@@ -27,7 +28,8 @@ type Synthesis struct {
 type SynthOption func(*synthConfig)
 
 type synthConfig struct {
-	cost func(from, to State) int // per-repair cost for candidate ordering (nil → minimal-change)
+	cost    func(from, to State) int // per-repair cost (nil → minimal-change)
+	optimal bool                     // branch-and-bound for the provably minimum-cost repair
 }
 
 // Prefer biases synthesis toward the repairs you want. cost(from, to) scores repairing the
@@ -38,6 +40,16 @@ type synthConfig struct {
 // synthesis defaults to minimal-change (fewest variables altered).
 func Prefer(cost func(from, to State) int) SynthOption {
 	return func(c *synthConfig) { c.cost = cost }
+}
+
+// Optimal switches synthesis from returning the first (ordering-biased) convergent repair to
+// branch-and-bound for the provably minimum-cost one, under the Prefer cost (or the default
+// minimal-change cost). More expensive — it exhausts the pruned tree rather than stopping at
+// the first solution — but the result is guaranteed optimal when the search completes
+// (Exhaustive). If the budget is hit first, the result is the best found so far, not proven
+// optimal (Exhaustive=false).
+func Optimal() SynthOption {
+	return func(c *synthConfig) { c.optimal = true }
 }
 
 // Synthesize searches for a compensation (a normal-form map on invalid states) that makes the
@@ -119,12 +131,20 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 		}
 	}
 	targets := make([][]int, len(invalids))
+	costByInv := make([]map[int]int, len(invalids))
+	minTail := make([]int, len(invalids)+1) // minTail[k] = min achievable cost of invalids[k:]
+	minAt := make([]int, len(invalids))
 	for k, inv := range invalids {
 		invState := mk(inv)
 		ts := append([]int(nil), valids...)
 		costOf := make(map[int]int, len(ts))
+		best := int(^uint(0) >> 1)
 		for _, t := range ts {
-			costOf[t] = cost(invState, mk(t))
+			c := cost(invState, mk(t))
+			costOf[t] = c
+			if c < best {
+				best = c
+			}
 		}
 		sort.Slice(ts, func(a, b int) bool {
 			if costOf[ts[a]] != costOf[ts[b]] {
@@ -133,6 +153,11 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 			return ts[a] < ts[b]
 		})
 		targets[k] = ts
+		costByInv[k] = costOf
+		minAt[k] = best
+	}
+	for k := len(invalids) - 1; k >= 0; k-- {
+		minTail[k] = minTail[k+1] + minAt[k] // admissible lower bound on remaining cost
 	}
 
 	// nf starts as identity; valid and non-encoding states are permanently "assigned".
@@ -143,22 +168,34 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 		assigned[s] = validEnc[s] && isValidState[s] || !validEnc[s]
 	}
 
-	// Order the decision variables most-constrained-first is a nice-to-have; index order is
-	// fine and deterministic. Backtracking with forward-checking prunes the tree.
+	// Backtracking with forward-checking (CC pruning). In Optimal mode it also branch-and-bounds
+	// on accumulated cost, keeping the best complete solution; otherwise it stops at the first.
 	nodes := 0
 	budgetHit := false
+	maxInt := int(^uint(0) >> 1)
 	var solution []uint64
-	var bt func(k int) bool
-	bt = func(k int) bool {
+	bestCost := maxInt
+	var bt func(k, partial int) bool // returns true to stop early (first-found mode only)
+	bt = func(k, partial int) bool {
 		if nodes >= maxSynthNodes {
 			budgetHit = true
 			return false
 		}
 		nodes++
+		if cfg.optimal && partial+minTail[k] >= bestCost {
+			return false // no completion can beat the best found — prune
+		}
 		if k == len(invalids) {
 			if ccHolds(nf, rawStep, validEnc, isValidState, pairs) {
-				solution = append([]uint64(nil), nf...)
-				return true
+				if !cfg.optimal {
+					solution = append([]uint64(nil), nf...)
+					bestCost = partial
+					return true
+				}
+				if partial < bestCost {
+					bestCost = partial
+					solution = append([]uint64(nil), nf...)
+				}
 			}
 			return false
 		}
@@ -167,7 +204,7 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 			nf[inv] = uint64(target)
 			assigned[inv] = true
 			if forwardCheck(nf, assigned, rawStep, validEnc, isValidState, pairs) {
-				if bt(k + 1) {
+				if bt(k+1, partial+costByInv[k][target]) {
 					return true
 				}
 			}
@@ -179,13 +216,17 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 		assigned[inv] = false
 		return false
 	}
-	found := bt(0)
+	bt(0, 0)
+	found := solution != nil
 
 	out := &Synthesis{
 		Convergent: found,
 		Exhaustive: !budgetHit,
 		Nodes:      nodes,
 		r:          r,
+	}
+	if found {
+		out.Cost = bestCost
 	}
 	if !found && !budgetHit {
 		out.witness = r.impossibilityWitness(rawStep, isValidState, pairs)
@@ -371,7 +412,7 @@ func (s *Synthesis) String() string {
 	fmt.Fprintf(&b, "Synthesis: %s (%d nodes)\n", s.r.name, s.Nodes)
 	switch {
 	case s.Convergent:
-		fmt.Fprintf(&b, "  CONVERGENT — synthesized a compensation. Representative repair:\n")
+		fmt.Fprintf(&b, "  CONVERGENT — synthesized a compensation (cost %d). Representative repair:\n", s.Cost)
 		for _, rp := range s.Repairs() {
 			fmt.Fprintf(&b, "    repair %s → %s\n", rp[0], rp[1])
 		}
