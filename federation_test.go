@@ -128,6 +128,33 @@ func TestFederation_CycleRejected(t *testing.T) {
 	}
 }
 
+// TestFederation_ReportAndAccessors covers the explicit Add path, the machine name accessor,
+// and the human-readable FedReport rendering.
+func TestFederation_ReportAndAccessors(t *testing.T) {
+	m, rep, _, _, _ := func() (*FedMachine, *FedReport, *Registry, *Registry, error) {
+		mfr := NewRegistry("manufacturer")
+		mstate := mfr.Enum("mstate", "draft", "active")
+		mfr.Event("epub").Apply(func(s State) State { return s.Set(mstate, "active") }).Add()
+		sup := NewRegistry("supplier")
+		sstate := sup.Enum("sstate", "idle", "listed")
+		image := map[string]string{"draft": "idle", "active": "listed"}
+		fed := NewFederation("mfr-sup-2").
+			Add(mfr). // explicit Add of an already-referenced component (idempotent)
+			Morphism(mfr, sup).Shared(sstate).
+			Map(func(srcNF, dst State) State { return dst.Set(sstate, image[srcNF.Get(mstate)]) }).Add()
+		mm, rr, err := fed.Build()
+		return mm, rr, mfr, sup, err
+	}()
+
+	if m.Name() != "mfr-sup-2" {
+		t.Fatalf("FedMachine.Name() = %q, want mfr-sup-2", m.Name())
+	}
+	s := rep.String()
+	if !strings.Contains(s, "mfr-sup-2") || !strings.Contains(s, "Morphisms:") {
+		t.Fatalf("FedReport.String() missing expected content:\n%s", s)
+	}
+}
+
 // TestFederation_ApplyNamed exercises name-keyed application (the form event-sourced replay
 // uses) including graceful errors for unknown registry and unknown event.
 func TestFederation_ApplyNamed(t *testing.T) {
