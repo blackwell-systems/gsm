@@ -43,6 +43,45 @@ func TestSugar_LowersToPrimitives(t *testing.T) {
 	}
 }
 
+// TestSugar_LabelAndRelationLowering checks the enum-by-label and two-variable
+// relation sugar lowers to the expected numeric/combinator AST, and that a typo in
+// a label is caught immediately.
+func TestSugar_LabelAndRelationLowering(t *testing.T) {
+	r := gsm.NewRegistry("labels")
+	state := r.Enum("state", "closed", "open", "locked") // indices 0,1,2
+	other := r.Enum("other", "a", "b")
+
+	// IsLabel / SetLabel resolve labels to indices; serialize to prove it.
+	r.Rule("stay_open").Require(gsm.IsLabel(state, "open")).RepairWith(gsm.SetLabel(state, "open")).Add()
+	// A two-variable relation and a Toggle-style write on enums (index arithmetic).
+	r.On("sync").Does(gsm.Copy(other, state)).Add()
+
+	var buf bytes.Buffer
+	if err := r.WriteMachineAST(&buf); err != nil {
+		t.Fatalf("WriteMachineAST: %v", err)
+	}
+	got := buf.String()
+	// "open" is index 1; SetLabel(state,"open") -> (set 0 (lit 1)); IsLabel -> (eq (var 0) (lit 1)).
+	wantInv := "(inv (eq (var 0) (lit 1)) (do (set 0 (lit 1))))"
+	wantEv := "(ev (do (set 1 (var 0))))"
+	if !bytes.Contains(buf.Bytes(), []byte(wantInv)) {
+		t.Fatalf("label sugar did not lower as expected:\nwant substring: %s\ngot:\n%s", wantInv, got)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(wantEv)) {
+		t.Fatalf("Copy did not lower as expected:\nwant substring: %s\ngot:\n%s", wantEv, got)
+	}
+
+	// A typo in a label is a construction-time panic, not a silent wrong index.
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic on unknown enum label")
+			}
+		}()
+		_ = gsm.IsLabel(state, "nope")
+	}()
+}
+
 // TestSugar_BuildsConvergent confirms the friendly surface still builds a convergent
 // machine (WFC+CC) and behaves: a is capped at 3, independent events commute.
 func TestSugar_BuildsConvergent(t *testing.T) {

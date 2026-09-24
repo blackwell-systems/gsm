@@ -9,6 +9,8 @@ package gsm
 // checker. Keep them separate on purpose: sugar may grow freely as long as it only
 // ever desugars to primitives.
 
+import "fmt"
+
 // ---- predicate sugar (reads as a sentence, lowers to a combinator Pred) ----
 
 // AtMost: v <= n.
@@ -32,6 +34,55 @@ func IsNot(v Var, n int) Pred { return Ne(V(v), Lit(n)) }
 // InRange: lo <= v <= hi.
 func InRange(v Var, lo, hi int) Pred { return And(AtLeast(v, lo), AtMost(v, hi)) }
 
+// Between is a synonym for InRange (lo <= v <= hi).
+func Between(v Var, lo, hi int) Pred { return InRange(v, lo, hi) }
+
+// ---- two-variable relations (lower to a combinator Pred over both vars) ----
+
+// AtMostVar: a <= b.
+func AtMostVar(a, b Var) Pred { return Le(V(a), V(b)) }
+
+// AtLeastVar: a >= b.
+func AtLeastVar(a, b Var) Pred { return Ge(V(a), V(b)) }
+
+// BelowVar: a < b.
+func BelowVar(a, b Var) Pred { return Lt(V(a), V(b)) }
+
+// AboveVar: a > b.
+func AboveVar(a, b Var) Pred { return Gt(V(a), V(b)) }
+
+// SameAs: a == b.
+func SameAs(a, b Var) Pred { return Eq(V(a), V(b)) }
+
+// DiffersFrom: a != b.
+func DiffersFrom(a, b Var) Pred { return Ne(V(a), V(b)) }
+
+// ---- enum-by-label ergonomics (resolve a label to its index, lower to numbers) ----
+
+// mustLabel resolves an enum value's label to its integer index, panicking with a
+// clear message on a typo or a non-enum variable. Rule construction is programmer
+// code, so a bad label literal is a programming error surfaced immediately, and the
+// resulting AST carries only the numeric index the analyzable core understands.
+func mustLabel(v Var, label string) int {
+	if v.kind != EnumKind {
+		panic(fmt.Sprintf("gsm: %s(%q): variable %q is not an enum", "label helper", label, v.name))
+	}
+	i, err := v.enumIndex(label)
+	if err != nil {
+		panic("gsm: " + err.Error())
+	}
+	return i
+}
+
+// IsLabel: enum v equals the value named label.
+func IsLabel(v Var, label string) Pred { return Eq(V(v), Lit(mustLabel(v, label))) }
+
+// IsNotLabel: enum v is not the value named label.
+func IsNotLabel(v Var, label string) Pred { return Ne(V(v), Lit(mustLabel(v, label))) }
+
+// SetLabel assigns enum v to the value named label.
+func SetLabel(v Var, label string) Transform { return Do(Set(v, Lit(mustLabel(v, label)))) }
+
 // ---- transform sugar (lowers to a combinator Transform) ----
 
 // SetTo assigns v := n.
@@ -54,6 +105,12 @@ func Raise(v Var) Transform { return Do(Set(v, Lit(1))) }
 
 // Lower sets a Bool false (v := 0).
 func Lower(v Var) Transform { return Do(Set(v, Lit(0))) }
+
+// Toggle flips a Bool: v := 1 - v.
+func Toggle(v Var) Transform { return Do(Set(v, Sub(Lit(1), V(v)))) }
+
+// Copy assigns dst := src.
+func Copy(dst, src Var) Transform { return Do(Set(dst, V(src))) }
 
 // ---- fluent rule/event builders (lower to DeclInvariant/DeclEvent) ----
 
