@@ -131,12 +131,13 @@ type fedEdge struct {
 // FedMachine is an immutable, constructive federated normalizer. It holds the component
 // machines separately (never a product machine) and applies the two-phase operator ρ_Fed.
 type FedMachine struct {
-	name  string
-	comps []*Machine
-	idx   map[*Registry]int
-	edges []fedEdge
-	topo  []int   // component indices in topological (source-first) order
-	out   [][]int // out[i] = indices into edges for morphisms with src == i
+	name   string
+	comps  []*Machine
+	idx    map[*Registry]int
+	byName map[string]*Registry // component name → registry, for name-keyed replay
+	edges  []fedEdge
+	topo   []int   // component indices in topological (source-first) order
+	out    [][]int // out[i] = indices into edges for morphisms with src == i
 }
 
 // FedState is a compact federated state: one component State per registry.
@@ -157,12 +158,14 @@ type FedState struct {
 // exists if convergence is guaranteed.
 func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	m := &FedMachine{
-		name:  f.name,
-		comps: make([]*Machine, len(f.comps)),
-		idx:   map[*Registry]int{},
+		name:   f.name,
+		comps:  make([]*Machine, len(f.comps)),
+		idx:    map[*Registry]int{},
+		byName: make(map[string]*Registry, len(f.comps)),
 	}
 	for r, i := range f.idx {
 		m.idx[r] = i
+		m.byName[r.name] = r
 	}
 
 	report := &FedReport{Name: f.name, Edges: len(f.edges)}
@@ -200,6 +203,16 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 
 // verify enforces the structural conditions the federated convergence theorem requires.
 func (f *Federation) verify() error {
+	// Distinct component names: name-keyed replay (FedMachine.ApplyNamed) would be ambiguous
+	// otherwise.
+	seen := make(map[string]bool, len(f.comps))
+	for _, r := range f.comps {
+		if seen[r.name] {
+			return fmt.Errorf("gsm: duplicate component registry name %q in federation %q", r.name, f.name)
+		}
+		seen[r.name] = true
+	}
+
 	// Multi-source rejection (Remark 8.15): a target with two incoming morphisms breaks the
 	// authority argument — no single source determines its shared component.
 	indeg := make([]int, len(f.comps))
@@ -367,6 +380,31 @@ func (m *FedMachine) Apply(fs FedState, r *Registry, event string) FedState {
 	next := fs.clone()
 	next.states[i] = m.comps[i].Apply(next.states[i], event)
 	return m.Normalize(next)
+}
+
+// Registries returns the component registry names, in declaration order.
+func (m *FedMachine) Registries() []string {
+	names := make([]string, len(m.comps))
+	for i, c := range m.comps {
+		names[i] = c.name
+	}
+	return names
+}
+
+// ApplyNamed is Apply keyed by registry name rather than pointer — the form needed for
+// event-sourced replay, where a durable log holds (registry, event) strings, not live
+// *Registry handles. Returns an error (rather than panicking) for an unknown registry or
+// event, so a stale or corrupt log fails gracefully on reconstruction.
+func (m *FedMachine) ApplyNamed(fs FedState, registry, event string) (FedState, error) {
+	r, ok := m.byName[registry]
+	if !ok {
+		return fs, fmt.Errorf("gsm: unknown registry %q in federation %q", registry, m.name)
+	}
+	comp := m.comps[m.idx[r]]
+	if _, ok := comp.events[event]; !ok {
+		return fs, fmt.Errorf("gsm: registry %q has no event %q", registry, event)
+	}
+	return m.Apply(fs, r, event), nil
 }
 
 // IsValid reports whether the federated state satisfies every local invariant and every

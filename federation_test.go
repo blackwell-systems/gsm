@@ -128,6 +128,50 @@ func TestFederation_CycleRejected(t *testing.T) {
 	}
 }
 
+// TestFederation_ApplyNamed exercises name-keyed application (the form event-sourced replay
+// uses) including graceful errors for unknown registry and unknown event.
+func TestFederation_ApplyNamed(t *testing.T) {
+	m, _, sup, _, sstate := buildManufacturerSupplier(t)
+
+	// Registries reports both component names.
+	names := m.Registries()
+	if len(names) != 2 {
+		t.Fatalf("Registries() = %v, want 2 names", names)
+	}
+
+	fs, err := m.ApplyNamed(m.NewState(), "manufacturer", "epub")
+	if err != nil {
+		t.Fatalf("ApplyNamed(manufacturer, epub): %v", err)
+	}
+	if ss := m.Of(fs, sup).Get(sstate); ss != "listed" {
+		t.Fatalf("after named epub, supplier = %s, want listed", ss)
+	}
+
+	if _, err := m.ApplyNamed(fs, "nonesuch", "epub"); err == nil {
+		t.Fatal("expected error for unknown registry")
+	}
+	if _, err := m.ApplyNamed(fs, "manufacturer", "nonesuch"); err == nil {
+		t.Fatal("expected error for unknown event")
+	}
+}
+
+// TestFederation_DuplicateNameRejected confirms Build refuses two components sharing a name
+// (name-keyed replay would be ambiguous).
+func TestFederation_DuplicateNameRejected(t *testing.T) {
+	a := NewRegistry("dup")
+	ax := a.Bool("ax")
+	b := NewRegistry("dup") // same name
+	bx := b.Bool("bx")
+
+	fed := NewFederation("dupe").
+		Morphism(a, b).Shared(bx).
+		Map(func(srcNF, dst State) State { return dst.SetBool(bx, srcNF.GetBool(ax)) }).Add()
+
+	if _, _, err := fed.Build(); err == nil {
+		t.Fatal("expected Build to reject duplicate component names, got nil error")
+	}
+}
+
 // TestFederation_M1Rejected confirms Build refuses a morphism that can drive the target
 // invalid (M1 violation, Prop 8.14). Target B requires flag=false; the morphism copies the
 // source's boolean into flag, so a source with x=true would make B invalid.
