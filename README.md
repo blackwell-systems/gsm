@@ -281,7 +281,22 @@ s = m.Apply(s, mfr, "epub") // ...manufacturer acts; morphism repair re-derives 
 
 **The build-time contract, extended.** `Build()` refuses any federation that cannot converge: the network must be a tree/forest (no cycles; at most one source per target), component names must be distinct, and every morphism must preserve target validity when it overwrites the shared component (the *M1* condition). A federated machine exists only if the whole network is proven convergent. The federated normal form is *constructive* - each source normalizes independently, then shared components propagate along morphisms in topological order - so federation never materializes the product state space.
 
-> Federation implements **Section 8** (Federated Convergence) of the paper. The current boundary is **multi-source** targets - one registry constrained by two independent sources - which `Build()` rejects; resolving them needs machinery beyond the authority argument (the paper's "natural next problem").
+**Multi-source targets (beyond the paper).** When a target has *two* sources, the authority argument doesn't pick a winner — so the target declares a `Resolver` that deterministically merges its sources (priority, AND/OR, most-restrictive, etc.), relaxing the tree requirement to any acyclic DAG:
+
+```go
+fed.Morphism(hr, door).Shared(access).Map(...).Add().
+    Morphism(security, door).Shared(access).Map(...).Add().
+    Resolve(door, func(dst gsm.State, src map[string]gsm.State) gsm.State {
+        if src["hr"].GetBool(employed) && src["security"].GetBool(cleared) {
+            return dst.Set(access, "granted") // AND: both sources must agree
+        }
+        return dst.Set(access, "denied")
+    })
+```
+
+This extends **past the paper's tree-only theorem** (§8, Remark 8.15 leaves it open because the merge is domain logic, not math). gsm makes it safe the way it handles single registries — not by a general proof, but by **exhaustively verifying at build time** that, for *this* federation, the resolver writes only shared variables, preserves target validity for every reachable source combination, and depends only on the sources. A resolver that could diverge is rejected. A multi-source target *without* a resolver is still rejected.
+
+> Federation implements **Section 8** (Federated Convergence) of the paper for tree-shaped networks; multi-source DAGs are a gsm extension, guaranteed per-federation by exhaustive build-time verification rather than by the paper's proof.
 
 ## Verification Report
 
@@ -361,7 +376,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 - **Finite state spaces only** - Cannot model unbounded domains (arbitrary strings, lists)
 - **Build-time cost** - Large state spaces (> 1M states) verification becomes slow
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
-- **Federation: tree-shaped networks** - Registries federate via directed morphisms (Section 8); multi-source targets (one registry constrained by two independent sources) are not yet supported and are rejected at build time
+- **Federation** - Tree-shaped networks are covered by the paper's proof (Section 8); multi-source DAGs are supported via user-declared `Resolver`s, guaranteed per-federation by exhaustive build-time verification rather than by a general theorem. Cyclic networks and multi-source targets without a resolver are rejected at build
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
 
 ## Multi-Language Support

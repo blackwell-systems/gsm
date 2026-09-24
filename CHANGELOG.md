@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Multi-source federation via resolvers** (`Resolver`, `Federation.Resolve`): a federation target may now have more than one source (an acyclic DAG, not just a tree). Such a target declares a `Resolver(dst, sources)` that deterministically merges its sources' states into its shared component (priority, AND/OR, most-restrictive, etc.) — a merge no single-authority morphism can express. This extends **beyond the paper's tree-only theorem** (Section 8 leaves multi-source open, Remark 8.15, because the merge is domain logic). gsm makes it safe not by a general proof but by **exhaustive build-time verification**: `Build` checks that the resolver writes only shared variables, preserves target validity for every reachable combination of valid source states, and depends only on the sources (not the target's local state); determinism gives order-independence. A multi-source target without a resolver — or a resolver that could diverge, read local state, or write non-shared variables — is rejected. Single-source (tree) federations are unchanged and remain backed by the paper's proof.
+
 ## [0.2.0] - 2026-09-23
 
 Federated registry networks: gsm now composes multiple registries connected by directed morphisms and proves the whole network converges (Section 8 of the paper), in addition to the single-registry model. Additive — no breaking changes to the single-registry API.

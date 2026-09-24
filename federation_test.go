@@ -110,6 +110,149 @@ func TestFederation_Authority(t *testing.T) {
 	}
 }
 
+// idMap is an identity Map for edges into a resolved target (superseded by the resolver).
+func idMap(srcNF, dst State) State { return dst }
+
+// buildAccessControl builds a multi-source (DAG) federation: independent HR and Security
+// registries both feed a Door, whose access is granted only if HR says employed AND Security
+// says cleared — an AND merge no single authority could express. The resolver makes it
+// converge; Build verifies the merge exhaustively.
+func buildAccessControl(t *testing.T) (m *FedMachine, hr, sec, door *Registry, access Var) {
+	t.Helper()
+	hr = NewRegistry("hr")
+	employed := hr.Bool("employed")
+	hr.Event("hire").Writes(employed).Apply(func(s State) State { return s.SetBool(employed, true) }).Add()
+	hr.Event("terminate").Writes(employed).Apply(func(s State) State { return s.SetBool(employed, false) }).Add()
+
+	sec = NewRegistry("security")
+	cleared := sec.Bool("cleared")
+	sec.Event("grant_clearance").Writes(cleared).Apply(func(s State) State { return s.SetBool(cleared, true) }).Add()
+	sec.Event("revoke").Writes(cleared).Apply(func(s State) State { return s.SetBool(cleared, false) }).Add()
+
+	door = NewRegistry("door")
+	access = door.Enum("access", "denied", "granted")
+
+	fed := NewFederation("access").
+		Morphism(hr, door).Shared(access).Map(idMap).Add().
+		Morphism(sec, door).Shared(access).Map(idMap).Add().
+		Resolve(door, func(dst State, src map[string]State) State {
+			if src["hr"].GetBool(employed) && src["security"].GetBool(cleared) {
+				return dst.Set(access, "granted")
+			}
+			return dst.Set(access, "denied")
+		})
+
+	mm, rep, err := fed.Build()
+	if err != nil {
+		t.Fatalf("access-control federation failed to build: %v\n%s", err, rep)
+	}
+	return mm, hr, sec, door, access
+}
+
+// TestFederation_MultiSourceResolver is the M4 headline: a DAG target with two independent
+// sources converges via a declared resolver. Access is granted only when BOTH sources agree,
+// and the result is order-independent.
+func TestFederation_MultiSourceResolver(t *testing.T) {
+	m, hr, sec, door, access := buildAccessControl(t)
+	get := func(fs FedState) string { return m.Of(fs, door).Get(access) }
+
+	s := m.NewState()
+	if get(m.Normalize(s)) != "denied" {
+		t.Fatalf("initial access = %s, want denied", get(m.Normalize(s)))
+	}
+	s = m.Apply(s, hr, "hire")
+	if get(s) != "denied" {
+		t.Fatalf("employed-only access = %s, want denied (needs both)", get(s))
+	}
+	s = m.Apply(s, sec, "grant_clearance")
+	if get(s) != "granted" {
+		t.Fatalf("both-conditions access = %s, want granted", get(s))
+	}
+	s = m.Apply(s, sec, "revoke")
+	if get(s) != "denied" {
+		t.Fatalf("post-revoke access = %s, want denied (merge re-evaluates)", get(s))
+	}
+
+	// Order independence across the two independent sources.
+	a := m.Apply(m.Apply(m.NewState(), hr, "hire"), sec, "grant_clearance")
+	b := m.Apply(m.Apply(m.NewState(), sec, "grant_clearance"), hr, "hire")
+	if m.Of(a, door).ID() != m.Of(b, door).ID() {
+		t.Fatalf("multi-source order dependence: %s vs %s", get(a), get(b))
+	}
+	if get(a) != "granted" || !m.IsValid(a) {
+		t.Fatalf("converged multi-source state wrong: access=%s valid=%v", get(a), m.IsValid(a))
+	}
+}
+
+// buildBadDoor wires HR+Security into a Door with a local `logged` flag and a
+// "granted requires logged" invariant. The resolver is built by `mk`, which receives the
+// live Var handles so each rejection test can express a specific fault.
+func buildBadDoor(name string, mk func(access, logged, employed, cleared Var) Resolver) *Federation {
+	hr := NewRegistry("hr")
+	employed := hr.Bool("employed")
+	hr.Event("hire").Writes(employed).Apply(func(s State) State { return s.SetBool(employed, true) }).Add()
+	sec := NewRegistry("security")
+	cleared := sec.Bool("cleared")
+	sec.Event("clear").Writes(cleared).Apply(func(s State) State { return s.SetBool(cleared, true) }).Add()
+
+	door := NewRegistry("door")
+	access := door.Enum("access", "denied", "granted")
+	logged := door.Bool("logged")
+	door.Invariant("granted_needs_log").Watches(access, logged).
+		Holds(func(s State) bool { return s.Get(access) != "granted" || s.GetBool(logged) }).
+		Repair(func(s State) State { return s.Set(access, "denied") }).Add()
+
+	return NewFederation(name).
+		Morphism(hr, door).Shared(access).Map(idMap).Add().
+		Morphism(sec, door).Shared(access).Map(idMap).Add().
+		Resolve(door, mk(access, logged, employed, cleared))
+}
+
+// TestFederation_ResolverValidityRejected: a resolver that can produce an invalid target
+// (grants without the required log) is rejected at build.
+func TestFederation_ResolverValidityRejected(t *testing.T) {
+	fed := buildBadDoor("bad-validity", func(access, logged, employed, cleared Var) Resolver {
+		return func(dst State, src map[string]State) State {
+			if src["hr"].GetBool(employed) && src["security"].GetBool(cleared) {
+				return dst.Set(access, "granted") // ignores `logged` → can be invalid
+			}
+			return dst.Set(access, "denied")
+		}
+	})
+	if _, _, err := fed.Build(); err == nil || !strings.Contains(err.Error(), "invalid target") {
+		t.Fatalf("expected M1-for-merge rejection, got: %v", err)
+	}
+}
+
+// TestFederation_ResolverLocalDependenceRejected: a resolver whose shared output depends on
+// the target's local state (not just the sources) is rejected.
+func TestFederation_ResolverLocalDependenceRejected(t *testing.T) {
+	fed := buildBadDoor("bad-local", func(access, logged, employed, cleared Var) Resolver {
+		return func(dst State, src map[string]State) State {
+			if dst.GetBool(logged) { // reads the target's local state — forbidden
+				return dst.Set(access, "granted")
+			}
+			return dst.Set(access, "denied")
+		}
+	})
+	if _, _, err := fed.Build(); err == nil || !strings.Contains(err.Error(), "local state") {
+		t.Fatalf("expected source-determinacy rejection, got: %v", err)
+	}
+}
+
+// TestFederation_ResolverNonSharedWriteRejected: a resolver that writes a non-shared target
+// variable is rejected.
+func TestFederation_ResolverNonSharedWriteRejected(t *testing.T) {
+	fed := buildBadDoor("bad-write", func(access, logged, employed, cleared Var) Resolver {
+		return func(dst State, src map[string]State) State {
+			return dst.Set(access, "denied").SetBool(logged, true) // writes non-shared `logged`
+		}
+	})
+	if _, _, err := fed.Build(); err == nil || !strings.Contains(err.Error(), "non-shared") {
+		t.Fatalf("expected non-shared-write rejection, got: %v", err)
+	}
+}
+
 // TestFederation_TenRegistryChain shows a federation scales to many registries: a 10-deep
 // chain r0→r1→…→r9 where each morphism copies its parent's flag. Turning the root on
 // propagates through all ten levels in a single ρ_Fed (topological order finalizes each
