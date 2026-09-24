@@ -594,7 +594,7 @@ return CC_SUCCESS(disjoint_count, brute_force_count)
 
 **Proof**: By definition. If WFC holds, compensation terminates, so Phase 1 succeeds. If CC holds, all event pairs commute, so Phase 3 succeeds.
 
-### 9.4 Synthesis (the inverse problem)
+### 9.5 Synthesis (the inverse problem)
 
 Verification asks: *does this compensation satisfy CC?* The inverse asks: *is there any
 compensation that does?* Since one-step compensation is WLOG for the convergence question
@@ -612,7 +612,7 @@ returns the provably minimum-cost one. The problem is NP-hard in general (worst-
 exponential), but the finite state space makes it decidable, and pruning handles registries far
 beyond naive enumeration.
 
-### 9.5 Footprint-local verification (beyond global enumeration)
+### 9.6 Footprint-local verification (beyond global enumeration)
 
 The Phase 1 and Phase 3 algorithms above enumerate the global state space S, which bounds them
 to small machines. But WFC and CC are local: a repair and an event effect touch only their
@@ -625,7 +625,7 @@ even when |S| is astronomically large. It relies on the declared footprints bein
 the disjointness path in `Build` already does) and on the zero state being valid, and it returns
 a machine that applies events by computing at runtime rather than by table lookup.
 
-### 9.6 Machine-checked meta-theory
+### 9.7 Machine-checked meta-theory
 
 The Convergence Theorem (Newman's Lemma plus the WFC/CC discharge), the soundness of gsm's own
 certification (footprint disjointness implies commutation; potential-decreasing repair
@@ -790,7 +790,7 @@ exhaustive enumeration is capped (currently 2²⁰ ≈ 1M states).
 
 **Mitigation (implemented)**: `Registry.BuildCompositional` verifies each **footprint component**
 independently over its own subspace, so certification cost is exponential in the largest
-component rather than the whole machine (see §9.5). The 10-variable example above certifies
+component rather than the whole machine (see §9.6). The 10-variable example above certifies
 instantly when its invariants are footprint-local, even though the global space is 10¹⁰. This is
 the modular-verification mitigation, made sound by the mechanized footprint-disjointness result
 and by a build-time check that each closure respects its declared footprint.
