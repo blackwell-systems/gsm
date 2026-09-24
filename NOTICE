@@ -1,0 +1,12 @@
+gsm — Governed State Machines
+Copyright 2026 Dayna Blackwell
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This library implements the normalization-confluence theory described in:
+  - Dayna Blackwell, "Normalization Confluence for Registry-Governed Stream
+    Processing," Zenodo, 2026. DOI: 10.5281/zenodo.18671870
+  - Dayna Blackwell, "Normalization Confluence in Federated Registry Networks,"
+    Zenodo, 2026. DOI: 10.5281/zenodo.18677400
+
+The accompanying papers are licensed separately under CC-BY-4.0.

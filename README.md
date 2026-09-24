@@ -454,7 +454,7 @@ Tests cover:
 
 ## License
 
-MIT License - see LICENSE file
+Apache License 2.0 - see [LICENSE](LICENSE) and [NOTICE](NOTICE). The accompanying papers are licensed separately under CC-BY-4.0.
 
 ## Citation
 
