@@ -14,6 +14,8 @@ What if distributed systems don't have to coordinate - because they agree on the
 
 CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
+Registries also **federate**: connect independently-governed machines with directed morphisms that encode cross-organizational constraints - a manufacturer's status constrains a supplier's listing, a regulator's rules constrain a bank - and `gsm` proves the *whole network* converges. Same build-time guarantee, now across organizational boundaries. See [Federated Registries](#federated-registries).
+
 ## Example: Order Fulfillment
 
 Full example from the paper (see `gsm_test.go`):
@@ -103,6 +105,7 @@ s = machine.Apply(s, "process_payment") // Arrives after shipment
 - Operations can violate invariants (need compensation/repair)
 - State space is finite and enumerable (< ~1M states)
 - You want mathematical convergence guarantees
+- Multiple registries share constraints across organizational boundaries (federated registry networks)
 - You're using Go
 
 **Don't use gsm when:**
@@ -242,6 +245,44 @@ s = s.SetBool(enabledVar, true)
 s = s.SetInt(countVar, 42)
 ```
 
+## Federated Registries
+
+A single registry governs one machine. Real systems span **multiple** registries with constraints across boundaries. `gsm` composes them into a **federation** connected by directed **morphisms**, and proves the whole network converges - the same build-time guarantee, one level up.
+
+```go
+// Two independently-governed registries (events/invariants elided)...
+mfr := gsm.NewRegistry("manufacturer")
+mstate := mfr.Enum("mstate", "draft", "active", "suspended")
+
+sup := gsm.NewRegistry("supplier")
+sstate := sup.Enum("sstate", "idle", "listed", "stale", "err")
+
+// ...linked by a morphism: the manufacturer's status fixes the supplier's listing.
+image := map[string]string{"draft": "idle", "active": "listed", "suspended": "stale"}
+fed := gsm.NewFederation("mfr-sup").
+    Morphism(mfr, sup).
+    Shared(sstate). // the target variables this morphism controls
+    Map(func(srcNF, dst gsm.State) gsm.State { // source normal form → target's shared component
+        return dst.Set(sstate, image[srcNF.Get(mstate)])
+    }).
+    Add()
+
+m, report, err := fed.Build() // verifies the WHOLE network converges
+if err != nil {
+    panic(fmt.Sprintf("federation not guaranteed to converge: %v\n%s", err, report))
+}
+
+s := m.NewState()
+s = m.Apply(s, sup, "eexp") // supplier acts...
+s = m.Apply(s, mfr, "epub") // ...manufacturer acts; morphism repair re-derives the listing
+```
+
+**Coordination-free conflict resolution.** In a morphism `A → B`, source `A` is **authoritative** over `B`'s shared component: `A`'s normal form deterministically fixes it. When a source event and a target event race, the source wins - no locking, no consensus.
+
+**The build-time contract, extended.** `Build()` refuses any federation that cannot converge: the network must be a tree/forest (no cycles; at most one source per target), component names must be distinct, and every morphism must preserve target validity when it overwrites the shared component (the *M1* condition). A federated machine exists only if the whole network is proven convergent. The federated normal form is *constructive* - each source normalizes independently, then shared components propagate along morphisms in topological order - so federation never materializes the product state space.
+
+> Federation implements **Section 8** (Federated Convergence) of the paper. The current boundary is **multi-source** targets - one registry constrained by two independent sources - which `Build()` rejects; resolving them needs machinery beyond the authority argument (the paper's "natural next problem").
+
 ## Verification Report
 
 The `Report` returned by `Build()` shows:
@@ -302,15 +343,16 @@ Memory: One `uint64` per state for normal form table, plus one `uint64` per (eve
 
 ## Relationship to the Paper
 
-This library implements the **single-registry governance model** from Section 3 of the paper:
+This library implements both the **single-registry governance model** (Section 3) and the **federated convergence model** (Section 8) of the paper:
 
 - **Registry** = the machine definition (variables, invariants, compensation, events)
 - **WFC (Definition 4.1)** = well-founded measure on compensation depth
 - **CC (Definition 4.3)** = compensation commutativity (CC1 + CC2)
 - **Theorem 5.1** = WFC + CC ⟹ unique normal forms (proven via Newman's Lemma)
 - **Section 9** = verification calculus with footprint optimization (implemented in `verify.go`)
+- **Federation (Section 8)** = registry morphisms, the authority argument, and the constructive federated normalizer ρ_Fed (implemented in `federation.go` as `Federation` / `FedMachine`)
 
-The paper proves: **if WFC and CC hold, all processors consuming the same events converge to the same valid state regardless of application order.**
+The paper proves: **if WFC and CC hold, all processors consuming the same events converge to the same valid state regardless of application order** - and that this extends to a tree-shaped network of registries connected by validity-preserving morphisms.
 
 This library verifies: **does your machine satisfy WFC and CC?**
 
@@ -319,7 +361,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 - **Finite state spaces only** - Cannot model unbounded domains (arbitrary strings, lists)
 - **Build-time cost** - Large state spaces (> 1M states) verification becomes slow
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
-- **Single-registry** - Federation (Section 7 of paper) not yet implemented
+- **Federation: tree-shaped networks** - Registries federate via directed morphisms (Section 8); multi-source targets (one registry constrained by two independent sources) are not yet supported and are rejected at build time
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
 
 ## Multi-Language Support

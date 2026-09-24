@@ -722,13 +722,11 @@ Current limit: 2²⁰ ≈ 1M states.
 
 ### 11.4 Multi-Registry Systems
 
-**Limitation**: gsm currently models single-registry systems.
+**Implemented**: gsm federates multiple registries via directed morphisms (Section 8 of the paper), see `federation.go` (`Federation` / `FedMachine`). Cross-registry constraints are morphism invariants; the authority argument (a source deterministically fixes its target's shared component) makes inter-registry compensation coordination-free. `Build()` proves the whole network converges when it is tree-shaped and every morphism preserves validity under overwrite (M1).
 
-**Paper extension**: Section 7 of the paper describes federated registries with cross-registry constraints.
+**Boundary**: **multi-source** targets - one registry constrained by two independent sources (Remark 8.15) - break the authority argument and are rejected at build time. Resolving them (target-agreement predicates / conflict operators) is the natural next problem.
 
-**Challenge**: Inter-registry compensation requires coordination.
-
-**Future work**: Implement federation with partial synchronization.
+**Future work**: partial-synchronization protocol - propagate only each parent's shared projection along tree edges, rather than full federated state.
 
 ### 11.5 Probabilistic and Timed Events
 
