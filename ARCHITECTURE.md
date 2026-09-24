@@ -393,6 +393,12 @@ therefore the verifier) does not see. Only rules built from this vocabulary are 
 closure-based invariants and events cannot be exported, and `WriteMachineAST` returns an error
 rather than emit something the oracle would misread.
 
+`Registry.PolicyBytes` exposes those serialized bytes and `Registry.PolicyDigest` a stable,
+domain-separated SHA-256 over them, so a policy is a portable, nameable artifact: the digested
+bytes are exactly the oracle's input, so an anchored digest and the re-checked artifact cannot
+diverge. This is what lets an external audit layer commit a policy's identity in a log and hand
+the same bytes to the rules oracle.
+
 ## Related Work
 
 This design is based on the theory in:

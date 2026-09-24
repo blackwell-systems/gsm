@@ -678,6 +678,14 @@ machine. This is the standard "trusted core mirrored in a proof assistant" patte
 compiler mirrors its source-language semantics in the proof assistant the same way), with cost
 proportional to the size of the grammar, not to the number of machines built with it.
 
+**The serialized policy is a portable, verifiable artifact.** `Registry.PolicyBytes` returns the
+canonical serialization above, and `Registry.PolicyDigest` a stable, domain-separated SHA-256 over
+it (a rule written with the sugar surface digests identically to the equivalent primitive
+combinators). Because the digested bytes are exactly the rules oracle's input, an anchored digest
+and the re-checked artifact cannot diverge. This is the interchange contract that lets a system
+outside gsm commit a policy's identity (for example in a cryptographic audit log) and hand the same
+bytes to the extracted oracle for an independent convergence verdict.
+
 ---
 
 ## 10. Comparison to Related Formalisms
