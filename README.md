@@ -108,16 +108,16 @@ s = machine.Apply(s, "process_payment") // Arrives after shipment
 **Use gsm when:**
 - Building event-sourced systems with out-of-order events
 - Operations can violate invariants (need compensation/repair)
-- State space is finite and enumerable (< ~1M states)
+- Each variable's domain is finite (the *global* state space may be astronomically large: `BuildCompositional` scales with the largest footprint component, not the product of all domains)
 - You want mathematical convergence guarantees
 - Multiple registries share constraints across organizational boundaries (federated registry networks)
 - You want gsm to **synthesize** the compensation from your invariants + events (or prove none converges)
 - You're using Go
 
 **Don't use gsm when:**
-- Operations already commute (use CRDTs instead)
+- Operations already commute: a CRDT is simpler (and is provably the compensation-free special case of what gsm does; gsm can certify whether your machine falls in that fragment)
 - Operations preserve invariants in all orderings (use invariant confluence)
-- State space is unbounded or infinite
+- A variable needs a truly unbounded domain (arbitrary strings, lists), or the machine is one large tightly-coupled footprint that neither `Build` nor `BuildCompositional` can enumerate
 - Real-time latency requirements conflict with build-time verification cost
 
 ## How It Works
@@ -126,7 +126,7 @@ s = machine.Apply(s, "process_payment") // Arrives after shipment
 
 When you call `registry.Build()`:
 
-1. **Enumerate state space** - All combinations of variable values (must be finite)
+1. **Enumerate state space** - All combinations of variable values (finite per variable; `BuildCompositional` enumerates per footprint component instead of the global product)
 2. **Compute normal forms** - For every state, apply compensation until valid
 3. **Verify WFC** - Compensation terminates and reaches valid states
 4. **Build step table** - For every (event, state) pair, precompute the normal form after applying the event
@@ -211,7 +211,7 @@ r.DeclInvariant("a_cap", Le(V(a), Lit(3)), Do(Set(a, Lit(3)))) // holds when a<=
 r.DeclEvent("inc_a", Do(Set(a, Add(V(a), Lit(1)))))            // a := a + 1
 ```
 
-The footprint is **derived** from the tree (the variables it reads and writes), so combinator rules are footprint-conformant by construction: no `Watches`/`Writes` to declare, and nothing to mis-declare. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits. (Prototype.)
+The footprint is **derived** from the tree (the variables it reads and writes), so combinator rules are footprint-conformant by construction: no `Watches`/`Writes` to declare, and nothing to mis-declare. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits.
 
 These combinators are the **analyzable core**: primitives we serialize (`Registry.WriteMachineAST`) and hand to the machine-checked oracle. On top of them sits an ergonomic layer that lowers to the exact same AST, so it adds nothing the verifier must learn:
 
@@ -222,7 +222,7 @@ r.On("inc_a").Does(Inc(a)).Add()
 
 `AtMost`/`Inc`/`SetTo` and the `Rule`/`On` builders desugar to `Le(V(a),Lit(3))` / `Do(Set(a,Add(V(a),Lit(1))))` etc.; a test pins that the friendly and primitive spellings serialize to byte-identical rules. Write for humans at the top; test, serialize, and prove at the primitive bottom.
 
-Either spelling can be cross-checked against the verified **rules oracle**: `WriteMachineAST` emits the machine as S-expressions and the OCaml `astchecker` (extracted from the axiom-free Coq proof in `normalization-confluence`) recomputes convergence straight from those rules. See `astoracle_test.go` (`GSM_AST_CHECKER`).
+Either spelling can be cross-checked against the verified **rules oracle**: `WriteMachineAST` emits the machine as S-expressions and the OCaml `astchecker` (extracted from the axiom-free Coq proof in `normalization-confluence`) recomputes convergence straight from those rules. It also certifies the **CRDT-fragment classification** (a machine-checked `compensation_free` verdict: whether repair is ever needed), so a consumer can confirm from the rules whether a machine is a plain CRDT or a compensation-bearing governed machine. See `astoracle_test.go` (`GSM_AST_CHECKER`).
 
 **Serializable fragment.** Only rules built from the combinator vocabulary can be exported to the oracle: variables over `min .. min+domain-1` (any nonnegative `min`); the comparison predicates `Le`/`Lt`/`Eq`/`Ge`/`Gt`/`Ne` and boolean `And`/`Or`/`Not`; the transforms `Set`/`Add`/`Sub`; and events with an optional guard. Closure-based invariants and events cannot be serialized, so `WriteMachineAST` returns an error rather than emit something the checker would misread. gsm's own `Build` verification has no such restriction; the fragment is only the boundary of what the extracted oracle can independently re-certify.
 
@@ -331,7 +331,7 @@ Multi-source convergence is the paper's **Federated Convergence with Resolution*
 
 > Single-source authority is the special case of a resolver with one source. Both are backed by the paper's proofs (Federated Convergence, and its multi-source generalization); gsm's build-time checks establish the theorems' preconditions.
 
-**Monotone cycles.** Acyclicity is only needed to tame *non-monotone* repair (the divergence counterexample is negation, which is antitone). With `Federation.AllowMonotoneCycles()`, cyclic networks are allowed when every morphism/resolver is **monotone** (verified by enumeration); `Build` then computes the normal form by Kleene iteration to the least fixed point, which converges order-independently even on arbitrary cyclic graphs (the paper's *Monotone Convergence Despite Cycles*, via Knaster–Tarski + chaotic iteration). State-based CRDTs are the compensation-free special case. Non-monotone cycles are still rejected.
+**Monotone cycles.** Acyclicity is only needed to tame *non-monotone* repair (the divergence counterexample is negation, which is antitone). With `Federation.AllowMonotoneCycles()`, cyclic networks are allowed when every morphism/resolver is **monotone** (verified by enumeration); `Build` then computes the normal form by Kleene iteration to the least fixed point, which converges order-independently even on arbitrary cyclic graphs (the paper's *Monotone Convergence Despite Cycles*, via Knaster–Tarski + chaotic iteration). State-based CRDTs are the compensation-free special case of this monotone regime; that CRDTs (op- and state-based) are a *strict* sub-fragment of normalization confluence is machine-checked in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (see [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)). Non-monotone cycles are still rejected.
 
 **Compositional construction.** A verified sub-federation embeds into a larger one with `Federation.Embed`: define and verify a subsystem on its own, then reuse it as a unit and connect it with more morphisms. The composed federation runs as the flat convergent machine (a `FedState` holds one `State` per component, so no product state space is materialized). This realizes the paper's compositional-collapse result — a convergent sub-federation collapses to an effective registry — enabling modular, hierarchical verification and black-box reuse of subsystems.
 
@@ -499,7 +499,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 
 ## Limitations
 
-- **Finite state spaces only** - Cannot model unbounded domains (arbitrary strings, lists)
+- **Finite variable domains** - Each variable's domain must be finite (no arbitrary strings or lists). The *global* state space need not be small: `BuildCompositional` certifies astronomically large product spaces when the machine decomposes into small footprint components, so "finite" is a per-variable constraint, not a ceiling on the whole state space
 - **Build-time cost** - Global `Build` enumerates the state space, so it slows past ~1M states; use `BuildCompositional` for machines that decompose into small footprint components (see [Compositional Verification](#compositional-verification)), where cost scales with the largest component rather than the whole machine
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
 - **Federation** - Tree networks, multi-source acyclic DAGs (resolution operators), and monotone *cyclic* networks are all covered by the paper's proofs (Section 8). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2, monotonicity) by exhaustive build-time verification. Only *non-monotone* cycles and multi-source targets without a resolver are rejected at build
