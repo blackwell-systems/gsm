@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **README de-staled**: fixed a contradiction (Limitations claimed cyclic networks are rejected while the body documents `AllowMonotoneCycles`), added the missing `Embed`/compositionality section, removed a fabricated `Checked in:` line from the verification-report example (`Report.String` never prints it), and corrected the "Relationship to the Paper" cross-references (WFC/CC are axioms in §3, convergence is §5, the verification calculus is §10; added multi-source, monotone-cycle, and compositionality rows).
+
 ## [0.4.1] - 2026-09-23
 
 ### Changed

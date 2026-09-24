@@ -300,6 +300,18 @@ Multi-source convergence is the paper's **Federated Convergence with Resolution*
 
 **Monotone cycles.** Acyclicity is only needed to tame *non-monotone* repair (the divergence counterexample is negation, which is antitone). With `Federation.AllowMonotoneCycles()`, cyclic networks are allowed when every morphism/resolver is **monotone** (verified by enumeration); `Build` then computes the normal form by Kleene iteration to the least fixed point, which converges order-independently even on arbitrary cyclic graphs (the paper's *Monotone Convergence Despite Cycles*, via Knaster–Tarski + chaotic iteration). State-based CRDTs are the compensation-free special case. Non-monotone cycles are still rejected.
 
+**Compositional construction.** A verified sub-federation embeds into a larger one with `Federation.Embed`: define and verify a subsystem on its own, then reuse it as a unit and connect it with more morphisms. The composed federation runs as the flat convergent machine (a `FedState` holds one `State` per component, so no product state space is materialized). This realizes the paper's compositional-collapse result — a convergent sub-federation collapses to an effective registry — enabling modular, hierarchical verification and black-box reuse of subsystems.
+
+```go
+sub := gsm.NewFederation("pricing").Morphism(pricing, catalog)./* ... */Add()
+sub.Build() // verify the subsystem on its own
+
+m, _, _ := gsm.NewFederation("storefront").
+    Embed(sub).                       // reuse the verified subsystem as a unit
+    Morphism(catalog, order)./* ... */Add().
+    Build()
+```
+
 ## Verification Report
 
 The `Report` returned by `Build()` shows:
@@ -314,7 +326,6 @@ Machine: order_fulfillment
   CC (Compensation Commutativity): PASS (3 pairs: 3 disjoint, 0 brute-force)
 
   Convergence: GUARANTEED
-Checked in: 234µs
 ```
 
 **WFC (Well-Founded Compensation)**: Compensation terminates from every state. The report shows the maximum number of repair steps needed.
@@ -363,13 +374,16 @@ Memory: One `uint64` per state for normal form table, plus one `uint64` per (eve
 This library implements both the **single-registry governance model** (Section 3) and the **federated convergence model** (Section 8) of the paper:
 
 - **Registry** = the machine definition (variables, invariants, compensation, events)
-- **WFC (Definition 4.1)** = well-founded measure on compensation depth
-- **CC (Definition 4.3)** = compensation commutativity (CC1 + CC2)
-- **Theorem 5.1** = WFC + CC ⟹ unique normal forms (proven via Newman's Lemma)
-- **Section 9** = verification calculus with footprint optimization (implemented in `verify.go`)
-- **Federation (Section 8)** = registry morphisms, the authority argument, and the constructive federated normalizer ρ_Fed (implemented in `federation.go` as `Federation` / `FedMachine`)
+- **WFC** (§3) = well-founded measure on compensation depth
+- **CC** (§3) = compensation commutativity (CC1 + CC2)
+- **Convergence theorem** (§5) = WFC + CC ⟹ unique normal forms (via Newman's Lemma)
+- **Verification calculus** (§10) = footprint optimization + decomposable repair (in `verify.go`)
+- **Federation** (§8) = registry morphisms + the authority argument + the constructive normalizer ρ_Fed (`federation.go`: `Federation` / `FedMachine`)
+- **Multi-source resolution** (§8) = resolution operators (`Resolve`)
+- **Monotone cycles** (§8) = convergence on cyclic networks under monotone repair (`AllowMonotoneCycles`)
+- **Compositionality** (§8) = sub-federations collapse to effective registries (`Embed`)
 
-The paper proves: **if WFC and CC hold, all processors consuming the same events converge to the same valid state regardless of application order** - and that this extends to a tree-shaped network of registries connected by validity-preserving morphisms, and further to any acyclic network whose multi-source targets carry a source-determined, validity-preserving resolution operator.
+The paper proves: **if WFC and CC hold, all processors consuming the same events converge to the same valid state regardless of application order** - that this extends to a tree-shaped network of registries connected by validity-preserving morphisms, and further to any acyclic network whose multi-source targets carry a source-determined, validity-preserving resolution operator; that even *cyclic* networks converge when repair is monotone; and that verified sub-federations compose.
 
 This library verifies: **does your machine satisfy WFC and CC?**
 
@@ -378,7 +392,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 - **Finite state spaces only** - Cannot model unbounded domains (arbitrary strings, lists)
 - **Build-time cost** - Large state spaces (> 1M states) verification becomes slow
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
-- **Federation** - Tree-shaped networks and multi-source acyclic DAGs are both covered by the paper's proofs (Section 8: Federated Convergence, and its multi-source generalization via resolution operators). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2) by exhaustive build-time verification. Cyclic networks and multi-source targets without a resolver are rejected at build
+- **Federation** - Tree networks, multi-source acyclic DAGs (resolution operators), and monotone *cyclic* networks are all covered by the paper's proofs (Section 8). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2, monotonicity) by exhaustive build-time verification. Only *non-monotone* cycles and multi-source targets without a resolver are rejected at build
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
 
 ## Multi-Language Support
