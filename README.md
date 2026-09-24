@@ -281,7 +281,7 @@ s = m.Apply(s, mfr, "epub") // ...manufacturer acts; morphism repair re-derives 
 
 **The build-time contract, extended.** `Build()` refuses any federation that cannot converge: the network must be a tree/forest (no cycles; at most one source per target), component names must be distinct, and every morphism must preserve target validity when it overwrites the shared component (the *M1* condition). A federated machine exists only if the whole network is proven convergent. The federated normal form is *constructive* - each source normalizes independently, then shared components propagate along morphisms in topological order - so federation never materializes the product state space.
 
-**Multi-source targets (beyond the paper).** When a target has *two* sources, the authority argument doesn't pick a winner — so the target declares a `Resolver` that deterministically merges its sources (priority, AND/OR, most-restrictive, etc.), relaxing the tree requirement to any acyclic DAG:
+**Multi-source targets.** When a target has *two* sources, the authority argument doesn't pick a winner — so the target declares a `Resolver` that deterministically merges its sources (priority, AND/OR, most-restrictive, etc.), relaxing the tree requirement to any acyclic DAG:
 
 ```go
 fed.Morphism(hr, door).Shared(access).Map(...).Add().
@@ -294,9 +294,9 @@ fed.Morphism(hr, door).Shared(access).Map(...).Add().
     })
 ```
 
-This extends **past the paper's tree-only theorem** (§8, Remark 8.15 leaves it open because the merge is domain logic, not math). gsm makes it safe the way it handles single registries — not by a general proof, but by **exhaustively verifying at build time** that, for *this* federation, the resolver writes only shared variables, preserves target validity for every reachable source combination, and depends only on the sources. A resolver that could diverge is rejected. A multi-source target *without* a resolver is still rejected.
+Multi-source convergence is the paper's **Federated Convergence with Resolution** theorem (§8), which holds whenever the resolver is a function of its sources alone (**R1**) and preserves target validity (**R2**, the multi-source generalization of M1). gsm certifies exactly those hypotheses: it **exhaustively verifies at build time** that, for *this* federation, the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same verify-the-preconditions contract it applies to single-registry WFC/CC. A resolver that could diverge (violates R2), reads local state (violates R1), or writes non-shared variables is rejected; a multi-source target *without* a resolver is rejected.
 
-> Federation implements **Section 8** (Federated Convergence) of the paper for tree-shaped networks; multi-source DAGs are a gsm extension, guaranteed per-federation by exhaustive build-time verification rather than by the paper's proof.
+> Single-source authority is the special case of a resolver with one source. Both are backed by the paper's proofs (Federated Convergence, and its multi-source generalization); gsm's build-time checks establish the theorems' preconditions.
 
 ## Verification Report
 
@@ -367,7 +367,7 @@ This library implements both the **single-registry governance model** (Section 3
 - **Section 9** = verification calculus with footprint optimization (implemented in `verify.go`)
 - **Federation (Section 8)** = registry morphisms, the authority argument, and the constructive federated normalizer ρ_Fed (implemented in `federation.go` as `Federation` / `FedMachine`)
 
-The paper proves: **if WFC and CC hold, all processors consuming the same events converge to the same valid state regardless of application order** - and that this extends to a tree-shaped network of registries connected by validity-preserving morphisms.
+The paper proves: **if WFC and CC hold, all processors consuming the same events converge to the same valid state regardless of application order** - and that this extends to a tree-shaped network of registries connected by validity-preserving morphisms, and further to any acyclic network whose multi-source targets carry a source-determined, validity-preserving resolution operator.
 
 This library verifies: **does your machine satisfy WFC and CC?**
 
@@ -376,7 +376,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 - **Finite state spaces only** - Cannot model unbounded domains (arbitrary strings, lists)
 - **Build-time cost** - Large state spaces (> 1M states) verification becomes slow
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
-- **Federation** - Tree-shaped networks are covered by the paper's proof (Section 8); multi-source DAGs are supported via user-declared `Resolver`s, guaranteed per-federation by exhaustive build-time verification rather than by a general theorem. Cyclic networks and multi-source targets without a resolver are rejected at build
+- **Federation** - Tree-shaped networks and multi-source acyclic DAGs are both covered by the paper's proofs (Section 8: Federated Convergence, and its multi-source generalization via resolution operators). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2) by exhaustive build-time verification. Cyclic networks and multi-source targets without a resolver are rejected at build
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)
 
 ## Multi-Language Support

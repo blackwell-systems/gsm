@@ -12,16 +12,16 @@ import (
 // a federation is itself a registry — the federated state space is the product of the
 // component spaces, morphism-consistency conditions are extra invariants, and morphism
 // repair is extra compensation. Convergence therefore follows from the single-registry
-// theorem once the network is tree-shaped and every morphism preserves validity under
-// shared-component overwrite (M1). Critically, the federated normal form is *constructive*
-// (Corollary 8.10): normalize each source independently, then propagate shared components
-// through morphisms in topological order. We never materialize the product machine, so
-// federation sidesteps the single-registry state-space ceiling entirely.
+// theorem for any acyclic network in which every single-source morphism preserves validity
+// under shared-component overwrite (M1) and every multi-source target has a Resolver
+// satisfying source-determinacy (R1) and validity-preservation (R2). The federated normal
+// form is *constructive* (Corollary 8.10): normalize each source independently, then
+// propagate shared components through morphisms/resolvers in topological order. We never
+// materialize the product machine, so federation sidesteps the single-registry ceiling.
 //
-// M0 scope: the constructive operator (Normalize/Apply/IsValid) over tree-shaped networks.
-// The build-time necessity checks (M1 validity preservation, acyclicity, multi-source
-// rejection per Remark 8.15) land in the next milestone; Build here performs only a basic
-// acyclicity check so the operator has a valid topological order to run against.
+// Build enforces the theorems' preconditions: components converge (WFC + CC), the network is
+// acyclic, single-source morphisms satisfy M1, and resolvers satisfy R1/R2 — all by finite
+// enumeration. A FedMachine exists only if the whole network is proven convergent.
 type Federation struct {
 	name      string
 	comps     []*Registry
@@ -35,15 +35,17 @@ type Federation struct {
 // target's current state and each source's finalized state keyed by source registry name,
 // and returns the target with its shared variables set.
 //
-// Multi-source support extends beyond the paper's tree-only convergence theorem (Thm 8.9);
-// the paper leaves conflict resolution open (Remark 8.15) because the merge is domain logic,
-// not math. gsm makes it safe the same way it handles single registries: rather than appeal
-// to a general theorem, Build EXHAUSTIVELY VERIFIES, for the specific federation, that the
-// resolver (a) writes only shared variables, (b) preserves target validity for every reachable
-// combination of valid source states, and (c) is a function of the sources alone (independent
-// of the target's local state). A resolver that reads the target's local component, can produce
-// an invalid target, or touches non-shared variables is rejected at build. Determinism — the
-// resolver is a pure function of a name-keyed source map — gives order-independence.
+// A resolver generalizes the single-source authority function: when |sources| == 1, the
+// authority morphism is the special case. Multi-source convergence is the paper's "Federated
+// Convergence with Resolution" theorem, which holds whenever the resolver is (R1) a function
+// of the sources alone — independent of the target's local state — and (R2) validity-
+// preserving (the multi-source generalization of M1). gsm certifies exactly those hypotheses:
+// Build EXHAUSTIVELY VERIFIES, over every reachable combination of valid source states, that
+// the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same
+// verify-the-preconditions contract gsm applies to single-registry WFC/CC and tree-federation
+// M1. A resolver that reads local state (violates R1), can produce an invalid target (violates
+// R2), or writes non-shared variables is rejected at build. Determinism — the resolver is a
+// pure function of a name-keyed source map — gives order-independence.
 type Resolver func(dst State, sources map[string]State) State
 
 type edgeDef struct {
@@ -238,7 +240,7 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 
 // verify enforces the structural conditions federated convergence requires. Tree-shaped
 // targets are checked per morphism (M1, the paper's proven case); multi-source targets are
-// checked against their declared Resolver (the beyond-paper case, verified exhaustively).
+// checked against their declared Resolver (the multi-source case, R1/R2 verified exhaustively).
 func (f *Federation) verify() error {
 	// Distinct component names: name-keyed replay (FedMachine.ApplyNamed) would be ambiguous
 	// otherwise.
@@ -360,11 +362,12 @@ func (f *Federation) verifyEdge(e edgeDef) error {
 	return nil
 }
 
-// verifyResolved exhaustively verifies a multi-source target's Resolver: for every combination
-// of valid source states and every valid target state, the merge must write only shared
-// variables, preserve target validity, and depend only on the sources (not the target's local
-// state). This is the beyond-paper multi-source guarantee, established by enumeration rather
-// than by a general theorem — the same discipline gsm applies to single-registry CC.
+// verifyResolved exhaustively verifies a multi-source target's Resolver against the hypotheses
+// of the paper's Federated Convergence with Resolution theorem: for every combination of valid
+// source states and every valid target state, the merge must write only shared variables,
+// preserve target validity (R2), and depend only on the sources, not the target's local state
+// (R1). Establishing the theorem's preconditions by finite enumeration is the same discipline
+// gsm applies to single-registry CC — the theorem then delivers convergence.
 func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges []edgeDef) error {
 	// Distinct sources, in edge order; union of the shared components they control.
 	var sources []*Registry
