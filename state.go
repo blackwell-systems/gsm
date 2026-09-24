@@ -1,6 +1,11 @@
 package gsm
 
-import "fmt"
+import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+)
 
 // State is a compact, immutable representation of all variable values.
 // Internally it is a bitpacked uint64, enabling use as a table index
@@ -8,6 +13,26 @@ import "fmt"
 type State struct {
 	packed uint64
 	vars   []Var // shared reference to machine's variable list
+}
+
+// StateDigestVersion is the domain-separation tag for State.Digest. Bump it only if the packing
+// that Digest hashes over changes, so a digest always names one unambiguous encoding.
+const StateDigestVersion = "gsm-state-v1"
+
+// Digest returns a stable, domain-separated SHA-256 over the state's packed value, as lowercase
+// hex. It is meaningful alongside a policy digest (which pins the variable layout the packing
+// depends on): the pair (policy digest, state digest) unambiguously names a state, and a reference
+// build of the same policy replaying the same events reproduces the same digest. An audit leaf that
+// records both binds an action to the exact resulting state, so a verifier replaying the policy can
+// confirm the runtime's state matched the reference at each transition.
+func (s State) Digest() string {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], s.packed)
+	h := sha256.New()
+	h.Write([]byte(StateDigestVersion))
+	h.Write([]byte{'\n'})
+	h.Write(buf[:])
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Get returns the string value of an enum variable.

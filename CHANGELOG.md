@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-24
+
+### Added
+- **State digest** (`State.Digest`, `StateDigestVersion`): a stable, domain-separated SHA-256 over a state's packed value, as lowercase hex. Meaningful alongside a policy digest (which pins the variable layout the packing depends on): the pair names a state unambiguously, and a reference build of the same policy replaying the same events reproduces the same digest. This lets an external audit trail bind an action to its exact resulting state in one committed leaf, so a verifier replaying the policy can confirm the runtime's state matched the reference at each transition (a per-run differential check, not a refinement proof for all inputs).
+
 ## [0.7.0] - 2026-09-24
 
 ### Added
