@@ -125,6 +125,7 @@ func (r *FedReport) String() string {
 // fedEdge is a resolved morphism (component indices, not registry pointers).
 type fedEdge struct {
 	src, dst int
+	shared   []Var // the target's shared component (read by SharedProjection)
 	mapFn    func(srcNF, dst State) State
 }
 
@@ -182,7 +183,7 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	m.out = make([][]int, len(f.comps))
 	for ei, e := range f.edges {
 		si, di := f.idx[e.src], f.idx[e.dst]
-		m.edges[ei] = fedEdge{src: si, dst: di, mapFn: e.mapFn}
+		m.edges[ei] = fedEdge{src: si, dst: di, shared: e.shared, mapFn: e.mapFn}
 		m.out[si] = append(m.out[si], ei)
 	}
 
@@ -247,13 +248,32 @@ func (f *Federation) verify() error {
 		}
 
 		for _, sa := range srcValid {
-			for _, sb := range dstValid {
+			var refShared map[int]uint64 // shared values from the first target, for this source
+			for di, sb := range dstValid {
 				sb2 := e.mapFn(sa, sb)
 				// Well-formedness: Map must overwrite only Shared() variables.
 				for _, v := range e.dst.vars {
 					if !sharedIdx[v.index] && sb2.getRaw(v) != sb.getRaw(v) {
 						return fmt.Errorf("gsm: morphism %s→%s Map modifies non-shared variable %q; "+
 							"Map may only overwrite variables declared in Shared()", e.src.name, e.dst.name, v.name)
+					}
+				}
+				// Source-determinacy: the shared image must depend only on the source, not on
+				// the target's local state — otherwise ϕ isn't a function ΣA→SB (Def 8.1) and the
+				// shared projection sent between distributed nodes would be ill-defined.
+				cur := make(map[int]uint64, len(e.shared))
+				for _, v := range e.shared {
+					cur[v.index] = sb2.getRaw(v)
+				}
+				if di == 0 {
+					refShared = cur
+				} else {
+					for idx, val := range cur {
+						if refShared[idx] != val {
+							return fmt.Errorf("gsm: morphism %s→%s image depends on the target's local state; "+
+								"ϕ must be a function of the source alone (the Map's Shared() output may not read the target)",
+								e.src.name, e.dst.name)
+						}
 					}
 				}
 				// M1 (Def 8.1): overwriting a valid target's shared component with the morphism
@@ -405,6 +425,60 @@ func (m *FedMachine) ApplyNamed(fs FedState, registry, event string) (FedState, 
 		return fs, fmt.Errorf("gsm: registry %q has no event %q", registry, event)
 	}
 	return m.Apply(fs, r, event), nil
+}
+
+// Component returns the built single-registry Machine for r. In a distributed deployment
+// each node runs just its own component's Machine, applies local events to it, and exchanges
+// shared projections with its tree neighbours — no node needs the FedMachine or full state.
+func (m *FedMachine) Component(r *Registry) *Machine {
+	i, ok := m.idx[r]
+	if !ok {
+		return nil
+	}
+	return m.comps[i]
+}
+
+// Projection is the shared-component message ϕ_ij(σ_i) that a source registry sends to a
+// target along their morphism: the concrete values the target's shared variables must take,
+// derived purely from the source's state. It is small and serializable, so a distributed
+// federation exchanges these along tree edges instead of shipping full federated state
+// (the constructive normal form, Corollary 8.10).
+type Projection struct {
+	From, To string            // source and target registry names
+	Shared   map[string]uint64 // target shared-variable name → raw value
+}
+
+// SharedProjection computes ϕ_ij(σ_i) — the message the source `src` sends its child `dst`
+// along their morphism, given the source's current state. Because Build verifies the image
+// depends only on the source (source-determinacy), the result is well-defined without the
+// target's state. Returns an error if there is no morphism src→dst.
+func (m *FedMachine) SharedProjection(srcState State, src, dst *Registry) (Projection, error) {
+	si, ok := m.idx[src]
+	if !ok {
+		return Projection{}, fmt.Errorf("gsm: %q is not part of federation %q", src.name, m.name)
+	}
+	di, ok := m.idx[dst]
+	if !ok {
+		return Projection{}, fmt.Errorf("gsm: %q is not part of federation %q", dst.name, m.name)
+	}
+	var e *fedEdge
+	for k := range m.edges {
+		if m.edges[k].src == si && m.edges[k].dst == di {
+			e = &m.edges[k]
+			break
+		}
+	}
+	if e == nil {
+		return Projection{}, fmt.Errorf("gsm: no morphism %q→%q", src.name, dst.name)
+	}
+	// Apply the morphism to a representative (zero) target; source-determinacy (checked at
+	// Build) guarantees the shared values are independent of which target we use.
+	projected := e.mapFn(srcState, m.comps[di].NewState())
+	shared := make(map[string]uint64, len(e.shared))
+	for _, v := range e.shared {
+		shared[v.name] = projected.getRaw(v)
+	}
+	return Projection{From: src.name, To: dst.name, Shared: shared}, nil
 }
 
 // IsValid reports whether the federated state satisfies every local invariant and every

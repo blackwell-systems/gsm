@@ -109,6 +109,73 @@ func TestFederation_Authority(t *testing.T) {
 	}
 }
 
+// TestFederation_PartialSyncEquivalence proves Corollary 8.10 as a network protocol: a
+// distributed system where each node holds only its own component Machine and receives just
+// its parent's shared projection (never the full federated state) reaches exactly the same
+// per-component normal form as the centralized FedMachine. This is the M3 partial-sync claim.
+func TestFederation_PartialSyncEquivalence(t *testing.T) {
+	m, mfr, sup, mstate, sstate := buildManufacturerSupplier(t)
+
+	// Centralized reference: apply events through the full FedMachine.
+	central := m.NewState()
+	central = m.Apply(central, sup, "eexp") // supplier acts first
+	central = m.Apply(central, mfr, "epub") // then manufacturer
+
+	// Distributed simulation: each node has ONLY its component Machine + local state.
+	mfrMachine := m.Component(mfr)
+	supMachine := m.Component(sup)
+	mfrLocal := mfrMachine.NewState()
+	supLocal := supMachine.NewState()
+
+	// Each node applies its own events locally (Machine.Apply normalizes locally).
+	supLocal = supMachine.Apply(supLocal, "eexp")
+	mfrLocal = mfrMachine.Apply(mfrLocal, "epub")
+
+	// Partial sync: the manufacturer (source, already finalized as a root) sends only its
+	// shared projection down the edge; the supplier merges it. No full state crosses.
+	proj, err := m.SharedProjection(mfrLocal, mfr, sup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proj.From != "manufacturer" || proj.To != "supplier" {
+		t.Fatalf("projection routing = %s→%s, want manufacturer→supplier", proj.From, proj.To)
+	}
+	supLocal, err = supMachine.MergeProjection(supLocal, proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Equivalence: distributed per-component states == centralized components.
+	if mfrLocal.ID() != m.Of(central, mfr).ID() {
+		t.Fatalf("manufacturer diverged: distributed %s vs central %s",
+			mfrLocal.Get(mstate), m.Of(central, mfr).Get(mstate))
+	}
+	if supLocal.ID() != m.Of(central, sup).ID() {
+		t.Fatalf("supplier diverged: distributed %s vs central %s",
+			supLocal.Get(sstate), m.Of(central, sup).Get(sstate))
+	}
+	// And it's the expected converged value.
+	if supLocal.Get(sstate) != "listed" {
+		t.Fatalf("distributed supplier = %s, want listed (authority via projection)", supLocal.Get(sstate))
+	}
+}
+
+// TestFederation_ProjectionErrors covers the SharedProjection/MergeProjection error paths.
+func TestFederation_ProjectionErrors(t *testing.T) {
+	m, mfr, sup, _, _ := buildManufacturerSupplier(t)
+
+	// No morphism in the supplier→manufacturer direction.
+	if _, err := m.SharedProjection(m.Of(m.NewState(), sup), sup, mfr); err == nil {
+		t.Fatal("expected error for a non-existent morphism direction")
+	}
+
+	// A projection naming a variable the target machine lacks.
+	bad := Projection{From: "manufacturer", To: "supplier", Shared: map[string]uint64{"no_such_var": 1}}
+	if _, err := m.Component(sup).MergeProjection(m.Component(sup).NewState(), bad); err == nil {
+		t.Fatal("expected error merging a projection with an unknown variable")
+	}
+}
+
 // TestFederation_CycleRejected confirms Build refuses a cyclic morphism network — the
 // paper proves cyclic federations cannot converge (§8.4, Prop 8.13).
 func TestFederation_CycleRejected(t *testing.T) {

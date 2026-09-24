@@ -54,6 +54,32 @@ func (m *Machine) IsValid(s State) bool {
 	return m.nf[s.packed] == s.packed
 }
 
+// MergeProjection overwrites, on state s, the target variables named in a shared projection
+// received from a parent registry, returning the merged state. A distributed target node
+// uses it to incorporate its parent's shared component without holding the parent's state or
+// the federated machine. Returns an error if the projection names a variable this machine
+// does not have. (Merging shared variables preserves local validity by the M1 guarantee, so
+// no re-normalization is required.)
+func (m *Machine) MergeProjection(s State, p Projection) (State, error) {
+	for name, raw := range p.Shared {
+		v, ok := m.varByName(name)
+		if !ok {
+			return s, fmt.Errorf("gsm: projection variable %q is not in machine %q", name, m.name)
+		}
+		s = s.setRaw(v, raw)
+	}
+	return s, nil
+}
+
+func (m *Machine) varByName(name string) (Var, bool) {
+	for _, v := range m.vars {
+		if v.name == name {
+			return v, true
+		}
+	}
+	return Var{}, false
+}
+
 // Events returns the names of all declared events.
 func (m *Machine) Events() []string {
 	names := make([]string, len(m.events))
