@@ -214,12 +214,15 @@ func TestSynthesize_Optimal(t *testing.T) {
 
 	// Flip the cost → optimal must flip to ok1 (proves it minimizes cost, not ordering).
 	r2, st2 := build()
-	o2, _ := r2.SynthesizeWith(gsm.Prefer(func(_, to gsm.State) int {
+	o2, err := r2.SynthesizeWith(gsm.Prefer(func(_, to gsm.State) int {
 		if to.Get(st2) == "ok1" {
 			return 1
 		}
 		return 3
 	}), gsm.Optimal())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if target(o2, st2) != "ok1" || o2.Cost != 1 {
 		t.Fatalf("optimal repair = %s (cost %d), want ok1 (cost 1)", target(o2, st2), o2.Cost)
 	}
@@ -240,8 +243,14 @@ func TestSynthesize_Optimal(t *testing.T) {
 	rc.Event("flipy").Writes(y).Apply(func(s gsm.State) gsm.State { return s.SetBool(y, !s.GetBool(y)) }).Add()
 	rc.Event("flipz").Writes(z).Apply(func(s gsm.State) gsm.State { return s.SetBool(z, !s.GetBool(z)) }).Add()
 
-	def, _ := rc.Synthesize()
-	opt, _ := rc.SynthesizeWith(gsm.Optimal())
+	def, err := rc.Synthesize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt, err := rc.SynthesizeWith(gsm.Optimal())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !opt.Exhaustive {
 		t.Fatal("clamp optimal search should complete (proven optimal)")
 	}
