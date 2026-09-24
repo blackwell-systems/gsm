@@ -31,6 +31,11 @@ type invariantDef struct {
 	footprint []int // indices into vars
 	check     CheckFunc
 	repair    EffectFunc
+	// When declared via the combinator vocabulary (DeclInvariant), the predicate
+	// and repair are retained as inspectable AST (nil for closure-based rules).
+	// This is what lets a machine be serialized and re-verified from its rules.
+	predAST   Pred
+	repairAST Transform
 }
 
 type eventDef struct {
@@ -38,6 +43,8 @@ type eventDef struct {
 	writes []int // indices into vars
 	guard  CheckFunc
 	effect EffectFunc
+	// Combinator AST of the effect, retained by DeclEvent (nil for closures).
+	effectAST Transform
 }
 
 // NewRegistry creates a Registry for a named state machine.

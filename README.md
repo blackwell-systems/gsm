@@ -213,6 +213,17 @@ r.DeclEvent("inc_a", Do(Set(a, Add(V(a), Lit(1)))))            // a := a + 1
 
 The footprint is **derived** from the tree (the variables it reads and writes), so combinator rules are footprint-conformant by construction: no `Watches`/`Writes` to declare, and nothing to mis-declare. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits. (Prototype.)
 
+These combinators are the **analyzable core**: primitives we serialize (`Registry.WriteMachineAST`) and hand to the machine-checked oracle. On top of them sits an ergonomic layer that lowers to the exact same AST, so it adds nothing the verifier must learn:
+
+```go
+r.Rule("a_cap").Require(AtMost(a, 3)).RepairWith(SetTo(a, 3)).Add()
+r.On("inc_a").Does(Inc(a)).Add()
+```
+
+`AtMost`/`Inc`/`SetTo` and the `Rule`/`On` builders desugar to `Le(V(a),Lit(3))` / `Do(Set(a,Add(V(a),Lit(1))))` etc.; a test pins that the friendly and primitive spellings serialize to byte-identical rules. Write for humans at the top; test, serialize, and prove at the primitive bottom.
+
+Either spelling can be cross-checked against the verified **rules oracle**: `WriteMachineAST` emits the machine as S-expressions and the OCaml `astchecker` (extracted from the axiom-free Coq proof in `normalization-confluence`) recomputes convergence straight from those rules. See `astoracle_test.go` (`GSM_AST_CHECKER`).
+
 ## API Overview
 
 ### Using Machines

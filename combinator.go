@@ -240,6 +240,8 @@ func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
 		footprint: fp,
 		check:     func(s State) bool { return holds.holds(s) },
 		repair:    func(s State) State { return repair.apply(s) },
+		predAST:   holds,
+		repairAST: repair,
 	})
 }
 
@@ -247,9 +249,10 @@ func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
 // derived from the assignments, so Writes need not be declared separately.
 func (r *Registry) DeclEvent(name string, effect Transform) {
 	r.events = append(r.events, eventDef{
-		name:   name,
-		writes: effect.writeVars(),
-		effect: func(s State) State { return effect.apply(s) },
+		name:      name,
+		writes:    effect.writeVars(),
+		effect:    func(s State) State { return effect.apply(s) },
+		effectAST: effect,
 	})
 }
 
