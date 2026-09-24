@@ -1,6 +1,9 @@
 package gsm
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // buildManufacturerSupplier constructs the federation from the paper's §8.5 example:
 // a manufacturer (authoritative source) and a supplier (target) linked by a total
@@ -122,5 +125,81 @@ func TestFederation_CycleRejected(t *testing.T) {
 
 	if _, _, err := fed.Build(); err == nil {
 		t.Fatal("expected Build to reject a cyclic morphism network, got nil error")
+	}
+}
+
+// TestFederation_M1Rejected confirms Build refuses a morphism that can drive the target
+// invalid (M1 violation, Prop 8.14). Target B requires flag=false; the morphism copies the
+// source's boolean into flag, so a source with x=true would make B invalid.
+func TestFederation_M1Rejected(t *testing.T) {
+	a := NewRegistry("A")
+	x := a.Bool("x")
+
+	b := NewRegistry("B")
+	flag := b.Bool("flag")
+	b.Invariant("flag_off").Watches(flag).
+		Holds(func(s State) bool { return !s.GetBool(flag) }).
+		Repair(func(s State) State { return s.SetBool(flag, false) }).Add()
+
+	fed := NewFederation("m1-violation").
+		Morphism(a, b).Shared(flag).
+		Map(func(srcNF, dst State) State { return dst.SetBool(flag, srcNF.GetBool(x)) }).Add()
+
+	_, _, err := fed.Build()
+	if err == nil {
+		t.Fatal("expected Build to reject an M1-violating morphism, got nil error")
+	}
+	if !strings.Contains(err.Error(), "M1") {
+		t.Fatalf("error should cite M1, got: %v", err)
+	}
+}
+
+// TestFederation_MultiSourceRejected confirms Build refuses a target with two incoming
+// morphisms — the authority argument requires a single source per target (Remark 8.15).
+func TestFederation_MultiSourceRejected(t *testing.T) {
+	a := NewRegistry("A")
+	ax := a.Bool("ax")
+	c := NewRegistry("C")
+	cx := c.Bool("cx")
+	b := NewRegistry("B")
+	bx := b.Bool("bx")
+
+	fed := NewFederation("multi-source").
+		Morphism(a, b).Shared(bx).
+		Map(func(srcNF, dst State) State { return dst.SetBool(bx, srcNF.GetBool(ax)) }).Add().
+		Morphism(c, b).Shared(bx).
+		Map(func(srcNF, dst State) State { return dst.SetBool(bx, srcNF.GetBool(cx)) }).Add()
+
+	_, _, err := fed.Build()
+	if err == nil {
+		t.Fatal("expected Build to reject a multi-source target, got nil error")
+	}
+	if !strings.Contains(err.Error(), "multi-source") {
+		t.Fatalf("error should cite multi-source, got: %v", err)
+	}
+}
+
+// TestFederation_NonSharedWriteRejected confirms Build refuses a Map that mutates a target
+// variable outside its declared Shared() set.
+func TestFederation_NonSharedWriteRejected(t *testing.T) {
+	a := NewRegistry("A")
+	x := a.Bool("x")
+	b := NewRegistry("B")
+	shared := b.Bool("shared")
+	local := b.Bool("local")
+
+	fed := NewFederation("bad-footprint").
+		Morphism(a, b).Shared(shared).
+		Map(func(srcNF, dst State) State {
+			// Illegally also writes the local (non-shared) variable.
+			return dst.SetBool(shared, srcNF.GetBool(x)).SetBool(local, true)
+		}).Add()
+
+	_, _, err := fed.Build()
+	if err == nil {
+		t.Fatal("expected Build to reject a Map writing a non-shared variable, got nil error")
+	}
+	if !strings.Contains(err.Error(), "non-shared") {
+		t.Fatalf("error should cite non-shared write, got: %v", err)
 	}
 }

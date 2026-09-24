@@ -125,7 +125,6 @@ func (r *FedReport) String() string {
 // fedEdge is a resolved morphism (component indices, not registry pointers).
 type fedEdge struct {
 	src, dst int
-	shared   []Var
 	mapFn    func(srcNF, dst State) State
 }
 
@@ -134,7 +133,6 @@ type fedEdge struct {
 type FedMachine struct {
 	name  string
 	comps []*Machine
-	regs  []*Registry
 	idx   map[*Registry]int
 	edges []fedEdge
 	topo  []int   // component indices in topological (source-first) order
@@ -146,15 +144,21 @@ type FedState struct {
 	states []State
 }
 
-// Build verifies each component (WFC + CC) and returns a constructive federated machine.
-// M0 additionally checks that the morphism network is acyclic (a topological order must
-// exist for the constructive operator). Full forest verification, M1 validity preservation,
-// and multi-source rejection arrive in the next milestone.
+// Build verifies the federation converges and returns a constructive federated machine.
+// It refuses any network that the paper proves cannot converge:
+//
+//   - each component must satisfy WFC + CC (via Registry.Build);
+//   - the network must be a tree/forest — no cycles (Prop 8.13) and at most one incoming
+//     morphism per registry (multi-source is out of scope, Remark 8.15);
+//   - each morphism must satisfy M1, validity preservation under shared-component overwrite
+//     (Prop 8.14), and its Map must touch only the declared Shared() variables.
+//
+// This is the federated analogue of gsm's single-registry contract: a FedMachine only
+// exists if convergence is guaranteed.
 func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	m := &FedMachine{
 		name:  f.name,
 		comps: make([]*Machine, len(f.comps)),
-		regs:  append([]*Registry(nil), f.comps...),
 		idx:   map[*Registry]int{},
 	}
 	for r, i := range f.idx {
@@ -175,8 +179,14 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	m.out = make([][]int, len(f.comps))
 	for ei, e := range f.edges {
 		si, di := f.idx[e.src], f.idx[e.dst]
-		m.edges[ei] = fedEdge{src: si, dst: di, shared: e.shared, mapFn: e.mapFn}
+		m.edges[ei] = fedEdge{src: si, dst: di, mapFn: e.mapFn}
 		m.out[si] = append(m.out[si], ei)
+	}
+
+	// Forest + morphism verification (multi-source rejection, M1 validity preservation,
+	// shared-only well-formedness) before the acyclicity check.
+	if err := f.verify(); err != nil {
+		return nil, report, err
 	}
 
 	topo, err := m.topoSort()
@@ -186,6 +196,83 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	m.topo = topo
 
 	return m, report, nil
+}
+
+// verify enforces the structural conditions the federated convergence theorem requires.
+func (f *Federation) verify() error {
+	// Multi-source rejection (Remark 8.15): a target with two incoming morphisms breaks the
+	// authority argument — no single source determines its shared component.
+	indeg := make([]int, len(f.comps))
+	for _, e := range f.edges {
+		indeg[f.idx[e.dst]]++
+	}
+	for i, d := range indeg {
+		if d > 1 {
+			return fmt.Errorf("gsm: registry %q has %d incoming morphisms — multi-source federations are unsupported: "+
+				"the authority argument requires a single source per target (Remark 8.15). Restructure as a tree, or "+
+				"resolve the conflict upstream", f.comps[i].name, d)
+		}
+	}
+
+	// Per-morphism M1 + well-formedness, by finite enumeration over valid states.
+	for _, e := range f.edges {
+		srcValid := e.src.validStates()
+		dstValid := e.dst.validStates()
+
+		// General-path cost is |valid(src)|·|valid(dst)| per edge. When a target's validity
+		// decomposes into independent shared/local parts, Remark 8.2 reduces this to
+		// |valid(src)| checks — a future fast path. For now, guard rather than hang.
+		if len(srcValid) > 0 && len(dstValid) > maxStateSpace/len(srcValid) {
+			return fmt.Errorf("gsm: morphism %s→%s: M1 verification space (%d×%d) exceeds %d; "+
+				"the shared/local fast path (Remark 8.2) is not yet implemented",
+				e.src.name, e.dst.name, len(srcValid), len(dstValid), maxStateSpace)
+		}
+
+		sharedIdx := make(map[int]bool, len(e.shared))
+		for _, v := range e.shared {
+			sharedIdx[v.index] = true
+		}
+
+		for _, sa := range srcValid {
+			for _, sb := range dstValid {
+				sb2 := e.mapFn(sa, sb)
+				// Well-formedness: Map must overwrite only Shared() variables.
+				for _, v := range e.dst.vars {
+					if !sharedIdx[v.index] && sb2.getRaw(v) != sb.getRaw(v) {
+						return fmt.Errorf("gsm: morphism %s→%s Map modifies non-shared variable %q; "+
+							"Map may only overwrite variables declared in Shared()", e.src.name, e.dst.name, v.name)
+					}
+				}
+				// M1 (Def 8.1): overwriting a valid target's shared component with the morphism
+				// image of a valid source must preserve target validity. Otherwise federated
+				// compensation oscillates (Prop 8.14).
+				if !e.dst.allInvariantsHold(sb2) {
+					return fmt.Errorf("gsm: morphism %s→%s violates M1 (validity preservation under overwrite): "+
+						"source %s produces a shared component making target invalid at %s — "+
+						"federated compensation would oscillate (§8.4, Prop 8.14)",
+						e.src.name, e.dst.name, sa, sb2)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validStates enumerates the registry's valid states (valid encoding + all invariants hold).
+// Bounded by the same ≤20-bit ceiling Build enforces per component.
+func (r *Registry) validStates() []State {
+	packedCount := 1 << r.totalBits
+	var out []State
+	for i := 0; i < packedCount; i++ {
+		if !r.isValidEncoding(uint64(i)) {
+			continue
+		}
+		s := State{packed: uint64(i), vars: r.vars}
+		if r.allInvariantsHold(s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // topoSort returns component indices in source-first order (Kahn's algorithm). A leftover
