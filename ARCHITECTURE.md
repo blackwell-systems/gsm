@@ -397,7 +397,10 @@ rather than emit something the oracle would misread.
 domain-separated SHA-256 over them, so a policy is a portable, nameable artifact: the digested
 bytes are exactly the oracle's input, so an anchored digest and the re-checked artifact cannot
 diverge. This is what lets an external audit layer commit a policy's identity in a log and hand
-the same bytes to the rules oracle.
+the same bytes to the rules oracle. `State.Digest` is the companion primitive for the resulting
+state (a stable, domain-separated hash over the packed state value, well defined because the policy
+pins the layout), so the same audit layer can attest which state an action produced and reproduce
+it by replaying the same events over a reference build.
 
 ## Related Work
 

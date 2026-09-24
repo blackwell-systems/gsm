@@ -684,7 +684,12 @@ it (a rule written with the sugar surface digests identically to the equivalent 
 combinators). Because the digested bytes are exactly the rules oracle's input, an anchored digest
 and the re-checked artifact cannot diverge. This is the interchange contract that lets a system
 outside gsm commit a policy's identity (for example in a cryptographic audit log) and hand the same
-bytes to the extracted oracle for an independent convergence verdict.
+bytes to the extracted oracle for an independent convergence verdict. `State.Digest` is the
+companion primitive for a state: a stable, domain-separated hash over the packed state value, well
+defined because the policy pins the layout. Because the convergence engine is deterministic given a
+policy and an event set, a verifier can reproduce a committed state digest by replaying the same
+events over a reference build, a per-run check of the actual execution against the verified model
+(distinct from the refinement question, which asks about all possible inputs and remains open).
 
 ---
 
