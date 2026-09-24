@@ -23,11 +23,12 @@ import (
 // acyclic, single-source morphisms satisfy M1, and resolvers satisfy R1/R2 — all by finite
 // enumeration. A FedMachine exists only if the whole network is proven convergent.
 type Federation struct {
-	name      string
-	comps     []*Registry
-	idx       map[*Registry]int
-	edges     []edgeDef
-	resolvers map[*Registry]Resolver
+	name        string
+	comps       []*Registry
+	idx         map[*Registry]int
+	edges       []edgeDef
+	resolvers   map[*Registry]Resolver
+	allowCycles bool
 }
 
 // A Resolver merges the morphism images of a target's incoming edges into its shared
@@ -65,6 +66,19 @@ func NewFederation(name string) *Federation {
 func (f *Federation) Resolve(target *Registry, r Resolver) *Federation {
 	f.register(target)
 	f.resolvers[target] = r
+	return f
+}
+
+// AllowMonotoneCycles permits cyclic morphism networks. By default the network must be
+// acyclic (the paper's tree/DAG theorems). With this opt-in, Build instead requires every
+// morphism/resolver to be MONOTONE with respect to the componentwise order on variable
+// values, and computes the federated normal form by Kleene iteration to the least fixed
+// point. This is the paper's "Monotone Convergence Despite Cycles" theorem: on ordered
+// (lattice) shared domains, a monotone repair operator converges — order-independently, by
+// chaotic iteration — even when the constraint graph has cycles. Non-monotone cyclic
+// networks (e.g. the negation counterexample) are still rejected.
+func (f *Federation) AllowMonotoneCycles() *Federation {
+	f.allowCycles = true
 	return f
 }
 
@@ -165,10 +179,14 @@ type FedMachine struct {
 	idx       map[*Registry]int
 	byName    map[string]*Registry // component name → registry, for name-keyed replay
 	edges     []fedEdge
-	topo      []int      // component indices in topological (source-first) order
+	topo      []int      // component indices in topological (source-first) order (acyclic only)
 	out       [][]int    // out[i] = edge indices for morphisms with src == i
 	in        [][]int    // in[j] = edge indices for morphisms with dst == j
 	resolvers []Resolver // resolvers[j] merges a multi-source target's incoming edges (nil if none)
+
+	cyclic    bool    // true when the network has cycles (requires monotone repair)
+	sharedVar [][]int // sharedVar[j] = var indices of j that some morphism controls (reset to ⊥)
+	kleeneCap int     // safe upper bound on Kleene iteration rounds
 }
 
 // FedState is a compact federated state: one component State per registry.
@@ -229,13 +247,56 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 		return nil, report, err
 	}
 
+	// The shared variables of each target (union across its incoming morphisms) — the
+	// components reset to bottom before Kleene iteration in the cyclic case.
+	m.sharedVar = make([][]int, len(f.comps))
+	for _, e := range f.edges {
+		di := f.idx[e.dst]
+		for _, v := range e.shared {
+			if !containsInt(m.sharedVar[di], v.index) {
+				m.sharedVar[di] = append(m.sharedVar[di], v.index)
+			}
+		}
+	}
+
 	topo, err := m.topoSort()
 	if err != nil {
-		return nil, report, err
+		// A cycle. Allowed only under AllowMonotoneCycles, and only if repair is monotone.
+		if !f.allowCycles {
+			return nil, report, err
+		}
+		m.cyclic = true
+		if err := f.verifyMonotone(); err != nil {
+			return nil, report, err
+		}
+		m.kleeneCap = m.monotoneChainBound()
+	} else {
+		m.topo = topo
 	}
-	m.topo = topo
 
 	return m, report, nil
+}
+
+func containsInt(xs []int, x int) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+// monotoneChainBound bounds the number of Kleene rounds: on a finite lattice a strictly
+// ascending chain of the shared components can rise at most (sum of shared-var domain sizes)
+// times, so this many rounds always reaches the fixed point. Plus slack.
+func (m *FedMachine) monotoneChainBound() int {
+	total := 2
+	for j, vars := range m.sharedVar {
+		for _, vi := range vars {
+			total += m.comps[j].vars[vi].domain
+		}
+	}
+	return total
 }
 
 // verify enforces the structural conditions federated convergence requires. Tree-shaped
@@ -456,6 +517,133 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 	return nil
 }
 
+// monotoneGuard bounds the source-combination space for the (all-pairs) monotonicity check.
+const monotoneGuard = 1024
+
+// verifyMonotone checks that every target's repair is monotone with respect to the
+// componentwise order on variable values — the hypothesis of the Monotone Convergence Despite
+// Cycles theorem. Source-determinacy (already verified) lets us evaluate each target's shared
+// image against a fixed target state, so monotonicity reduces to: over all pairs of valid
+// source combinations P ⊑ P', the shared image is ⊑-ordered too. A non-monotone repair (e.g.
+// the negation counterexample) is rejected.
+func (f *Federation) verifyMonotone() error {
+	inEdges := make([][]edgeDef, len(f.comps))
+	for _, e := range f.edges {
+		inEdges[f.idx[e.dst]] = append(inEdges[f.idx[e.dst]], e)
+	}
+	for ti, edges := range inEdges {
+		if len(edges) == 0 {
+			continue // source registry: no repair to check
+		}
+		target := f.comps[ti]
+
+		// Distinct sources (edge order) and the shared variables they control.
+		var sources []*Registry
+		seenSrc := map[*Registry]bool{}
+		var sharedVars []Var
+		sharedSeen := map[int]bool{}
+		for _, e := range edges {
+			if !seenSrc[e.src] {
+				seenSrc[e.src] = true
+				sources = append(sources, e.src)
+			}
+			for _, v := range e.shared {
+				if !sharedSeen[v.index] {
+					sharedSeen[v.index] = true
+					sharedVars = append(sharedVars, v)
+				}
+			}
+		}
+
+		srcValids := make([][]State, len(sources))
+		n := 1
+		for i, s := range sources {
+			srcValids[i] = s.validStates()
+			if len(srcValids[i]) == 0 {
+				n = 0
+				break
+			}
+			if n > monotoneGuard/len(srcValids[i]) {
+				return fmt.Errorf("gsm: monotonicity check for %q: source space exceeds %d combinations", target.name, monotoneGuard)
+			}
+			n *= len(srcValids[i])
+		}
+		if n == 0 {
+			continue
+		}
+
+		points := cartesianStates(srcValids)
+		resolver := f.resolvers[target]
+		dst0 := State{vars: target.vars} // fixed target; shared image is source-determined
+		// shared image (raw values of shared vars) for a source combination.
+		image := func(combo []State) []uint64 {
+			var out State
+			if resolver != nil {
+				m := make(map[string]State, len(sources))
+				for i, s := range sources {
+					m[s.name] = combo[i]
+				}
+				out = resolver(dst0, m)
+			} else {
+				out = edges[0].mapFn(combo[0], dst0)
+			}
+			raw := make([]uint64, len(sharedVars))
+			for i, v := range sharedVars {
+				raw[i] = out.getRaw(v)
+			}
+			return raw
+		}
+
+		for a := range points {
+			for b := range points {
+				if pointsLE(points[a], points[b]) && !rawLE(image(points[a]), image(points[b])) {
+					return fmt.Errorf("gsm: repair for %q is not monotone — cyclic federations require "+
+						"monotone morphisms/resolvers (a non-monotone repair, e.g. negation, cannot converge "+
+						"on cycles; see the Monotone Convergence theorem). Use an acyclic network instead", target.name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// cartesianStates returns every combination picking one state from each set.
+func cartesianStates(sets [][]State) [][]State {
+	out := [][]State{{}}
+	for _, set := range sets {
+		var next [][]State
+		for _, prefix := range out {
+			for _, s := range set {
+				combo := append(append([]State(nil), prefix...), s)
+				next = append(next, combo)
+			}
+		}
+		out = next
+	}
+	return out
+}
+
+// pointsLE is the componentwise order on aligned source-state tuples.
+func pointsLE(a, b []State) bool {
+	for i := range a {
+		for _, v := range a[i].vars {
+			if a[i].getRaw(v) > b[i].getRaw(v) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func rawLE(a, b []uint64) bool {
+	for i := range a {
+		if a[i] > b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // validStates enumerates the registry's valid states (valid encoding + all invariants hold).
 // Bounded by the same ≤20-bit ceiling Build enforces per component.
 func (r *Registry) validStates() []State {
@@ -543,6 +731,9 @@ func (m *FedMachine) Normalize(fs FedState) FedState {
 	for i, c := range m.comps {
 		out.states[i] = c.Normalize(out.states[i])
 	}
+	if m.cyclic {
+		return m.normalizeCyclic(out)
+	}
 	// Phase 2: visit components source-first, setting each target's shared component exactly
 	// once. Because sources precede their targets in topological order, every source is
 	// finalized before the target that consumes it — single or multi.
@@ -550,15 +741,46 @@ func (m *FedMachine) Normalize(fs FedState) FedState {
 		if len(m.in[j]) == 0 {
 			continue // a source registry has no shared component to set
 		}
-		if r := m.resolvers[j]; r != nil {
-			out.states[j] = r(out.states[j], m.sourcesOf(out, j)) // multi-source merge
-		} else {
-			// exactly one incoming edge (multi-source without a resolver is rejected at Build)
-			e := m.edges[m.in[j][0]]
-			out.states[j] = e.mapFn(out.states[e.src], out.states[j])
-		}
+		out.states[j] = m.repair(out, j)
 	}
 	return out
+}
+
+// repair recomputes target j's state from its sources (single-source morphism or resolver).
+func (m *FedMachine) repair(fs FedState, j int) State {
+	if r := m.resolvers[j]; r != nil {
+		return r(fs.states[j], m.sourcesOf(fs, j))
+	}
+	e := m.edges[m.in[j][0]] // exactly one incoming (multi-source without a resolver is rejected)
+	return e.mapFn(fs.states[e.src], fs.states[j])
+}
+
+// normalizeCyclic computes the federated normal form on a cyclic (but monotone) network by
+// Kleene iteration: reset every shared component to bottom, then apply repair until a fixed
+// point. Monotonicity (verified at Build) guarantees this ascending iteration converges to
+// the least fixed point, order-independently — the Monotone Convergence Despite Cycles result.
+func (m *FedMachine) normalizeCyclic(out FedState) FedState {
+	for j, vars := range m.sharedVar {
+		for _, vi := range vars {
+			out.states[j] = out.states[j].setRaw(m.comps[j].vars[vi], 0) // ⊥ = componentwise minimum
+		}
+	}
+	for round := 0; round < m.kleeneCap; round++ {
+		changed := false
+		for j := range m.comps {
+			if len(m.in[j]) == 0 {
+				continue
+			}
+			if next := m.repair(out, j); next.ID() != out.states[j].ID() {
+				out.states[j] = next
+				changed = true
+			}
+		}
+		if !changed {
+			return out // fixed point
+		}
+	}
+	return out // safety net; monotonicity guarantees convergence within kleeneCap
 }
 
 // sourcesOf gathers the (finalized) states of a target's source registries, keyed by source

@@ -342,6 +342,108 @@ func TestFederation_BranchingTree(t *testing.T) {
 	}
 }
 
+// buildMonotoneMesh builds a CYCLIC federation: a 3-cycle A→B→C→A where each node's shared
+// `s` takes the max of its predecessor's request and shared value. max is monotone, so the
+// highest request propagates all the way around the cycle — convergence without acyclicity
+// (the Monotone Convergence Despite Cycles theorem).
+func buildMonotoneMesh(t *testing.T) (m *FedMachine, regs [3]*Registry, sV [3]Var) {
+	t.Helper()
+	names := [3]string{"A", "B", "C"}
+	var reqV [3]Var
+	for i := 0; i < 3; i++ {
+		r := NewRegistry(names[i])
+		reqV[i] = r.Int("req", 0, 3)
+		sV[i] = r.Int("s", 0, 3)
+		val, rq := i+1, reqV[i]
+		r.Event(fmt.Sprintf("req%d", val)).Writes(rq).
+			Apply(func(st State) State { return st.SetInt(rq, val) }).Add()
+		regs[i] = r
+	}
+	fed := NewFederation("mesh").AllowMonotoneCycles()
+	for i := 0; i < 3; i++ {
+		pred := (i + 2) % 3 // A←C, B←A, C←B  (edges C→A, A→B, B→C form a cycle)
+		src, dst := regs[pred], regs[i]
+		pReq, pS, dS := reqV[pred], sV[pred], sV[i]
+		fed.Morphism(src, dst).Shared(dS).
+			Map(func(srcNF, d State) State {
+				mx := srcNF.GetInt(pReq)
+				if v := srcNF.GetInt(pS); v > mx {
+					mx = v
+				}
+				return d.SetInt(dS, mx)
+			}).Add()
+	}
+	mm, rep, err := fed.Build()
+	if err != nil {
+		t.Fatalf("monotone mesh failed to build: %v\n%s", err, rep)
+	}
+	return mm, regs, sV
+}
+
+// TestFederation_MonotoneMeshConverges is the M4+ headline: a CYCLIC network converges, and
+// converges order-independently, because its repair is monotone. The max request (3) reaches
+// every node around the cycle.
+func TestFederation_MonotoneMeshConverges(t *testing.T) {
+	m, regs, sV := buildMonotoneMesh(t)
+
+	s := m.NewState()
+	s = m.Apply(s, regs[0], "req1")
+	s = m.Apply(s, regs[1], "req2")
+	s = m.Apply(s, regs[2], "req3")
+	for i := 0; i < 3; i++ {
+		if got := m.Of(s, regs[i]).GetInt(sV[i]); got != 3 {
+			t.Fatalf("node %s: s=%d, want 3 (max request propagates around the cycle)", regs[i].name, got)
+		}
+	}
+	if !m.IsValid(s) {
+		t.Fatal("mesh fixed point is not federally valid")
+	}
+
+	// Order independence: applying the same events in a different order reaches the same state.
+	s2 := m.NewState()
+	s2 = m.Apply(s2, regs[2], "req3")
+	s2 = m.Apply(s2, regs[0], "req1")
+	s2 = m.Apply(s2, regs[1], "req2")
+	for i := 0; i < 3; i++ {
+		if m.Of(s, regs[i]).ID() != m.Of(s2, regs[i]).ID() {
+			t.Fatalf("cyclic mesh is order-dependent at node %s", regs[i].name)
+		}
+	}
+}
+
+// TestFederation_NonMonotoneCycleRejected confirms a cyclic network with non-monotone repair
+// (the negation counterexample) is rejected even under AllowMonotoneCycles.
+func TestFederation_NonMonotoneCycleRejected(t *testing.T) {
+	a := NewRegistry("A")
+	as := a.Bool("s")
+	b := NewRegistry("B")
+	bs := b.Bool("s")
+	fed := NewFederation("flip").AllowMonotoneCycles().
+		Morphism(a, b).Shared(bs).Map(func(src, d State) State { return d.SetBool(bs, !src.GetBool(as)) }).Add().
+		Morphism(b, a).Shared(as).Map(func(src, d State) State { return d.SetBool(as, !src.GetBool(bs)) }).Add()
+
+	if _, _, err := fed.Build(); err == nil || !strings.Contains(err.Error(), "monotone") {
+		t.Fatalf("expected non-monotone cycle rejection, got: %v", err)
+	}
+}
+
+// TestFederation_CycleRejectedWithoutOptIn confirms cycles are still rejected by default
+// (even monotone ones) unless AllowMonotoneCycles is set.
+func TestFederation_CycleRejectedWithoutOptIn(t *testing.T) {
+	a := NewRegistry("A")
+	av := a.Int("v", 0, 3)
+	b := NewRegistry("B")
+	bv := b.Int("v", 0, 3)
+	// Monotone 2-cycle, but no AllowMonotoneCycles() — must be rejected as a cycle.
+	fed := NewFederation("no-optin").
+		Morphism(a, b).Shared(bv).Map(func(src, d State) State { return d.SetInt(bv, src.GetInt(av)) }).Add().
+		Morphism(b, a).Shared(av).Map(func(src, d State) State { return d.SetInt(av, src.GetInt(bv)) }).Add()
+
+	if _, _, err := fed.Build(); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("expected cycle rejection without opt-in, got: %v", err)
+	}
+}
+
 // TestFederation_PartialSyncEquivalence proves Corollary 8.10 as a network protocol: a
 // distributed system where each node holds only its own component Machine and receives just
 // its parent's shared projection (never the full federated state) reaches exactly the same
