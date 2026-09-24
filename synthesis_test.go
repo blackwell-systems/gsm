@@ -81,6 +81,10 @@ func TestSynthesize_ProvesImpossible(t *testing.T) {
 	if !strings.Contains(syn.String(), "IMPOSSIBLE") {
 		t.Fatalf("report should state impossibility:\n%s", syn)
 	}
+	// The impossibility should come with an actionable witness (the unreconcilable pair).
+	if syn.Witness() == "" || !strings.Contains(syn.Witness(), "set1") || !strings.Contains(syn.Witness(), "set2") {
+		t.Fatalf("expected a witness naming the conflicting events, got: %q", syn.Witness())
+	}
 }
 
 // TestSynthesize_Scales: a registry whose repair-assignment space (8 invalid × 8 valid =
@@ -112,6 +116,17 @@ func TestSynthesize_Scales(t *testing.T) {
 		t.Fatalf("expected a convergent compensation (per-variable clamp):\n%s", syn)
 	}
 	t.Logf("solved a 8^8 ≈ 16.7M-assignment problem in %d backtracking nodes", syn.Nodes)
+	// Minimal-change preference: each invalid state (x∈{2,3}) should repair by changing ONLY
+	// x (a clamp), leaving y and z untouched — the sensible repair, not an arbitrary one.
+	for _, rp := range syn.Repairs() {
+		from, to := rp[0], rp[1]
+		if from.GetBool(y) != to.GetBool(y) || from.GetBool(z) != to.GetBool(z) {
+			t.Fatalf("non-minimal repair: %s → %s changed y or z (expected x-only clamp)", from, to)
+		}
+		if to.GetInt(x) > 1 {
+			t.Fatalf("repair %s → %s did not restore x≤1", from, to)
+		}
+	}
 	m := syn.Machine()
 	// spot-check order-independence of two independent events through the synthesized machine.
 	s0 := m.Apply(m.NewState(), "incx") // x=1 (valid); drive x to 2 to exercise repair

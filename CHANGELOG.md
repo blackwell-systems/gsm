@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Least-invasive repair by default**: synthesis orders each invalid state's candidate repairs by how few variables they change (nearest valid state first), so the representative compensation is the minimal, likely-sensible one — e.g. "clamp the violating variable" rather than an arbitrary reset. Directly mitigates the convergent-≠-desirable caveat.
+- **Impossibility witness** (`Synthesis.Witness`): when no compensation converges, synthesis surfaces a concrete critical pair — two events that from a valid state reach *distinct already-valid states* — that no repair can reconcile. Makes "redesign the events" actionable instead of a bare verdict.
+
 ### Changed
 - **Compensation synthesis now scales via backtracking + forward-checking** (was brute-force enumeration over `|valid|^|invalid|`). Same completeness — it finds a convergent compensation iff one exists, and proves impossibility by exhaustion — but it prunes the assignment tree, handling spaces far beyond the old `2^20` cap (a test solves an `8^8 ≈ 16.7M`-assignment problem in ~10 nodes). Still worst-case exponential (CC synthesis is NP-hard); a search budget now distinguishes **provably impossible** (exhaustive) from **undetermined** (budget hit — a SAT/SMT encoding would settle those). `Synthesis` fields changed: `Alternatives`/`Searched` → `Exhaustive`/`Nodes`.
 

@@ -20,6 +20,7 @@ type Synthesis struct {
 	nf       []uint64 // representative convergent normal-form table (nil if none)
 	step     [][]uint64
 	invalids []uint64 // packed invalid states (for Repairs())
+	witness  string   // when impossible: why (a critical pair no repair can reconcile)
 }
 
 // Synthesize searches for a compensation (a normal-form map on invalid states) that makes the
@@ -77,6 +78,32 @@ func (r *Registry) Synthesize() (*Synthesis, error) {
 	}
 	pairs := r.ccPairs()
 
+	// Prefer least-invasive repairs: order each invalid state's candidate targets by how many
+	// variables they change (nearest valid state first). Backtracking's first solution is then
+	// biased toward a sensible, minimal repair rather than an arbitrary one.
+	dist := func(a, b uint64) int {
+		d := 0
+		for _, v := range r.vars {
+			mask := uint64((1 << v.bits) - 1)
+			if (a>>v.offset)&mask != (b>>v.offset)&mask {
+				d++
+			}
+		}
+		return d
+	}
+	targets := make([][]int, len(invalids))
+	for k, inv := range invalids {
+		ts := append([]int(nil), valids...)
+		sort.Slice(ts, func(a, b int) bool {
+			da, db := dist(uint64(inv), uint64(ts[a])), dist(uint64(inv), uint64(ts[b]))
+			if da != db {
+				return da < db
+			}
+			return ts[a] < ts[b]
+		})
+		targets[k] = ts
+	}
+
 	// nf starts as identity; valid and non-encoding states are permanently "assigned".
 	nf := make([]uint64, packedCount)
 	assigned := make([]bool, packedCount)
@@ -105,7 +132,7 @@ func (r *Registry) Synthesize() (*Synthesis, error) {
 			return false
 		}
 		inv := invalids[k]
-		for _, target := range valids {
+		for _, target := range targets[k] {
 			nf[inv] = uint64(target)
 			assigned[inv] = true
 			if forwardCheck(nf, assigned, rawStep, validEnc, isValidState, pairs) {
@@ -128,6 +155,9 @@ func (r *Registry) Synthesize() (*Synthesis, error) {
 		Exhaustive: !budgetHit,
 		Nodes:      nodes,
 		r:          r,
+	}
+	if !found && !budgetHit {
+		out.witness = r.impossibilityWitness(rawStep, isValidState, pairs)
 	}
 	for _, s := range invalids {
 		out.invalids = append(out.invalids, uint64(s))
@@ -239,6 +269,38 @@ func forwardCheck(nf []uint64, assigned []bool, rawStep [][]uint64, validEnc, is
 	return true
 }
 
+// impossibilityWitness looks for a critical pair that no compensation can reconcile: two
+// independent events that, from a valid state, both reach already-VALID states which then
+// diverge. Since compensation is the identity on valid states, no repair can close this — a
+// concrete, actionable reason to redesign the events. Returns "" if no such witness exists
+// (the impossibility is subtler than a valid critical pair).
+func (r *Registry) impossibilityWitness(rawStep [][]uint64, isValidState []bool, pairs [][2]int) string {
+	names := make([]string, len(r.events))
+	for i, ev := range r.events {
+		names[i] = ev.name
+	}
+	for s := 0; s < len(isValidState); s++ {
+		if !isValidState[s] {
+			continue
+		}
+		u := uint64(s)
+		for _, p := range pairs {
+			a, b := rawStep[p[0]][u], rawStep[p[1]][u]
+			if !isValidState[a] || !isValidState[b] {
+				continue
+			}
+			c, d := rawStep[p[1]][a], rawStep[p[0]][b]
+			if isValidState[c] && isValidState[d] && c != d {
+				return fmt.Sprintf("from %s, events %q and %q reach distinct valid states %s vs %s — "+
+					"both already valid, so no compensation can reconcile them",
+					State{packed: u, vars: r.vars}, names[p[0]], names[p[1]],
+					State{packed: c, vars: r.vars}, State{packed: d, vars: r.vars})
+			}
+		}
+	}
+	return ""
+}
+
 // Machine returns a ready-to-use Machine built from the synthesized compensation, or nil if
 // no convergent compensation was found.
 func (s *Synthesis) Machine() *Machine {
@@ -268,6 +330,10 @@ func (s *Synthesis) Repairs() [][2]State {
 	return out
 }
 
+// Witness returns, for a provably-impossible synthesis, a concrete critical pair that no
+// compensation can reconcile — or "" if none was found or the synthesis is not impossible.
+func (s *Synthesis) Witness() string { return s.witness }
+
 // String renders a human-readable synthesis report.
 func (s *Synthesis) String() string {
 	var b strings.Builder
@@ -280,6 +346,9 @@ func (s *Synthesis) String() string {
 		}
 	case s.Exhaustive:
 		fmt.Fprintf(&b, "  IMPOSSIBLE — no compensation converges (search exhausted).\n")
+		if s.witness != "" {
+			fmt.Fprintf(&b, "  Witness: %s.\n", s.witness)
+		}
 		fmt.Fprintf(&b, "  These invariants and events cannot converge under any compensation; redesign the events.\n")
 	default:
 		fmt.Fprintf(&b, "  UNDETERMINED — no compensation found within the search budget (%d nodes); one may exist.\n", maxSynthNodes)
