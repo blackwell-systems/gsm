@@ -21,6 +21,11 @@
 // lets a preference steer the choice, and Optimal returns the provably minimum-cost
 // repair. See Synthesize and Synthesis.
 //
+// Rules can be declared as Go closures (Holds/Repair/Apply) or from a fixed
+// combinator vocabulary (DeclInvariant/DeclEvent with V/Lit/Add/Sub, Le/Lt/Eq/
+// And/Or/Not, Set/Do); combinator rules are data, so they are inspectable,
+// serializable, and can be re-certified by checkers extracted from the proof.
+//
 // This implements the single-registry model (Section 3) and the federated
 // convergence model (Section 8) of "Normalization Confluence in Federated
 // Registry Networks" (Blackwell, 2026).

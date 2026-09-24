@@ -23,6 +23,7 @@ If you're looking for:
 - [Why These Properties Guarantee Convergence](#why-these-properties-guarantee-convergence)
 - [Visual Examples](#visual-examples)
 - [Glossary: Paper Terms → Code](#glossary-paper-terms--code)
+- [Rule Expression Layers](#rule-expression-layers)
 - [Common Misconceptions](#common-misconceptions)
 - [Further Reading](#further-reading)
 
@@ -428,6 +429,11 @@ WFC failure: compensation does not terminate
 | **Synthesis** | `Registry.Synthesize` | Generate a CC-satisfying compensation from invariants + events (the inverse of verifying one) |
 | **Repair target** | `Synthesis.Repairs` | Where each invalid state is repaired to, in a synthesized compensation |
 | **Impossibility witness** | `Synthesis.Witness` | A critical pair no compensation can reconcile (why synthesis returned IMPOSSIBLE) |
+| **Combinator rule** | `DeclInvariant` / `DeclEvent` | An invariant or event built from a fixed vocabulary as inspectable data, instead of an opaque closure |
+| **Sugar layer** | `AtMost`, `Inc`, `r.Rule(...)`, `r.On(...)` | Read-as-English surface that lowers to the primitive combinators |
+| **Rules serialization** | `Registry.WriteMachineAST` | Emit the combinator rules as S-expressions for the extracted rules oracle |
+| **Compositional build** | `Registry.BuildCompositional` | Verify each footprint component independently, so cost scales with the largest component, not the whole machine |
+| **Oracle** | Extracted Coq checker (`checker` / `astchecker`) | Independently re-certifies gsm's convergence verdict, from tables or from rules |
 
 > **Synthesis vs. verification.** `Build` *checks* the compensation you supplied (WFC + CC).
 > `Synthesize` does the inverse: given only the invariants (validity) and events, it *searches*
@@ -435,6 +441,39 @@ WFC failure: compensation does not terminate
 > compensation (least-invasive by default; steer it with `Prefer`, or get the provably minimal
 > one with `Optimal`), or proving that none converges. Convergent is not the same as desirable:
 > it only makes orderings agree, so inspect or steer the repair.
+
+---
+
+## Rule Expression Layers
+
+Rules can be written at two levels, and both lower to the *same* underlying expression tree:
+
+**Sugar layer (for humans):**
+
+```go
+r.Rule("a_cap").Require(AtMost(a, 3)).RepairWith(SetTo(a, 3)).Add()
+r.On("inc_a").Does(Inc(a)).Add()
+```
+
+**Primitive layer (analyzable core):**
+
+```go
+r.DeclInvariant("a_cap", Le(V(a), Lit(3)), Do(Set(a, Lit(3))))
+r.DeclEvent("inc_a", Do(Set(a, Add(V(a), Lit(1)))))
+```
+
+`AtMost`/`Inc`/`SetTo` and the `Rule`/`On` builders desugar to the primitive combinators. The
+layering is deliberate: write for people at the top, but the *primitive* layer is what gets
+serialized, tested, and handed to the verified oracle. A load-bearing test
+(`sugar_test.go`, `TestSugar_LowersToPrimitives`) pins that the two spellings serialize to
+byte-identical rules, so no behavior can hide in the sugar that the analyzable core (and the
+proof-derived checker) would not see.
+
+Because combinator rules are data rather than closures, their footprints are *derived* from the
+tree (no `Watches`/`Writes` to declare or mis-declare), they serialize via
+`Registry.WriteMachineAST`, and they can be re-certified by an extracted, machine-checked checker
+(see the "Oracle" glossary entry and ARCHITECTURE.md). Closure rules stay fully supported; they
+just cannot be serialized or independently re-certified.
 
 ---
 
@@ -498,6 +537,16 @@ For business logic state machines (order workflows, authorization states, invent
 
 CRDTs: `op1; op2 = op2; op1` (operations commute)
 gsm: `NF(op1; op2) = NF(op2; op1)` (normal forms converge)
+
+---
+
+### "The sugar layer hides behavior"
+
+**False**. The ergonomic helpers (`AtMost`, `Inc`, `Rule`/`On`, ...) are pure syntax: each one
+lowers to the same primitive combinators, and a test pins that a machine written with the sugar
+serializes to *byte-identical* rules as the same machine written with the primitives. The
+analyzable core, and the extracted checker that re-certifies it, see exactly what you wrote, with
+nothing added or elided by the friendly surface. See [Rule Expression Layers](#rule-expression-layers).
 
 ---
 

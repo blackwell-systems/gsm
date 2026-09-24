@@ -224,6 +224,8 @@ r.On("inc_a").Does(Inc(a)).Add()
 
 Either spelling can be cross-checked against the verified **rules oracle**: `WriteMachineAST` emits the machine as S-expressions and the OCaml `astchecker` (extracted from the axiom-free Coq proof in `normalization-confluence`) recomputes convergence straight from those rules. See `astoracle_test.go` (`GSM_AST_CHECKER`).
 
+**Serializable fragment.** Only rules built from the combinator vocabulary can be exported to the oracle: variables over `min .. min+domain-1` (any nonnegative `min`); the comparison predicates `Le`/`Lt`/`Eq`/`Ge`/`Gt`/`Ne` and boolean `And`/`Or`/`Not`; the transforms `Set`/`Add`/`Sub`; and events with an optional guard. Closure-based invariants and events cannot be serialized, so `WriteMachineAST` returns an error rather than emit something the checker would misread. gsm's own `Build` verification has no such restriction; the fragment is only the boundary of what the extracted oracle can independently re-certify.
+
 ## API Overview
 
 ### Using Machines
@@ -340,6 +342,35 @@ m, _, _ := gsm.NewFederation("storefront").
     Morphism(catalog, order)./* ... */Add().
     Build()
 ```
+
+## Compositional Verification
+
+`Build` enumerates the whole state space, which caps it at the 2²⁰ (≈1M) state ceiling.
+`BuildCompositional` lifts that cap for machines that are *wide but loosely coupled*: many
+variables, but each invariant and event touches only a few of them.
+
+**When to use it:**
+- Your global state space exceeds the ~1M enumeration ceiling, but
+- The machine decomposes into independent groups of variables (invariants and events with
+  disjoint footprints), each group small on its own.
+
+```go
+m, rep, err := r.BuildCompositional()
+// rep.Components          -> number of independent footprint components
+// rep.MaxComponentStates  -> size of the largest component's subspace (the real cost)
+// rep.FootprintChecked    -> footprint conformance held
+```
+
+**How it works.** gsm partitions the variables into footprint-connected components (union-find),
+verifies WFC and CC over each component's own subspace, and skips cross-component event pairs
+because disjoint footprints commute by structure. Certification cost is exponential in the
+*largest component*, not the whole machine, so a registry of many independent small invariants
+certifies even when its global state space is astronomically large.
+
+**Trade-offs.** The returned `Machine` is *lazy*: it computes `Apply`/`Normalize` at runtime from
+the rules instead of via a precomputed table lookup, and `Export` is unavailable (there are no
+global tables to serialize). Preconditions: every invariant declares its footprint and every
+event its write set (both automatic with the combinator vocabulary), and the zero state is valid.
 
 ## Verification Report
 
@@ -467,7 +498,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 ## Limitations
 
 - **Finite state spaces only** - Cannot model unbounded domains (arbitrary strings, lists)
-- **Build-time cost** - Large state spaces (> 1M states) verification becomes slow
+- **Build-time cost** - Global `Build` enumerates the state space, so it slows past ~1M states; use `BuildCompositional` for machines that decompose into small footprint components (see [Compositional Verification](#compositional-verification)), where cost scales with the largest component rather than the whole machine
 - **Verification requires Go** - Runtime portable via JSON export, but verification engine is Go-only
 - **Federation** - Tree networks, multi-source acyclic DAGs (resolution operators), and monotone *cyclic* networks are all covered by the paper's proofs (Section 8). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2, monotonicity) by exhaustive build-time verification. Only *non-monotone* cycles and multi-source targets without a resolver are rejected at build
 - **No runtime monitoring** - Once built, machine is immutable (cannot add events/invariants dynamically)

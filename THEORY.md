@@ -636,12 +636,47 @@ that gates on the axiom-free property. See the
 [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq).
 
 Beyond the meta-theory, gsm's own per-machine verification is **differentially tested** against
-the proof. A convergence checker is extracted from the Coq development (`coq/extraction`) to a
-runnable binary; `Machine.WriteConvergenceTables` emits a built machine's step tables, and the
-extracted, machine-checked checker re-certifies that they converge (the per-event step functions
-commute and stay in range) independently of gsm's Go. This catches the class of bug where gsm's
-hand-written verifier would wrongly accept a non-convergent machine: the extracted oracle,
-compiled from an axiom-free proof, would reject it.
+the proof, at two different trust boundaries. Both checkers are extracted from the Coq
+development (`coq/extraction`) to runnable binaries, so a bug in gsm's hand-written Go verifier
+cannot make a non-convergent machine pass:
+
+1. **Table oracle.** `Machine.WriteConvergenceTables` emits a built machine's step tables, and
+   the extracted checker re-certifies that they converge (the per-event step functions commute
+   and stay in range) independently of gsm's Go. It trusts that gsm computed the tables, and
+   confirms those tables converge. Proven sound in Coq via `checked_converges` /
+   `check_commuting_sound`. Cross-checked in `oracle_test.go` (`GSM_CONVERGENCE_CHECKER`).
+2. **Rules oracle.** `Registry.WriteMachineAST` serializes the combinator **rules** themselves,
+   and a second extracted checker recomputes each event's step function by evaluating the rule
+   AST (apply the event, then normalize by iterated repair), confirming convergence from scratch.
+   It trusts neither gsm's enumeration nor its tables: it re-derives the verdict straight from the
+   declarations. Proven sound in Coq via `check_sound_converges` / `check_sound_commute`.
+   Cross-checked in `astoracle_test.go` (`GSM_AST_CHECKER`).
+
+**Fragment covered by the rules oracle.** The Coq model of the rules is precise about its scope,
+and `WriteMachineAST` returns an error for anything outside it, so a passing differential test
+always compares semantics-identical checkers:
+
+- **Variables** range over `min .. min+domain-1` for any nonnegative `min`; the state stores the
+  raw `0..domain-1` offset.
+- **Predicates:** comparisons `le`, `lt`, `eq`, `ge`, `gt`, `ne`, and the boolean combinators
+  `and`, `or`, `not`.
+- **Transforms:** `Set`, `Add`, `Sub` (arithmetic over the naturals, truncating at 0).
+- **Events:** an effect transform with an optional guard predicate (a guarded event is a no-op
+  when its guard is false).
+
+Adding a construct to this fragment (as was done for disjunction, guards, and nonzero minimums)
+is a deliberate extension of the grammar in both Go and Coq, not a per-machine cost.
+
+**You do not continuously port machines to Coq.** What is mirrored across the two languages is
+the fixed combinator *grammar* (the handful of expression, predicate, and transform forms above),
+mirrored once in Go (`combinator.go`) and once in Coq (`AstChecker.v`). An individual machine is
+*data* in that grammar; it is never ported or re-proven. You write your rules once in Go, and the
+already-proven checker consumes them. Coq is touched again only when a brand-new grammar primitive
+is added, which is rare and deliberate. And drift between the two mirrors is caught mechanically:
+the differential test fails the moment gsm's Go evaluator and the Coq evaluator disagree on any
+machine. This is the standard "trusted core mirrored in a proof assistant" pattern (a verified
+compiler mirrors its source-language semantics in the proof assistant the same way), with cost
+proportional to the size of the grammar, not to the number of machines built with it.
 
 ---
 
