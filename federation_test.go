@@ -1,6 +1,7 @@
 package gsm
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -106,6 +107,95 @@ func TestFederation_Authority(t *testing.T) {
 	}
 	if ms := m.Of(fs, mfr).Get(mstate); ms != "active" {
 		t.Fatalf("manufacturer drifted to %s, want active (source is unaffected by target events)", ms)
+	}
+}
+
+// TestFederation_TenRegistryChain shows a federation scales to many registries: a 10-deep
+// chain r0→r1→…→r9 where each morphism copies its parent's flag. Turning the root on
+// propagates through all ten levels in a single ρ_Fed (topological order finalizes each
+// parent before its edge fires). No product state space is ever built — the ten components
+// stay independent.
+func TestFederation_TenRegistryChain(t *testing.T) {
+	const N = 10
+	regs := make([]*Registry, N)
+	on := make([]Var, N)
+	for i := 0; i < N; i++ {
+		r := NewRegistry(fmt.Sprintf("r%02d", i))
+		on[i] = r.Bool("on")
+		regs[i] = r
+	}
+	// Only the root has an event; the rest receive state purely through morphisms.
+	regs[0].Event("turn_on").Writes(on[0]).
+		Apply(func(s State) State { return s.SetBool(on[0], true) }).Add()
+
+	fed := NewFederation("chain").Add(regs[0])
+	for i := 1; i < N; i++ {
+		parent, child := regs[i-1], regs[i]
+		pv, cv := on[i-1], on[i]
+		fed.Morphism(parent, child).Shared(cv).
+			Map(func(srcNF, dst State) State { return dst.SetBool(cv, srcNF.GetBool(pv)) }).Add()
+	}
+
+	m, rep, err := fed.Build()
+	if err != nil {
+		t.Fatalf("10-registry chain failed to build: %v\n%s", err, rep)
+	}
+	if len(rep.Components) != N {
+		t.Fatalf("report has %d components, want %d", len(rep.Components), N)
+	}
+
+	// Turn on the root; one Apply propagates the flag through all ten registries.
+	s := m.Apply(m.NewState(), regs[0], "turn_on")
+	for i := 0; i < N; i++ {
+		if !m.Of(s, regs[i]).GetBool(on[i]) {
+			t.Fatalf("registry r%02d did not receive propagation", i)
+		}
+	}
+	if !m.IsValid(s) {
+		t.Fatal("10-registry state is not federally valid")
+	}
+}
+
+// TestFederation_BranchingTree shows federations aren't limited to chains: a root fans out to
+// three children, and one child fans out to two grandchildren (6 registries, still a tree).
+func TestFederation_BranchingTree(t *testing.T) {
+	root := NewRegistry("root")
+	rv := root.Enum("v", "off", "on")
+	root.Event("flip").Apply(func(s State) State { return s.Set(rv, "on") }).Add()
+
+	mkChild := func(name string) (*Registry, Var) {
+		c := NewRegistry(name)
+		return c, c.Enum("v", "off", "on")
+	}
+	a, av := mkChild("a")
+	b, bv := mkChild("b")
+	c, cv := mkChild("c")
+	d, dv := mkChild("d") // grandchild of b
+	e, ev := mkChild("e") // grandchild of b
+
+	copyV := func(src, dst Var) func(State, State) State {
+		return func(srcNF, dstS State) State { return dstS.Set(dst, srcNF.Get(src)) }
+	}
+	fed := NewFederation("tree").
+		Morphism(root, a).Shared(av).Map(copyV(rv, av)).Add().
+		Morphism(root, b).Shared(bv).Map(copyV(rv, bv)).Add().
+		Morphism(root, c).Shared(cv).Map(copyV(rv, cv)).Add().
+		Morphism(b, d).Shared(dv).Map(copyV(bv, dv)).Add().
+		Morphism(b, e).Shared(ev).Map(copyV(bv, ev)).Add()
+
+	m, rep, err := fed.Build()
+	if err != nil {
+		t.Fatalf("branching tree failed to build: %v\n%s", err, rep)
+	}
+
+	s := m.Apply(m.NewState(), root, "flip")
+	for _, pair := range []struct {
+		r *Registry
+		v Var
+	}{{a, av}, {b, bv}, {c, cv}, {d, dv}, {e, ev}} {
+		if m.Of(s, pair.r).Get(pair.v) != "on" {
+			t.Fatalf("registry %q did not receive propagation (incl. 2 levels deep)", pair.r.name)
+		}
 	}
 }
 

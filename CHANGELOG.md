@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 - **Confluence property tests**: an all-independent machine now proves the core convergence guarantee at full strength — every one of the 720 permutations of a 6-event multiset reaches an identical normal form (Theorem 5.4), plus 500 randomized-multiset shuffles and a 2000-step "normal form is always valid" (WFC) walk. Exercises both CC-verification paths (footprint-disjoint and brute-force).
+- **Federation scale tests**: a 10-registry chain (a root flag propagates through all ten levels in one ρ_Fed) and a 6-registry branching tree (fan-out plus two-level depth) confirm federations handle many components and arbitrary tree shapes — no product state space is built.
 - **Validation / guardrail tests**: panic paths (unknown event, invalid enum value, foreign `Var`, enum with <2 values, `Int` max<min, invariant/event builders missing their functions, `Independent` on an unknown event) and behavioral edges (`TrySet` valid/error, `SetInt` clamping, negative-min offset, guarded-out no-op, oversized-state-space build rejection, name accessors). Coverage 89.7% → 96.3%; suite is race-clean.
 
 ### Changed
