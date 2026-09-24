@@ -7,7 +7,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18677400.svg)](https://doi.org/10.5281/zenodo.18677400)
 [![proof: machine-checked](https://github.com/blackwell-systems/normalization-confluence/actions/workflows/verify.yml/badge.svg)](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq)
 
-**Act like UDP, receive like TCP.**
+**Send in any order. Converge on the rules.**
 
 What if distributed systems don't have to coordinate - because they agree on the rules ahead of time, so ordering and compensations are deterministic? The underlying theory - normalization confluence - proves that compensation is sufficient for convergence when two algebraic properties hold, without the expressiveness limits of CRDTs or the latency cost of consensus.
 
