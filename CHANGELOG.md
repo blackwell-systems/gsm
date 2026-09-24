@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-23
+
 ### Changed
-- **Relicensed from MIT to Apache License 2.0.** Adds an explicit patent grant (relevant for a library implementing novel, published algorithms) and a `NOTICE` file citing the underlying papers. Still fully permissive; the papers remain CC-BY-4.0.
+- **Relicensed from MIT to Apache License 2.0.** Adds an explicit patent grant (relevant for a library implementing novel, published algorithms) and a `NOTICE` file citing the underlying papers. Copyright held by Dayna Blackwell, Blackwell Systems. Still fully permissive; no code or API change; the papers remain CC-BY-4.0.
 
 ## [0.4.0] - 2026-09-23
 
