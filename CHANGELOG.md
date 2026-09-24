@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-23
+
+Compensation synthesis grows up: it now scales (backtracking + forward-checking instead of brute force), takes a preference to steer the repair it chooses, can return the provably minimum-cost repair, and surfaces a concrete witness when convergence is impossible. Breaking: two `Synthesis` fields were renamed.
+
 ### Added
 - **Optimal synthesis** (`Optimal` option): branch-and-bound for the provably minimum-cost convergent repair, rather than the first ordering-biased one. Uses the accumulated cost plus an admissible lower bound to prune branches that can't beat the best found. When the search completes (`Exhaustive`) the result is guaranteed optimal; if the budget is hit first it's the best-so-far. `Synthesis.Cost` reports the representative repair's total cost.
 - **Preference-guided synthesis** (`Registry.SynthesizeWith`, `Prefer`): supply a `cost(from, to)` over repairs and synthesis returns the least-costly convergent one it finds (an ordering bias — tries lower-cost targets first). Encodes a domain policy ("prefer hold over cancel", "toward a safe state", "avoid destructive repairs") so the synthesized repair is the one you *want*, while gsm keeps the convergence guarantee. It only chooses among convergent repairs. `Synthesize()` is now `SynthesizeWith()` with the default policy below.
