@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-23
+
+Federated registry networks: gsm now composes multiple registries connected by directed morphisms and proves the whole network converges (Section 8 of the paper), in addition to the single-registry model. Additive — no breaking changes to the single-registry API.
+
 ### Fixed
 - **Export() file permissions**: Changed from 0644 (world-readable) to 0600 (owner-only)
 - **State space overflow**: Added overflow guard before multiplication in Build() to prevent silent int overflow on large variable domains
