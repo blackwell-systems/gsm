@@ -23,22 +23,47 @@ type Synthesis struct {
 	witness  string   // when impossible: why (a critical pair no repair can reconcile)
 }
 
+// SynthOption configures synthesis. See Prefer.
+type SynthOption func(*synthConfig)
+
+type synthConfig struct {
+	cost func(from, to State) int // per-repair cost for candidate ordering (nil → minimal-change)
+}
+
+// Prefer biases synthesis toward the repairs you want. cost(from, to) scores repairing the
+// invalid state `from` to the valid target `to` — lower is more preferred. Synthesis tries
+// lower-cost targets first, so the representative compensation is the least-costly convergent
+// one it finds (an ordering bias, not a guaranteed global optimum). It only chooses AMONG
+// convergent repairs; it never makes a non-convergent repair convergent. Without Prefer,
+// synthesis defaults to minimal-change (fewest variables altered).
+func Prefer(cost func(from, to State) int) SynthOption {
+	return func(c *synthConfig) { c.cost = cost }
+}
+
 // Synthesize searches for a compensation (a normal-form map on invalid states) that makes the
 // registry converge — satisfying WFC and CC — from the invariants' validity predicates and
-// the events alone. Any Repair functions on the invariants are IGNORED: the point is to
-// generate one. It returns a representative convergent compensation if one exists (as a
-// ready-to-use Machine and inspectable Repairs), reports provable impossibility when the
-// search is exhaustive and finds nothing, or reports Exhaustive=false when it hit its search
-// budget without a verdict.
+// the events alone, defaulting to a least-invasive (minimal-change) repair. See SynthesizeWith
+// to steer the choice with a preference.
+func (r *Registry) Synthesize() (*Synthesis, error) { return r.SynthesizeWith() }
+
+// SynthesizeWith is Synthesize with options (see Prefer). Any Repair functions on the
+// invariants are IGNORED: the point is to generate one. It returns a representative convergent
+// compensation if one exists (a ready-to-use Machine and inspectable Repairs), proves
+// impossibility when the search is exhaustive and finds nothing (with a Witness where
+// available), or reports Exhaustive=false when it hit its search budget without a verdict.
 //
-// Convergent does not mean desirable: the synthesized repair merely makes orderings agree.
-// Inspect Repairs() and judge acceptability; if the only convergent repairs are unacceptable,
-// the events — not the compensation — need redesign.
+// Convergent does not mean desirable: a repair merely makes orderings agree. The default
+// ordering prefers minimal-change repairs; use Prefer to encode a domain policy. If the only
+// convergent repairs are unacceptable, the events — not the compensation — need redesign.
 //
 // The search is backtracking with forward-checking (pure Go, no solver dependency); it prunes
-// the assignment tree but is worst-case exponential (as CC synthesis is NP-hard). A SAT/SMT
+// the assignment tree but is worst-case exponential (CC synthesis is NP-hard). A SAT/SMT
 // encoding would push the ceiling further.
-func (r *Registry) Synthesize() (*Synthesis, error) {
+func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
+	var cfg synthConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	if r.totalBits > 20 {
 		return nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
@@ -78,26 +103,32 @@ func (r *Registry) Synthesize() (*Synthesis, error) {
 	}
 	pairs := r.ccPairs()
 
-	// Prefer least-invasive repairs: order each invalid state's candidate targets by how many
-	// variables they change (nearest valid state first). Backtracking's first solution is then
-	// biased toward a sensible, minimal repair rather than an arbitrary one.
-	dist := func(a, b uint64) int {
-		d := 0
-		for _, v := range r.vars {
-			mask := uint64((1 << v.bits) - 1)
-			if (a>>v.offset)&mask != (b>>v.offset)&mask {
-				d++
+	// Candidate ordering: try lower-cost repair targets first, so backtracking's first solution
+	// is the least-costly convergent one it finds. Default cost is minimal-change (fewest
+	// variables altered); Prefer overrides it with a domain policy.
+	cost := cfg.cost
+	if cost == nil {
+		cost = func(from, to State) int {
+			d := 0
+			for _, v := range r.vars {
+				if from.getRaw(v) != to.getRaw(v) {
+					d++
+				}
 			}
+			return d
 		}
-		return d
 	}
 	targets := make([][]int, len(invalids))
 	for k, inv := range invalids {
+		invState := mk(inv)
 		ts := append([]int(nil), valids...)
+		costOf := make(map[int]int, len(ts))
+		for _, t := range ts {
+			costOf[t] = cost(invState, mk(t))
+		}
 		sort.Slice(ts, func(a, b int) bool {
-			da, db := dist(uint64(inv), uint64(ts[a])), dist(uint64(inv), uint64(ts[b]))
-			if da != db {
-				return da < db
+			if costOf[ts[a]] != costOf[ts[b]] {
+				return costOf[ts[a]] < costOf[ts[b]]
 			}
 			return ts[a] < ts[b]
 		})

@@ -136,6 +136,47 @@ func TestSynthesize_Scales(t *testing.T) {
 	}
 }
 
+// TestSynthesize_PreferenceOrdering: when several repairs converge, Prefer steers which one
+// synthesis returns. Here both ok1 and ok2 are convergent repairs for `broken`; the default
+// (minimal-change, ties by index) picks ok1, and a preference for ok2 flips it.
+func TestSynthesize_PreferenceOrdering(t *testing.T) {
+	r := gsm.NewRegistry("twochoice")
+	st := r.Enum("state", "ok1", "ok2", "broken")
+	r.Invariant("not_broken").Watches(st).
+		Holds(func(s gsm.State) bool { return s.Get(st) != "broken" }).Add()
+	r.Event("noop").Apply(func(s gsm.State) gsm.State { return s }).Add()
+
+	target := func(syn *gsm.Synthesis) string {
+		for _, rp := range syn.Repairs() {
+			if rp[0].Get(st) == "broken" {
+				return rp[1].Get(st)
+			}
+		}
+		return ""
+	}
+
+	def, err := r.Synthesize()
+	if err != nil || !def.Convergent {
+		t.Fatalf("default synthesis failed: %v\n%s", err, def)
+	}
+	if got := target(def); got != "ok1" {
+		t.Fatalf("default repair broken → %s, want ok1 (minimal-change tie by index)", got)
+	}
+
+	pref, err := r.SynthesizeWith(gsm.Prefer(func(from, to gsm.State) int {
+		if to.Get(st) == "ok2" {
+			return 0 // most preferred
+		}
+		return 1
+	}))
+	if err != nil || !pref.Convergent {
+		t.Fatalf("preference synthesis failed: %v\n%s", err, pref)
+	}
+	if got := target(pref); got != "ok2" {
+		t.Fatalf("preferred repair broken → %s, want ok2", got)
+	}
+}
+
 // TestBuild_MissingRepairErrors: an invariant without a Repair is fine for Synthesize but
 // Build must refuse it with a clear message (not panic).
 func TestBuild_MissingRepairErrors(t *testing.T) {

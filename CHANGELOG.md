@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Least-invasive repair by default**: synthesis orders each invalid state's candidate repairs by how few variables they change (nearest valid state first), so the representative compensation is the minimal, likely-sensible one — e.g. "clamp the violating variable" rather than an arbitrary reset. Directly mitigates the convergent-≠-desirable caveat.
+- **Preference-guided synthesis** (`Registry.SynthesizeWith`, `Prefer`): supply a `cost(from, to)` over repairs and synthesis returns the least-costly convergent one it finds (an ordering bias — tries lower-cost targets first). Encodes a domain policy ("prefer hold over cancel", "toward a safe state", "avoid destructive repairs") so the synthesized repair is the one you *want*, while gsm keeps the convergence guarantee. It only chooses among convergent repairs. `Synthesize()` is now `SynthesizeWith()` with the default policy below.
+- **Least-invasive repair by default**: with no preference, synthesis orders each invalid state's candidate repairs by how few variables they change (nearest valid state first), so the representative compensation is the minimal, likely-sensible one — e.g. "clamp the violating variable" rather than an arbitrary reset. Directly mitigates the convergent-≠-desirable caveat.
 - **Impossibility witness** (`Synthesis.Witness`): when no compensation converges, synthesis surfaces a concrete critical pair — two events that from a valid state reach *distinct already-valid states* — that no repair can reconcile. Makes "redesign the events" actionable instead of a bare verdict.
 
 ### Changed
