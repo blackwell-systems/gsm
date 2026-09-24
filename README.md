@@ -201,6 +201,18 @@ r.Independent("withdraw", "send_notification")
 
 **Tip**: Events with disjoint `Writes()` sets and non-overlapping invariant footprints are automatically proved commutative via footprint analysis (no exhaustive checking needed).
 
+### Declarative rules (combinators)
+
+Rules can also be written from a fixed, gsm-owned vocabulary instead of Go closures. It still reads as Go, but produces an expression tree gsm can both evaluate and analyze:
+
+```go
+a := r.Int("a", 0, 5)
+r.DeclInvariant("a_cap", Le(V(a), Lit(3)), Do(Set(a, Lit(3)))) // holds when a<=3; repair sets a=3
+r.DeclEvent("inc_a", Do(Set(a, Add(V(a), Lit(1)))))            // a := a + 1
+```
+
+The footprint is **derived** from the tree (the variables it reads and writes), so combinator rules are footprint-conformant by construction: no `Watches`/`Writes` to declare, and nothing to mis-declare. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits. (Prototype.)
+
 ## API Overview
 
 ### Using Machines
