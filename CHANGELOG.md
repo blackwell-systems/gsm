@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Footprint-local verification** (`Registry.BuildCompositional`): certify WFC and CC per footprint component instead of over the whole state space. `Build` is capped by global enumeration (20 bits); `BuildCompositional` partitions variables into footprint-connected components and verifies each over its own (small) subspace, so a machine with many independent small invariants certifies even when its global state space is astronomically large. Cross-component event pairs commute by footprint disjointness (the mechanized `disjoint_events_commute` result); shared-footprint pairs are brute-forced within their component. Returns a lazy `Machine` that computes `Apply`/`Normalize` at runtime from the rules (no global tables, so `Export` is unavailable). Preconditions: every invariant declares a footprint, every event declares its writes, the zero state is valid, and no single component exceeds the enumeration budget.
+
+### Changed
+- The convergence theorem is now **machine-checked** (axiom-free Coq/Rocq; see the `normalization-confluence` `coq/` artifact and the `proof: machine-checked` badge). No library behavior change.
+
 ## [0.6.0] - 2026-09-23
 
 Compensation synthesis grows up: it now scales (backtracking + forward-checking instead of brute force), takes a preference to steer the repair it chooses, can return the provably minimum-cost repair, and surfaces a concrete witness when convergence is impossible. Breaking: two `Synthesis` fields were renamed.

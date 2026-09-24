@@ -16,6 +16,13 @@ type Machine struct {
 	events map[string]int // event name → index
 	step   [][]uint64     // step[event][stateID] → normal form stateID
 	nf     []uint64       // nf[stateID] → normal form stateID
+
+	// Lazy path (BuildCompositional): for machines whose global state space is too
+	// large to tabulate, Apply/Normalize compute at runtime from the rules instead
+	// of O(1) table lookups. step/nf are nil in this mode.
+	lazy       bool
+	invariants []invariantDef
+	eventDefs  []eventDef
 }
 
 // Name returns the machine's name.
@@ -34,6 +41,9 @@ func (m *Machine) Apply(s State, event string) State {
 	if !ok {
 		panic(fmt.Sprintf("gsm: unknown event %q", event))
 	}
+	if m.lazy {
+		return m.lazyApply(m.eventDefs[ei], s)
+	}
 	return State{
 		packed: m.step[ei][s.packed],
 		vars:   m.vars,
@@ -43,6 +53,9 @@ func (m *Machine) Apply(s State, event string) State {
 // Normalize returns the normal form of a state.
 // If the state is already valid, returns it unchanged.
 func (m *Machine) Normalize(s State) State {
+	if m.lazy {
+		return m.lazyNormalize(s)
+	}
 	return State{
 		packed: m.nf[s.packed],
 		vars:   m.vars,
@@ -51,7 +64,51 @@ func (m *Machine) Normalize(s State) State {
 
 // IsValid returns true if all invariants hold for the state.
 func (m *Machine) IsValid(s State) bool {
+	if m.lazy {
+		return m.allHold(s)
+	}
 	return m.nf[s.packed] == s.packed
+}
+
+// --- lazy runtime (BuildCompositional machines) ---
+
+func (m *Machine) allHold(s State) bool {
+	for _, inv := range m.invariants {
+		if !inv.check(s) {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Machine) clamp(s State) State {
+	for _, v := range m.vars {
+		raw := s.getRaw(v)
+		if max := uint64(v.domain - 1); raw > max {
+			s = s.setRaw(v, max)
+		}
+	}
+	return s
+}
+
+func (m *Machine) lazyNormalize(s State) State {
+	for !m.allHold(s) {
+		for _, inv := range m.invariants {
+			if !inv.check(s) {
+				s = inv.repair(s)
+				break
+			}
+		}
+	}
+	return s
+}
+
+func (m *Machine) lazyApply(ev eventDef, s State) State {
+	after := s
+	if ev.guard == nil || ev.guard(s) {
+		after = ev.effect(s)
+	}
+	return m.lazyNormalize(m.clamp(after))
 }
 
 // MergeProjection overwrites, on state s, the target variables named in a shared projection
@@ -147,6 +204,9 @@ type verifyInfo struct {
 //	    def apply(self, state, event):
 //	        return self.step[self.events[event]][state]
 func (m *Machine) Export(path string) error {
+	if m.lazy {
+		return fmt.Errorf("gsm: cannot Export a compositionally-verified machine (no global tables); Export is for Build machines")
+	}
 	eventNames := m.Events()
 
 	vars := make([]varExport, len(m.vars))

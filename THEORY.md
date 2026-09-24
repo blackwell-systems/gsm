@@ -612,6 +612,27 @@ returns the provably minimum-cost one. The problem is NP-hard in general (worst-
 exponential), but the finite state space makes it decidable, and pruning handles registries far
 beyond naive enumeration.
 
+### 9.5 Footprint-local verification (beyond global enumeration)
+
+The Phase 1 and Phase 3 algorithms above enumerate the global state space S, which bounds them
+to small machines. But WFC and CC are local: a repair and an event effect touch only their
+declared footprint, and events with disjoint footprints commute (mechanized:
+`disjoint_events_commute`). So a registry partitions into footprint-connected **components** that
+do not interact, and it suffices to verify each component over the subspace of its own variables.
+`Registry.BuildCompositional` does this: certification cost is exponential in the largest
+component, not in the whole machine, so a registry of many independent small invariants certifies
+even when |S| is astronomically large. It relies on the declared footprints being accurate (as
+the disjointness path in `Build` already does) and on the zero state being valid, and it returns
+a machine that applies events by computing at runtime rather than by table lookup.
+
+### 9.6 Machine-checked meta-theory
+
+The Convergence Theorem (Newman's Lemma plus the WFC/CC discharge) and the soundness of gsm's
+own certification (footprint disjointness implies commutation; potential-decreasing repair
+terminates) are mechanized in Coq/Rocq, axiom-free (`Print Assumptions` reports "Closed under the
+global context"), with CI that gates on the axiom-free property. See the
+[mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq).
+
 ---
 
 ## 10. Comparison to Related Formalisms

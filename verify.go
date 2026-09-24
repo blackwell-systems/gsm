@@ -22,6 +22,10 @@ type Report struct {
 	PairsDisjoint int        // proved by footprint disjointness
 	PairsBrute    int        // proved by exhaustive check
 	CCFailure     *CCFailure // non-nil if CC failed
+
+	// Compositional (BuildCompositional) results
+	Components         int // number of footprint components verified
+	MaxComponentStates int // largest component subspace enumerated
 }
 
 // CCFailure describes a specific CC violation.
