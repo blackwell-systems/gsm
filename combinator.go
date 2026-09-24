@@ -260,9 +260,11 @@ func (r *Registry) DeclEvent(name string, effect Transform) {
 // guard is false.
 func (r *Registry) DeclEventGuarded(name string, guard Pred, effect Transform) {
 	r.events = append(r.events, eventDef{
-		name:   name,
-		writes: effect.writeVars(),
-		guard:  func(s State) bool { return guard.holds(s) },
-		effect: func(s State) State { return effect.apply(s) },
+		name:      name,
+		writes:    effect.writeVars(),
+		guard:     func(s State) bool { return guard.holds(s) },
+		effect:    func(s State) State { return effect.apply(s) },
+		effectAST: effect,
+		guardAST:  guard,
 	})
 }

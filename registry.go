@@ -43,8 +43,10 @@ type eventDef struct {
 	writes []int // indices into vars
 	guard  CheckFunc
 	effect EffectFunc
-	// Combinator AST of the effect, retained by DeclEvent (nil for closures).
+	// Combinator AST of the effect and (optional) guard, retained by DeclEvent /
+	// DeclEventGuarded (nil for closures).
 	effectAST Transform
+	guardAST  Pred
 }
 
 // NewRegistry creates a Registry for a named state machine.

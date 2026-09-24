@@ -63,6 +63,53 @@ func TestMachineAST_WriteAndVerify(t *testing.T) {
 	}
 }
 
+// TestMachineAST_WidenedFragment exercises the parts of the oracle beyond the
+// original fragment: a variable with a nonzero minimum (min=2), an invariant using
+// a disjunction (Or), and a guarded event (OnlyIf). gsm builds it convergent and the
+// verified oracle re-certifies straight from the rules.
+func TestMachineAST_WidenedFragment(t *testing.T) {
+	r := gsm.NewRegistry("widened")
+	a := r.Int("a", 2, 6) // min=2, domain 2..6
+	b := r.Int("b", 0, 4)
+	flag := r.Bool("flag")
+
+	r.Rule("cap_a").Require(gsm.AtMost(a, 5)).RepairWith(gsm.SetTo(a, 5)).Add()
+	// Disjunction that always holds (a >= 2 by construction); exercises Or export/eval.
+	r.Rule("flag_or_a").Require(gsm.Or(gsm.Is(flag, 1), gsm.AtLeast(a, 2))).RepairWith(gsm.Raise(flag)).Add()
+
+	// Guarded increment on a; independent increments on b and flag (disjoint writes commute).
+	r.On("warm").OnlyIf(gsm.Below(a, 6)).Does(gsm.Inc(a)).Add()
+	r.On("inc_b").Does(gsm.Inc(b)).Add()
+	r.On("raise").Does(gsm.Raise(flag)).Add()
+
+	_, rep, err := r.Build()
+	if err != nil {
+		t.Fatalf("build: %v\n%s", err, rep)
+	}
+	if !rep.WFC || !rep.CC {
+		t.Fatalf("gsm expected WFC+CC, got %s", rep)
+	}
+
+	var buf bytes.Buffer
+	if err := r.WriteMachineAST(&buf); err != nil {
+		t.Fatalf("WriteMachineAST: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "widened.machine")
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write machine file: %v", err)
+	}
+
+	checker := os.Getenv("GSM_AST_CHECKER")
+	if checker == "" {
+		t.Skipf("set GSM_AST_CHECKER to run the widened-fragment cross-check\nserialized machine:\n%s", buf.String())
+	}
+	out, err := exec.Command(checker, path).CombinedOutput()
+	t.Logf("verified AST oracle: %s", out)
+	if err != nil {
+		t.Fatalf("verified AST oracle rejected gsm's rules (gsm said WFC+CC): %v", err)
+	}
+}
+
 // TestMachineAST_RejectsNonConvergent confirms the differential test has teeth: a
 // machine whose events do NOT commute (two events write the same variable with
 // order-dependent results, and no compensation restores order-independence) must be

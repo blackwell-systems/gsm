@@ -5,11 +5,12 @@ package gsm
 // extracted from a machine-checked Coq proof, recomputes convergence straight from
 // these rules, so it does not have to trust gsm's Go verification or its tables.
 //
-// This is faithful only for the fragment the Coq model covers: variables in raw
-// 0..domain-1 space (min=0), predicates built from <=,<,==,and,not, transforms
-// built from Set/Add/Sub, and unguarded events. WriteMachineAST returns an error
-// (rather than emit something the oracle would misread) whenever a rule falls
-// outside that fragment, so a passing differential test always compares like semantics.
+// This is faithful for the fragment the Coq model covers: variables over
+// min..min+domain-1 (the state stores the raw offset), predicates built from
+// <=,<,==,>=,>,!=,and,or,not, transforms built from Set/Add/Sub, and events with an
+// optional guard. WriteMachineAST returns an error (rather than emit something the
+// oracle would misread) whenever a rule falls outside that fragment, so a passing
+// differential test always compares like semantics.
 
 import (
 	"fmt"
@@ -80,8 +81,14 @@ func predSexp(p Pred) (string, error) {
 		}
 		return fmt.Sprintf("(%s %s %s)", op, a, b), nil
 	case boolP:
-		if x.op != "and" {
-			return "", fmt.Errorf("gsm: cannot export boolean %q (AST oracle models only 'and'/'not')", x.op)
+		var head string
+		switch x.op {
+		case "and":
+			head = "and"
+		case "or":
+			head = "or"
+		default:
+			return "", fmt.Errorf("gsm: cannot export boolean %q (AST oracle models 'and'/'or'/'not')", x.op)
 		}
 		parts := make([]string, 0, len(x.ps))
 		for _, q := range x.ps {
@@ -91,7 +98,7 @@ func predSexp(p Pred) (string, error) {
 			}
 			parts = append(parts, s)
 		}
-		return "(and " + strings.Join(parts, " ") + ")", nil
+		return "(" + head + " " + strings.Join(parts, " ") + ")", nil
 	case notP:
 		s, err := predSexp(x.p)
 		if err != nil {
@@ -121,16 +128,21 @@ func transformSexp(t Transform) (string, error) {
 // variable is outside the oracle's min=0 raw-value fragment.
 func (r *Registry) WriteMachineAST(w io.Writer) error {
 	doms := make([]string, len(r.vars))
+	mins := make([]string, len(r.vars))
 	for i, v := range r.vars {
 		if v.index != i {
 			return fmt.Errorf("gsm: variable %q index %d out of order", v.name, v.index)
 		}
-		if v.min != 0 {
-			return fmt.Errorf("gsm: cannot export variable %q with min=%d (AST oracle uses raw 0..domain-1 space)", v.name, v.min)
+		if v.min < 0 {
+			return fmt.Errorf("gsm: cannot export variable %q with negative min=%d (AST oracle is over naturals)", v.name, v.min)
 		}
 		doms[i] = fmt.Sprintf("%d", v.domain)
+		mins[i] = fmt.Sprintf("%d", v.min)
 	}
 	if _, err := fmt.Fprintf(w, "(doms %s)\n", strings.Join(doms, " ")); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "(mins %s)\n", strings.Join(mins, " ")); err != nil {
 		return err
 	}
 	for _, inv := range r.invariants {
@@ -150,15 +162,25 @@ func (r *Registry) WriteMachineAST(w io.Writer) error {
 		}
 	}
 	for _, ev := range r.events {
-		if ev.guard != nil {
-			return fmt.Errorf("gsm: event %q is guarded (AST oracle models only unguarded events)", ev.name)
-		}
 		if ev.effectAST == nil {
 			return fmt.Errorf("gsm: event %q has no combinator AST (declare it with DeclEvent to export)", ev.name)
+		}
+		if ev.guard != nil && ev.guardAST == nil {
+			return fmt.Errorf("gsm: event %q has a closure guard with no AST (declare it with DeclEventGuarded to export)", ev.name)
 		}
 		t, err := transformSexp(ev.effectAST)
 		if err != nil {
 			return fmt.Errorf("event %q: %w", ev.name, err)
+		}
+		if ev.guardAST != nil {
+			g, err := predSexp(ev.guardAST)
+			if err != nil {
+				return fmt.Errorf("event %q guard: %w", ev.name, err)
+			}
+			if _, err := fmt.Fprintf(w, "(evwhen %s %s)\n", g, t); err != nil {
+				return err
+			}
+			continue
 		}
 		if _, err := fmt.Fprintf(w, "(ev %s)\n", t); err != nil {
 			return err
