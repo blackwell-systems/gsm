@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Compensation synthesis** (`Registry.Synthesize`): instead of verifying a compensation you wrote, gsm can now *generate* one. Given the invariants' validity predicates and the events (Repair omitted), it searches for a normal-form map on invalid states that satisfies CC — returning a representative convergent compensation as a ready-to-use `Machine` plus an inspectable repair map (`Synthesis.Repairs`), reporting how many alternatives exist, or **proving that no compensation can make the registry converge** (the invariants + events must be redesigned). Convergent ≠ desirable: the synthesized repair only makes orderings agree, so inspect it and judge acceptability. Brute-force over `|valid|^|invalid|`, bounded by an internal cap (a SAT/SMT encoding would lift the ceiling).
+- Invariants may now be declared **without a `Repair`** (validity predicate only) for use with `Synthesize`; `Build` still requires a Repair and now returns a clear error (rather than panicking) when one is missing.
+
 ## [0.4.2] - 2026-09-23
 
 Documentation and CI hygiene; no code or API change.

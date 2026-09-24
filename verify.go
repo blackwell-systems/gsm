@@ -69,6 +69,12 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 	if r.totalBits > 20 {
 		return nil, nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
+	for _, inv := range r.invariants {
+		if inv.repair == nil {
+			return nil, nil, fmt.Errorf("gsm: invariant %q has no Repair; provide one, or call "+
+				"Synthesize to generate a convergent compensation", inv.name)
+		}
+	}
 
 	stateCount := 1
 	for _, v := range r.vars {

@@ -176,13 +176,12 @@ func (ib *InvariantBuilder) Repair(fn EffectFunc) *InvariantBuilder {
 	return ib
 }
 
-// Add registers the invariant with the registry.
+// Add registers the invariant with the registry. A Repair is required for Build (which
+// verifies a given compensation), but may be omitted when the registry is passed to
+// Synthesize, which generates a convergent compensation from the validity predicates alone.
 func (ib *InvariantBuilder) Add() {
 	if ib.def.check == nil {
 		panic(fmt.Sprintf("gsm: invariant %q has no check function", ib.def.name))
-	}
-	if ib.def.repair == nil {
-		panic(fmt.Sprintf("gsm: invariant %q has no repair function", ib.def.name))
 	}
 	ib.r.invariants = append(ib.r.invariants, ib.def)
 }

@@ -88,13 +88,8 @@ func TestPanic_InvariantMissingHolds(t *testing.T) {
 	})
 }
 
-func TestPanic_InvariantMissingRepair(t *testing.T) {
-	r := gsm.NewRegistry("bad")
-	v := r.Bool("v")
-	mustPanic(t, "no repair function", func() {
-		r.Invariant("x").Watches(v).Holds(func(s gsm.State) bool { return true }).Add()
-	})
-}
+// Note: an invariant may be declared without a Repair (that's what Synthesize generates);
+// Build rejects a missing Repair with a clear error — see TestBuild_MissingRepairErrors.
 
 func TestPanic_EventMissingEffect(t *testing.T) {
 	r := gsm.NewRegistry("bad")
