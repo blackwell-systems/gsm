@@ -1,7 +1,23 @@
 // Package gsm implements governed state machines: finite state machines
 // whose states live in a registry that enforces invariants via compensation.
 // Events are applied in any order; the registry guarantees convergence to
-// the same valid state regardless of ordering.
+// the same valid state regardless of ordering. Convergence is verified once,
+// at Build time, by exhaustive state-space enumeration (well-founded
+// compensation + compensation commutativity); runtime application is an O(1)
+// table lookup.
+//
+// Registries also federate. Connect independently-governed registries with
+// directed morphisms that encode cross-registry constraints (a manufacturer's
+// status fixing a supplier's listing, a regulator's rules constraining a bank),
+// and gsm proves the whole network converges — the same build-time guarantee,
+// across organizational boundaries. In a morphism the source is authoritative
+// over its target's shared component, so cross-registry conflicts resolve
+// without coordination. See Federation and FedMachine; the federated normal
+// form is constructive and never materializes the product state space.
+//
+// This implements the single-registry model (Section 3) and the federated
+// convergence model (Section 8) of "Normalization Confluence in Federated
+// Registry Networks" (Blackwell, 2026).
 package gsm
 
 import "fmt"
