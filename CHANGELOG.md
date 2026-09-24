@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Var ownership validation**: getRaw/setRaw now panic with a clear message if a Var from a different Machine is used on a State, preventing silent data corruption
 
 ### Added
+- **Federated registries** (`Federation`, `MorphismBuilder`, `FedMachine`, `FedState`): compose multiple component registries connected by directed registry morphisms encoding cross-registry constraints, per §8 of *Normalization Confluence in Federated Registry Networks*. `FedMachine` applies the constructive two-phase normalizer ρ_Fed (Corollary 8.10) — normalize each component, then propagate shared components through morphisms in topological order — without ever materializing the product state space. Exposes `NewState`/`Of`/`Apply`/`Normalize`/`IsValid`; `Build` verifies each component (WFC + CC) and rejects cyclic networks (Prop 8.13). Directed morphisms give coordination-free conflict resolution via the authority argument (§8.3): a source registry deterministically fixes its targets' shared components. (Milestone M0; M1 build-time validity-preservation and multi-source rejection to follow.)
 - `State.TrySet()` — error-returning alternative to `Set()` for use with user input or external values
 - Clearer panic message in `Set()` showing variable name and invalid value
 
