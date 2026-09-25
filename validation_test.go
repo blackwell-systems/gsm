@@ -80,6 +80,11 @@ func TestPanic_IntMaxLessThanMin(t *testing.T) {
 	mustPanic(t, "max < min", func() { r.Int("range", 5, 1) })
 }
 
+func TestPanic_IntSingleValue(t *testing.T) {
+	r := gsm.NewRegistry("bad")
+	mustPanic(t, "degenerate", func() { r.Int("range", 5, 5) })
+}
+
 func TestPanic_InvariantMissingHolds(t *testing.T) {
 	r := gsm.NewRegistry("bad")
 	v := r.Bool("v")

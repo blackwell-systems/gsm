@@ -133,6 +133,10 @@ func (r *Registry) Int(name string, min, max int) Var {
 	if max < min {
 		panic(fmt.Sprintf("gsm: int %q has max < min", name))
 	}
+	if max == min {
+		panic(fmt.Sprintf("gsm: int %q needs max > min; a single-value range (%d..%d) is a degenerate "+
+			"variable with no states to range over", name, min, max))
+	}
 	domain := max - min + 1
 	bits := bitsNeeded(domain)
 	v := Var{
