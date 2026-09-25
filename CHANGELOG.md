@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Cyclic-federation obstruction diagnostic** (`Federation.DiagnoseCycle`, `CycleDiagnostic`): when a
+  cyclic morphism network is rejected, identify the offending loop and, by iterating its repair from
+  the zero seed, report whether the loop settles or oscillates (with an orbit witness); `Build`'s
+  cycle-rejection error now names the loop. This is the loop-composite fixed-point obstruction from
+  the categorical account: a cycle converges iff its loop composite has a reachable fixed point, so a
+  monotone loop always settles (Knaster-Tarski) and a non-monotone one (for example a negation loop)
+  orbits. Cycle-local and best-effort (a representative zero seed); it explains a rejected cyclic
+  Build rather than re-deciding convergence.
+
 ## [0.9.0] - 2026-09-25
 
 ### Added

@@ -313,6 +313,10 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	if err != nil {
 		// A cycle. Allowed only under AllowMonotoneCycles, and only if repair is monotone.
 		if !f.allowCycles {
+			if path := f.cyclePath(); path != "" {
+				return nil, report, fmt.Errorf("%w: %s (use AllowMonotoneCycles if the repair is monotone, "+
+					"or call DiagnoseCycle to see whether the loop converges)", err, path)
+			}
 			return nil, report, err
 		}
 		m.cyclic = true
