@@ -579,6 +579,7 @@ nothing added or elided by the friendly surface. See [Rule Expression Layers](#r
 
 ### Implementation Details
 
+- [FEDERATION-CONCEPTS.md](FEDERATION-CONCEPTS.md) - The multi-registry sequel: when a whole network of connected registries converges
 - [ARCHITECTURE.md](ARCHITECTURE.md) — How `gsm` implements the theory
 - [README.md](README.md) — API reference and usage examples
 - [nccheck](https://github.com/blackwell-systems/nccheck) — YAML-based verifier (reference implementation from paper)

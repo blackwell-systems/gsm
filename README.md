@@ -621,6 +621,8 @@ Apache License 2.0 - see [LICENSE](LICENSE) and [NOTICE](NOTICE). The accompanyi
 
 ## Further Reading
 
+- [CONCEPTS.md](CONCEPTS.md) - Single-registry convergence, intuitively
+- [FEDERATION-CONCEPTS.md](FEDERATION-CONCEPTS.md) - Federated (multi-registry) convergence, intuitively
 - [Paper: Normalization Confluence in Federated Registry Networks](https://doi.org/10.5281/zenodo.18677400)
 - [Newman's Lemma](https://en.wikipedia.org/wiki/Newman%27s_lemma) - Foundation for confluence proofs
 - [CRDTs](https://crdt.tech/) - Alternative approach via operation commutativity
