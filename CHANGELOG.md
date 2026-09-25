@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-25
+
+### Fixed
+- **Unsatisfiable targets no longer pass vacuously**: `Build` now rejects a morphism or resolver whose
+  target registry has no valid state. M1/R2 were trivially satisfied because the verification loop had
+  no target states to range over; such a target can never converge to a valid state, so it is a
+  definite error rather than a silent pass.
+- **Morphisms are evaluated at a valid representative target**: table extraction (`Certify`), the
+  monotonicity check, and `SharedProjection` previously applied a source-determined morphism to the
+  raw zero-encoded target, which may itself be an invalid state (outside the morphism's contract).
+  They now use a valid representative target. Source-determinacy (verified at `Build`) guarantees the
+  shared image is independent of which valid target is chosen, so results are unchanged for
+  well-formed morphisms and correct for ones that read the target.
+- **`DiagnoseCycle` orbit detection is exact**: orbit repetition is keyed on the full packed state IDs
+  of the cycle components rather than a human-readable shared-carrier string, which could collide (the
+  shared projection omits local state, and the "=,|" delimiters could clash) and report a false orbit.
+- **Single-value `Int` ranges are rejected**: `Int(name, n, n)` compiled to a zero-bit variable with
+  no states to range over. It now panics at declaration, matching `Enum`'s at-least-two-values rule,
+  so the declaration mistake surfaces immediately.
+
+### Changed
+- Internal refactors with no behavior change: the resolver source/shared collection and the
+  mixed-radix source-combination enumeration are unified into shared helpers, and the ~1040-line
+  `federation.go` is split into DSL, verification, and runtime files.
+
 ## [0.9.1] - 2026-09-25
 
 ### Added
