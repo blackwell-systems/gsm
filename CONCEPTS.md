@@ -60,9 +60,9 @@ The **state space** is the set of all possible states your system can be in.
 In `gsm`, states are defined by **finite-domain variables**:
 
 ```go
-status := b.Enum("status", "pending", "paid", "shipped")  // 3 values
-paid := b.Bool("paid")                                     // 2 values
-count := b.Int("count", 0, 5)                              // 6 values
+status := r.Enum("status", "pending", "paid", "shipped")  // 3 values
+paid := r.Bool("paid")                                     // 2 values
+count := r.Int("count", 0, 5)                              // 6 values
 
 // Total state space: 3 × 2 × 6 = 36 states
 ```
@@ -73,7 +73,7 @@ Each state is a unique assignment of values to all variables:
 - ...
 - State 35: `{status=shipped, paid=true, count=5}`
 
-**Why finite?** Because we enumerate all states at build time to verify convergence properties exhaustively.
+**Why finite?** Because `Build` enumerates all states at build time to verify convergence exhaustively. Only variable *domains* need be finite: `BuildCompositional` verifies per footprint component instead of the global product, so the total state space can still be astronomically large.
 
 **Internally**: States are bitpacked into a single `uint64`, enabling O(1) table lookups. See [ARCHITECTURE.md#state-representation](ARCHITECTURE.md#state-representation) for details.
 
@@ -121,7 +121,7 @@ An **invariant** has three parts:
 3. **Repair** (via `Repair`): Function to restore validity
 
 ```go
-b.Invariant("no_overdraft").
+r.Invariant("no_overdraft").
     Watches(balance).             // Footprint: {balance}
     Holds(func(s State) bool {
         return s.GetInt(balance) >= 0
@@ -213,7 +213,7 @@ WFC ensures this never happens.
 #### Example: WFC Violation
 
 ```go
-b.Invariant("force_even").
+r.Invariant("force_even").
     Watches(x).
     Holds(func(s State) bool {
         return s.GetInt(x) % 2 == 0
@@ -223,7 +223,7 @@ b.Invariant("force_even").
     }).
     Add()
 
-b.Invariant("force_odd").
+r.Invariant("force_odd").
     Watches(x).
     Holds(func(s State) bool {
         return s.GetInt(x) % 2 == 1
@@ -284,7 +284,7 @@ Different finals! CC fails.
 To fix: Ensure the `ship` event guards on payment:
 
 ```go
-b.Event("ship").
+r.Event("ship").
     Guard(func(s State) bool {
         return s.GetBool(paid)  // Only ship if paid
     }).
@@ -298,8 +298,8 @@ Now both orders converge to `{shipped, true}`.
 If two events have **disjoint footprints** (no shared variables, no shared invariant footprints), CC is automatically satisfied without exhaustive checking:
 
 ```go
-b.Event("deposit").Writes(balance)      // Footprint: {balance}
-b.Event("send_email").Writes(notified)  // Footprint: {notified}
+r.Event("deposit").Writes(balance)      // Footprint: {balance}
+r.Event("send_email").Writes(notified)  // Footprint: {notified}
 
 // Disjoint footprints → automatically commutative
 ```
@@ -511,9 +511,9 @@ No repair functions execute at runtime. Everything is baked into lookup tables d
 **False**. By default, `gsm` checks all pairs. But you can use `OnlyDeclaredPairs()` to check only specific pairs:
 
 ```go
-b.OnlyDeclaredPairs()
-b.Independent("deposit", "notify")  // These two can happen in either order
-b.Independent("withdraw", "notify")
+r.OnlyDeclaredPairs()
+r.Independent("deposit", "notify")  // These two can happen in either order
+r.Independent("withdraw", "notify")
 // Other pairs not checked
 ```
 
@@ -523,9 +523,7 @@ Use this when you know some events are causally ordered (e.g., `pay` always befo
 
 ### "Finite state spaces are a limitation"
 
-**Perspective**. Finite state spaces enable **exhaustive verification**. You trade:
-- Cannot model unbounded domains (arbitrary strings, lists)
-- Gain mathematical proof of convergence (can't get this with infinite spaces)
+**Narrower than it sounds**. The constraint is finite *per-variable domains* (no arbitrary strings or lists), which is what enables **exhaustive verification**. It is not a cap on the whole state space: `BuildCompositional` verifies each footprint component independently, so a machine whose global state space is astronomically large still certifies when it decomposes into small components. You trade unbounded domains for a mathematical proof of convergence you cannot get with infinite spaces.
 
 For business logic state machines (order workflows, authorization states, inventory counts), finite domains are natural.
 
@@ -533,10 +531,12 @@ For business logic state machines (order workflows, authorization states, invent
 
 ### "This is the same as CRDTs"
 
-**Not quite**. CRDTs require operations to **commute directly**. `gsm` allows operations to violate invariants, then **compensates** to restore validity. The compensation brings you to the same state regardless of order.
+**Backwards, if anything**: CRDTs are a *special case* of what gsm does. A CRDT requires operations to **commute directly**; gsm allows operations to violate invariants, then **compensates** to restore validity, reaching the same state regardless of order.
 
 CRDTs: `op1; op2 = op2; op1` (operations commute)
 gsm: `NF(op1; op2) = NF(op2; op1)` (normal forms converge)
+
+A CRDT is exactly the compensation-free corner of this: a governed machine whose operations were designed so repair never fires. Drop that design restriction and you still have convergence (normalization confluence), and the inclusion is **strict**: governed machines exist that no CRDT can express. This is machine-checked and axiom-free in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (full statement in [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)); gsm can even certify whether a given machine falls in the CRDT fragment.
 
 ---
 

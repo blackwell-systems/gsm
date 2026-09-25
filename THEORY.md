@@ -586,13 +586,15 @@ return CC_SUCCESS(disjoint_count, brute_force_count)
 
 ### 9.4 Soundness and Completeness
 
-**Soundness**: If the verification algorithm reports success, then WFC and CC hold.
+**Soundness**: If the verification algorithm reports success, then WFC holds and CC1 holds for every declared-independent event pair.
 
-**Proof**: The algorithm exhaustively checks all states (for WFC) and all event pairs in all states (for CC). Since |S| is finite, exhaustive checking is sound.
+**Proof**: Phase 1 simulates each state's compensation sequence to a fixpoint, failing on a repeat or an over-length run, so success means (S, →ᵣ) terminates from every state: WFC. Phase 3 compares the two normalized orderings for every declared-independent pair over every valid state, so success means each such pair commutes: CC1. Both are exhaustive over the finite |S|, hence sound. CC2 is not tested here; it holds structurally because the step table stores NFᵣ(s →ₑ ·), so every lookup is already a normalized step (§6.5).
 
 **Completeness**: If WFC and CC hold, then the verification algorithm reports success.
 
-**Proof**: By definition. If WFC holds, compensation terminates, so Phase 1 succeeds. If CC holds, all event pairs commute, so Phase 3 succeeds.
+**Proof**: Under WFC every compensation sequence reaches a valid state within |S| steps, so Phase 1 never trips its cycle-or-overflow guard and records a normal form for every state. Under CC1 every declared-independent pair commutes on every valid state, so no comparison in Phase 3 fails. Both phases therefore succeed.
+
+**Scope**: Both directions are relative to the declared independence relation: gsm checks the pairs the registry declares independent (via `Independent`, or all pairs by default). A pair wrongly declared independent when it is in fact causally dependent is a specification error the checker does not police, not an incompleteness of the algorithm.
 
 ### 9.5 Synthesis (the inverse problem)
 
