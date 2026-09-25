@@ -365,22 +365,7 @@ func extractEdgeTable(e edgeDef) MorphismTable {
 
 // extractResolverTable reifies a multi-source resolver over every valid source combination.
 func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) MorphismTable {
-	var sources []*Registry
-	seen := map[*Registry]bool{}
-	sharedSeen := map[int]bool{}
-	var sharedVars []Var
-	for _, e := range edges {
-		if !seen[e.src] {
-			seen[e.src] = true
-			sources = append(sources, e.src)
-		}
-		for _, v := range e.shared {
-			if !sharedSeen[v.index] {
-				sharedSeen[v.index] = true
-				sharedVars = append(sharedVars, v)
-			}
-		}
-	}
+	sources, sharedVars := resolverInputs(edges)
 	t := MorphismTable{Target: target.name}
 	for _, s := range sources {
 		t.Sources = append(t.Sources, s.name)
@@ -396,14 +381,12 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 		}
 	}
 	dstRep := representativeTarget(target)
-	idx := make([]int, len(sources))
-	for {
+	_ = forEachCombo(srcValids, func(cs []State) error {
 		combo := make(map[string]State, len(sources))
 		ids := make([]uint64, len(sources))
 		for k, s := range sources {
-			st := srcValids[k][idx[k]]
-			combo[s.name] = st
-			ids[k] = st.packed
+			combo[s.name] = cs[k]
+			ids[k] = cs[k].packed
 		}
 		merged := resolver(dstRep, combo)
 		row := TableRow{SourceIDs: ids}
@@ -411,20 +394,8 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 			row.Values = append(row.Values, merged.getRaw(v))
 		}
 		t.Rows = append(t.Rows, row)
-
-		k := len(sources) - 1
-		for k >= 0 {
-			idx[k]++
-			if idx[k] < len(srcValids[k]) {
-				break
-			}
-			idx[k] = 0
-			k--
-		}
-		if k < 0 {
-			break
-		}
-	}
+		return nil
+	})
 	return t
 }
 

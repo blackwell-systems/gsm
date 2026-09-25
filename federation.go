@@ -501,17 +501,10 @@ func (f *Federation) verifyEdge(e edgeDef) error {
 // gsm applies to single-registry CC — the theorem then delivers convergence.
 func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges []edgeDef) error {
 	// Distinct sources, in edge order; union of the shared components they control.
-	var sources []*Registry
-	sharedIdx := make(map[int]bool)
-	sourceSeen := make(map[*Registry]bool)
-	for _, e := range edges {
-		if !sourceSeen[e.src] {
-			sourceSeen[e.src] = true
-			sources = append(sources, e.src)
-		}
-		for _, v := range e.shared {
-			sharedIdx[v.index] = true
-		}
+	sources, sharedVars := resolverInputs(edges)
+	sharedIdx := make(map[int]bool, len(sharedVars))
+	for _, v := range sharedVars {
+		sharedIdx[v.index] = true
 	}
 
 	dstValid := target.validStates()
@@ -535,12 +528,11 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 		total *= len(srcValids[i])
 	}
 
-	// Enumerate every source combination via a mixed-radix counter.
-	idx := make([]int, len(sources))
-	for {
+	// Enumerate every source combination and, for each, every valid target state.
+	return forEachCombo(srcValids, func(cs []State) error {
 		combo := make(map[string]State, len(sources))
 		for k, s := range sources {
-			combo[s.name] = srcValids[k][idx[k]]
+			combo[s.name] = cs[k]
 		}
 
 		var refShared map[int]uint64
@@ -575,22 +567,8 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 					"source combination — federated compensation would not converge", target.name, merged)
 			}
 		}
-
-		// Advance the mixed-radix counter.
-		k := len(sources) - 1
-		for k >= 0 {
-			idx[k]++
-			if idx[k] < len(srcValids[k]) {
-				break
-			}
-			idx[k] = 0
-			k--
-		}
-		if k < 0 {
-			break
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // monotoneGuard bounds the source-combination space for the (all-pairs) monotonicity check.
@@ -614,22 +592,7 @@ func (f *Federation) verifyMonotone() error {
 		target := f.comps[ti]
 
 		// Distinct sources (edge order) and the shared variables they control.
-		var sources []*Registry
-		seenSrc := map[*Registry]bool{}
-		var sharedVars []Var
-		sharedSeen := map[int]bool{}
-		for _, e := range edges {
-			if !seenSrc[e.src] {
-				seenSrc[e.src] = true
-				sources = append(sources, e.src)
-			}
-			for _, v := range e.shared {
-				if !sharedSeen[v.index] {
-					sharedSeen[v.index] = true
-					sharedVars = append(sharedVars, v)
-				}
-			}
-		}
+		sources, sharedVars := resolverInputs(edges)
 
 		srcValids := make([][]State, len(sources))
 		n := 1
@@ -681,6 +644,58 @@ func (f *Federation) verifyMonotone() error {
 		}
 	}
 	return nil
+}
+
+// resolverInputs collects the distinct source registries (in edge order) and the union of shared
+// variables written across a resolved target's incoming edges. Every path that enumerates a
+// resolver's source combinations (verifyResolved, verifyMonotone, extractResolverTable) needs the
+// same two, so they share this rather than re-deriving it three ways.
+func resolverInputs(edges []edgeDef) (sources []*Registry, sharedVars []Var) {
+	seenSrc := map[*Registry]bool{}
+	sharedSeen := map[int]bool{}
+	for _, e := range edges {
+		if !seenSrc[e.src] {
+			seenSrc[e.src] = true
+			sources = append(sources, e.src)
+		}
+		for _, v := range e.shared {
+			if !sharedSeen[v.index] {
+				sharedSeen[v.index] = true
+				sharedVars = append(sharedVars, v)
+			}
+		}
+	}
+	return sources, sharedVars
+}
+
+// forEachCombo enumerates every combination that picks one state from each set in srcValids via a
+// mixed-radix counter, invoking fn with the current pick (a slice aligned with srcValids, reused
+// across calls, so fn must not retain it). fn returning an error stops the enumeration. Callers must
+// ensure each set is non-empty (an empty set would make the space vacuous, which they handle before
+// calling). It is the shared odometer behind verifyResolved and extractResolverTable.
+func forEachCombo(srcValids [][]State, fn func(combo []State) error) error {
+	idx := make([]int, len(srcValids))
+	combo := make([]State, len(srcValids))
+	for {
+		for k := range srcValids {
+			combo[k] = srcValids[k][idx[k]]
+		}
+		if err := fn(combo); err != nil {
+			return err
+		}
+		k := len(srcValids) - 1
+		for k >= 0 {
+			idx[k]++
+			if idx[k] < len(srcValids[k]) {
+				break
+			}
+			idx[k] = 0
+			k--
+		}
+		if k < 0 {
+			return nil
+		}
+	}
 }
 
 // cartesianStates returns every combination picking one state from each set.

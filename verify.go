@@ -224,27 +224,8 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, step [][]uint64, mkSt
 	pairsDisjoint := 0
 	pairsBrute := 0
 
-	type pair struct{ i, j int }
-	var pairsToCheck []pair
-
-	if r.allIndependent {
-		for i := 0; i < len(r.events); i++ {
-			for j := i + 1; j < len(r.events); j++ {
-				pairsToCheck = append(pairsToCheck, pair{i, j})
-			}
-		}
-	} else {
-		for _, p := range r.independent {
-			i, j := p[0], p[1]
-			if i > j {
-				i, j = j, i
-			}
-			pairsToCheck = append(pairsToCheck, pair{i, j})
-		}
-	}
-
-	for _, p := range pairsToCheck {
-		i, j := p.i, p.j
+	for _, p := range r.ccPairs() {
+		i, j := p[0], p[1]
 
 		if r.eventsDisjoint(i, j) {
 			pairsDisjoint++
