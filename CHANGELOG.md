@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-25
+
 ### Added
 - **Effective-registry certificates** (`Federation.Certify`, `Federation.EmbedCertified`, `Certificate`, `MorphismTable`, `Certificate.Verify`): package a verified sub-federation as a portable certificate and reuse it without re-verifying its internals. `Certify` builds and verifies a subsystem and records the verdict, each morphism/resolver in extensional table form (reified from the finite, source-determined maps), and a tamper-complete digest over the component policies plus those tables. `EmbedCertified` composes a subsystem on its certificate: `Build` checks only the seam (boundary morphisms) and the whole-graph acyclicity, skipping per-component CC re-enumeration and internal-morphism re-verification (a `Build`/`build(runCC)` split trusts CC for certified components while still constructing their runtime machine and checking WFC). `Certificate.Verify` is an independent differential re-checker: given the consumer's own component registries, it re-derives validity preservation (M1/R2) from the tables rather than the producer's closures and matches the digest, so a composition is confirmed without trusting the producer's code. **Input ports** (`Certify(Port{...})`): a subsystem may declare free shared variables (no internal morphism writes them) that an outer morphism may drive once embedded; `Build` verifies each inbound boundary morphism at the seam (M1/R2) and rejects a write to any sealed variable, and the port declaration is folded into the tamper-complete digest. This is the assume-guarantee (Theorem 2') case. An axiom-free-Coq-extracted federation oracle remains future work. See CERTIFICATE-DESIGN.md.
 
@@ -183,7 +185,8 @@ Federated registry networks: gsm now composes multiple registries connected by d
 - Full test suite covering WFC, CC, compensation, and failures
 - Documentation with usage examples, API reference, and design rationale
 
-[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/blackwell-systems/gsm/compare/v0.8.0...v0.9.0
 [0.1.5]: https://github.com/blackwell-systems/gsm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/blackwell-systems/gsm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/blackwell-systems/gsm/compare/v0.1.2...v0.1.3
