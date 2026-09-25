@@ -429,6 +429,13 @@ func (f *Federation) verifyEdge(e edgeDef) error {
 	srcValid := e.src.validStates()
 	dstValid := e.dst.validStates()
 
+	// A target with no valid state cannot preserve validity under any source image, so M1 is
+	// unsatisfiable rather than vacuously true: reject it instead of passing an unverified edge.
+	if len(dstValid) == 0 {
+		return fmt.Errorf("gsm: morphism %s→%s: target %q has no valid state, so no source image can "+
+			"preserve target validity (M1 is unsatisfiable)", e.src.name, e.dst.name, e.dst.name)
+	}
+
 	// General-path cost is |valid(src)|·|valid(dst)| per edge. When a target's validity
 	// decomposes into independent shared/local parts, Remark 8.2 reduces this to
 	// |valid(src)| checks — a future fast path. For now, guard rather than hang.
@@ -508,6 +515,12 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 	}
 
 	dstValid := target.validStates()
+	// A resolved target with no valid state cannot preserve validity under any merge, so R2 is
+	// unsatisfiable rather than vacuously true: reject it instead of passing an unverified resolver.
+	if len(dstValid) == 0 {
+		return fmt.Errorf("gsm: resolver for %q: the target has no valid state, so no merge can preserve "+
+			"target validity (R2 is unsatisfiable)", target.name)
+	}
 	srcValids := make([][]State, len(sources))
 	total := len(dstValid)
 	for i, s := range sources {
@@ -637,7 +650,7 @@ func (f *Federation) verifyMonotone() error {
 
 		points := cartesianStates(srcValids)
 		resolver := f.resolvers[target]
-		dst0 := State{vars: target.vars} // fixed target; shared image is source-determined
+		dst0 := representativeTarget(target) // fixed valid target; shared image is source-determined
 		// shared image (raw values of shared vars) for a source combination.
 		image := func(combo []State) []uint64 {
 			var out State
@@ -705,6 +718,36 @@ func rawLE(a, b []uint64) bool {
 		}
 	}
 	return true
+}
+
+// firstValidState returns the registry's lowest-packed valid state and true, or a zero State and
+// false if the registry has no valid state. Cheaper than validStates() (it stops at the first hit
+// rather than materializing the whole list); used as a source-determined morphism's representative
+// target, since the shared image is independent of which valid target is chosen (verified at Build).
+func (r *Registry) firstValidState() (State, bool) {
+	packedCount := 1 << r.totalBits
+	for i := 0; i < packedCount; i++ {
+		if !r.isValidEncoding(uint64(i)) {
+			continue
+		}
+		s := State{packed: uint64(i), vars: r.vars}
+		if r.allInvariantsHold(s) {
+			return s, true
+		}
+	}
+	return State{vars: r.vars}, false
+}
+
+// representativeTarget returns a valid target state against which to evaluate a source-determined
+// morphism or resolver. Source-determinacy (verified at Build) makes the shared image independent of
+// which target is chosen, so any valid state works; a valid one keeps the morphism evaluated within
+// its contract, unlike the raw zero encoding which may itself be an invalid state. Falls back to the
+// zero state only when the target has no valid state, which Build rejects for any edge target.
+func representativeTarget(r *Registry) State {
+	if s, ok := r.firstValidState(); ok {
+		return s
+	}
+	return State{vars: r.vars}
 }
 
 // validStates enumerates the registry's valid states (valid encoding + all invariants hold).
@@ -939,9 +982,11 @@ func (m *FedMachine) SharedProjection(srcState State, src, dst *Registry) (Proje
 	if e == nil {
 		return Projection{}, fmt.Errorf("gsm: no morphism %q→%q", src.name, dst.name)
 	}
-	// Apply the morphism to a representative (zero) target; source-determinacy (checked at
-	// Build) guarantees the shared values are independent of which target we use.
-	projected := e.mapFn(srcState, m.comps[di].NewState())
+	// Apply the morphism to a representative valid target (the target machine's normalized zero
+	// state); source-determinacy (checked at Build) guarantees the shared values are independent of
+	// which valid target we use, and a normalized state stays within the morphism's contract.
+	dstRep := m.comps[di].Normalize(m.comps[di].NewState())
+	projected := e.mapFn(srcState, dstRep)
 	shared := make(map[string]uint64, len(e.shared))
 	for _, v := range e.shared {
 		shared[v.name] = projected.getRaw(v)

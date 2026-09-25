@@ -322,7 +322,7 @@ func (t MorphismTable) serialize() string {
 
 // extractTables reifies every morphism and resolver into its extensional table by enumerating the
 // valid source states. Source-determinacy (verified at Build) makes the shared image independent of
-// the target, so a representative (zero) target suffices. Must be called on a structurally valid
+// the target, so a representative valid target suffices. Must be called on a structurally valid
 // federation (single-source targets have exactly one incoming edge, multi-source targets have a
 // resolver); Certify and the Build-time validation both guarantee that.
 func (f *Federation) extractTables() ([]MorphismTable, error) {
@@ -347,7 +347,7 @@ func (f *Federation) extractTables() ([]MorphismTable, error) {
 
 // extractEdgeTable reifies a single-source morphism.
 func extractEdgeTable(e edgeDef) MorphismTable {
-	dstRep := State{vars: e.dst.vars}
+	dstRep := representativeTarget(e.dst)
 	t := MorphismTable{Target: e.dst.name, Sources: []string{e.src.name}}
 	for _, v := range e.shared {
 		t.Shared = append(t.Shared, v.name)
@@ -395,7 +395,7 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 			return t // a source with no valid states leaves the table empty
 		}
 	}
-	dstRep := State{vars: target.vars}
+	dstRep := representativeTarget(target)
 	idx := make([]int, len(sources))
 	for {
 		combo := make(map[string]State, len(sources))

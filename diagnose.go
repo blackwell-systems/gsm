@@ -173,17 +173,28 @@ func (f *Federation) DiagnoseCycle() (*CycleDiagnostic, error) {
 		}
 		return strings.Join(parts, " | ")
 	}
+	// Orbit detection keys on the full state IDs of every cycle component, not the human-readable
+	// carrier string: the carrier shows only shared vars and could collide (two distinct full states
+	// with the same shared projection, or a var-name/value pair colliding across the "=,|" delimiters),
+	// which would report a false orbit. The packed state IDs are exact and delimiter-safe.
+	stateKey := func() string {
+		var b strings.Builder
+		for _, ci := range cyc {
+			fmt.Fprintf(&b, "%d/", state[ci].ID())
+		}
+		return b.String()
+	}
 
 	seen := map[string]int{}
 	var trace []string
 	cap := k*maxCarrierRounds + 1
 	for round := 0; round < cap; round++ {
-		cfg := carrier()
-		if first, ok := seen[cfg]; ok {
+		key := stateKey()
+		if first, ok := seen[key]; ok {
 			return &CycleDiagnostic{Cycle: names, Shared: shared, Converges: false, Orbit: trace[first:]}, nil
 		}
-		seen[cfg] = len(trace)
-		trace = append(trace, cfg)
+		seen[key] = len(trace)
+		trace = append(trace, carrier())
 
 		changed := false
 		for i := 0; i < k; i++ {
