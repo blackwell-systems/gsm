@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Effective-registry certificates** (`Federation.Certify`, `Federation.EmbedCertified`, `Certificate`, `MorphismTable`, `Certificate.Verify`): package a verified sub-federation as a portable certificate and reuse it without re-verifying its internals. `Certify` builds and verifies a subsystem and records the verdict, each morphism/resolver in extensional table form (reified from the finite, source-determined maps), and a tamper-complete digest over the component policies plus those tables. `EmbedCertified` composes a subsystem on its certificate: `Build` checks only the seam (boundary morphisms) and the whole-graph acyclicity, skipping per-component CC re-enumeration and internal-morphism re-verification (a `Build`/`build(runCC)` split trusts CC for certified components while still constructing their runtime machine and checking WFC). `Certificate.Verify` is an independent differential re-checker: given the consumer's own component registries, it re-derives validity preservation (M1/R2) from the tables rather than the producer's closures and matches the digest, so a composition is confirmed without trusting the producer's code. First-cut limits: writing into a certified subsystem (input ports) is rejected, and an axiom-free-Coq-extracted federation oracle is future work. See CERTIFICATE-DESIGN.md.
+
 ## [0.8.0] - 2026-09-24
 
 ### Added

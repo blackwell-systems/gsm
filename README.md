@@ -345,6 +345,20 @@ m, _, _ := gsm.NewFederation("storefront").
     Build()
 ```
 
+**Certificate-based reuse.** A verified sub-federation can be packaged as a `Certificate` and reused without re-verifying its internals. `sub.Certify()` builds and verifies the subsystem and returns a certificate carrying the verdict, each morphism and resolver in extensional table form (reified from the finite, source-determined maps), and a tamper-complete digest over both the component policies and those tables. `EmbedCertified(sub, cert)` embeds it on that certificate: `Build` checks only the seam (the boundary morphisms) plus the whole-graph acyclicity, skipping the per-component convergence re-enumeration and the internal-morphism re-verification. A consumer that receives a certificate re-checks it independently with `cert.Verify(components)`, which re-derives validity preservation (M1/R2) from the tables rather than the producer's morphism closures, so a composition is confirmed without trusting the producer's code. First-cut limitation: an outer morphism may read a certified subsystem but not write into it (writing in needs the input-port extension), which `Build` rejects. See [CERTIFICATE-DESIGN.md](CERTIFICATE-DESIGN.md).
+
+```go
+cert, _ := sub.Certify() // verify once; package the verdict + morphism tables + digest
+
+m, _, _ := gsm.NewFederation("storefront").
+    EmbedCertified(sub, cert). // reuse without re-verifying internals; only the seam is checked
+    Morphism(catalog, order)./* ... */Add().
+    Build()
+
+// A consumer re-checks the certificate independently, from the tables (not the producer's closures):
+err := cert.Verify(map[string]*gsm.Registry{"pricing": pricing, "catalog": catalog})
+```
+
 ## Compositional Verification
 
 `Build` enumerates the whole state space, which caps it at the 2²⁰ (≈1M) state ceiling.

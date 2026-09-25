@@ -70,7 +70,14 @@ func (r *Report) String() string {
 }
 
 // Build verifies WFC and CC, then returns an immutable Machine.
-func (r *Registry) Build() (*Machine, *Report, error) {
+func (r *Registry) Build() (*Machine, *Report, error) { return r.build(true) }
+
+// build is Build with a switch to skip Phase 3 (CC verification). runCC=false is used only
+// when a caller already holds a certificate attesting this component converges (see
+// EmbedCertified): Phases 1 and 2 still run because the normal-form and step tables they
+// produce are needed to construct the runtime Machine, and WFC is still checked as a byproduct
+// of computing normal forms; only the pairwise CC enumeration is trusted rather than re-run.
+func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 	if r.totalBits > 20 {
 		return nil, nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
@@ -120,10 +127,12 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 	// Phase 2: Compute step tables
 	step := r.computeStepTables(packedCount, valid, nf, mkState)
 
-	// Phase 3: Verify CC
-	err = r.verifyCC(packedCount, valid, step, mkState, report)
-	if err != nil {
-		return nil, report, err
+	// Phase 3: Verify CC (skipped when a certificate already attests convergence).
+	if runCC {
+		err = r.verifyCC(packedCount, valid, step, mkState, report)
+		if err != nil {
+			return nil, report, err
+		}
 	}
 
 	// Build immutable machine

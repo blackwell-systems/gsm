@@ -29,6 +29,7 @@ type Federation struct {
 	edges       []edgeDef
 	resolvers   map[*Registry]Resolver
 	allowCycles bool
+	certified   []*certifiedEmbed // sub-federations embedded on certificate (see certificate.go)
 }
 
 // A Resolver merges the morphism images of a target's incoming edges into its shared
@@ -243,7 +244,31 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	}
 
 	report := &FedReport{Name: f.name, Edges: len(f.edges)}
+
+	// Certificate validation runs first: it checks each certified embed still matches its
+	// certificate and that the seam obeys the output-port restriction, before any component is
+	// built. subOf classifies components as belonging to a certified sub or not.
+	subOf := f.subOf()
+	if err := f.validateCertificates(subOf); err != nil {
+		return nil, report, err
+	}
+
 	for i, r := range f.comps {
+		if sid, ok := subOf[r]; ok {
+			// Certified component: build the runtime Machine (Phases 1-2) but trust the
+			// certificate for CC rather than re-enumerating it.
+			cm, cr, err := r.build(false)
+			if err != nil {
+				return nil, report, fmt.Errorf("gsm: certified component %q does not build: %w", r.name, err)
+			}
+			m.comps[i] = cm
+			if certRep := f.certified[sid].reportFor(r.name); certRep != nil {
+				report.Components = append(report.Components, certRep)
+			} else {
+				report.Components = append(report.Components, cr)
+			}
+			continue
+		}
 		cm, cr, err := r.Build()
 		if err != nil {
 			return nil, report, fmt.Errorf("gsm: component %q does not converge: %w", r.name, err)
@@ -268,7 +293,7 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 
 	// Forest + morphism verification (multi-source rejection, M1 validity preservation,
 	// shared-only well-formedness) before the acyclicity check.
-	if err := f.verify(); err != nil {
+	if err := f.verify(subOf); err != nil {
 		return nil, report, err
 	}
 
@@ -327,7 +352,7 @@ func (m *FedMachine) monotoneChainBound() int {
 // verify enforces the structural conditions federated convergence requires. Tree-shaped
 // targets are checked per morphism (M1, the paper's proven case); multi-source targets are
 // checked against their declared Resolver (the multi-source case, R1/R2 verified exhaustively).
-func (f *Federation) verify() error {
+func (f *Federation) verify(subOf map[*Registry]int) error {
 	// Distinct component names: name-keyed replay (FedMachine.ApplyNamed) would be ambiguous
 	// otherwise.
 	seen := make(map[string]bool, len(f.comps))
@@ -362,8 +387,12 @@ func (f *Federation) verify() error {
 		}
 	}
 
-	// Single-source targets: per-morphism M1 + well-formedness + source-determinacy.
+	// Single-source targets: per-morphism M1 + well-formedness + source-determinacy. Edges
+	// internal to a certified sub-federation are trusted by its certificate and skipped.
 	for _, e := range f.edges {
+		if internalEdge(subOf, e) {
+			continue
+		}
 		if _, resolved := f.resolvers[e.dst]; resolved {
 			continue // resolved targets are verified against their Resolver below
 		}
@@ -373,9 +402,13 @@ func (f *Federation) verify() error {
 	}
 
 	// Multi-source (resolved) targets: exhaustively verify the Resolver over every combination
-	// of valid source states. Deterministic order in ti keeps error reporting stable.
+	// of valid source states. Deterministic order in ti keeps error reporting stable. A target
+	// inside a certified sub is trusted by its certificate and skipped.
 	for ti := range f.comps {
 		target := f.comps[ti]
+		if _, internal := subOf[target]; internal {
+			continue
+		}
 		if resolver, resolved := f.resolvers[target]; resolved {
 			if err := f.verifyResolved(target, resolver, inEdges[ti]); err != nil {
 				return err
