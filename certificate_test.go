@@ -100,8 +100,62 @@ func TestEmbedCertified_InboundWriteRejected(t *testing.T) {
 		Morphism(ext, catalog).Shared(badge).
 		Map(func(srcNF, d State) State { return d.SetInt(badge, 1) }).Add()
 
-	if _, _, err = outer.Build(); err == nil || !strings.Contains(err.Error(), "writes into certified sub-federation") {
+	if _, _, err = outer.Build(); err == nil || !strings.Contains(err.Error(), "not a declared input port") {
 		t.Fatalf("expected an inbound-write rejection, got %v", err)
+	}
+}
+
+// TestEmbedCertified_InputPortAccepted certifies a subsystem that declares an input port (a free
+// variable no internal morphism writes), embeds it, and connects an outer morphism that writes that
+// port. Build accepts it (verifying the boundary morphism at the seam) and the write propagates.
+func TestEmbedCertified_InputPortAccepted(t *testing.T) {
+	pricing := NewRegistry("pricing")
+	tier := pricing.Int("tier", 0, 1)
+	pricing.DeclEvent("upgrade", SetTo(tier, 1))
+	catalog := NewRegistry("catalog")
+	badge := catalog.Int("badge", 0, 1)
+	inbox := NewRegistry("inbox")
+	msg := inbox.Int("msg", 0, 1) // free inside the sub: an input port
+	sub := NewFederation("sub").
+		Add(inbox).
+		Morphism(pricing, catalog).Shared(badge).
+		Map(func(srcNF, d State) State { return d.SetInt(badge, srcNF.GetInt(tier)) }).Add()
+
+	cert, err := sub.Certify(Port{Registry: inbox, Var: msg})
+	if err != nil {
+		t.Fatalf("Certify with input port: %v", err)
+	}
+	if len(cert.InputPorts) != 1 || cert.InputPorts[0].Registry != "inbox" || cert.InputPorts[0].Var != "msg" {
+		t.Fatalf("certificate should declare inbox.msg as an input port, got %+v", cert.InputPorts)
+	}
+
+	geo := NewRegistry("geo")
+	loc := geo.Int("loc", 0, 1)
+	geo.DeclEvent("set", SetTo(loc, 1))
+	outer := NewFederation("system").
+		EmbedCertified(sub, cert).
+		Morphism(geo, inbox).Shared(msg).
+		Map(func(srcNF, d State) State { return d.SetInt(msg, srcNF.GetInt(loc)) }).Add()
+
+	m, _, err := outer.Build()
+	if err != nil {
+		t.Fatalf("input-port embed failed to build: %v", err)
+	}
+	s := m.Apply(m.NewState(), geo, "set")
+	if got := m.Of(s, inbox).GetInt(msg); got != 1 {
+		t.Fatalf("inbox.msg = %d, want 1 (written through the input port)", got)
+	}
+	if !m.IsValid(s) {
+		t.Fatal("composed state is not federally valid")
+	}
+}
+
+// TestCertify_InputPortNotFreeRejected checks Certify rejects declaring an input port on a variable
+// an internal morphism already writes (it is an output the sub owns, not a free input).
+func TestCertify_InputPortNotFreeRejected(t *testing.T) {
+	sub, _, catalog, _, badge := buildPricingCatalogSub()
+	if _, err := sub.Certify(Port{Registry: catalog, Var: badge}); err == nil || !strings.Contains(err.Error(), "must be free") {
+		t.Fatalf("expected an input-port-not-free rejection, got %v", err)
 	}
 }
 
@@ -167,7 +221,7 @@ func TestCertificate_VerifyCatchesInvalidTable(t *testing.T) {
 	comps := map[string]*Registry{"pricing": pricing, "catalog": catalog}
 	// Corrupt a row to the invalid value, then re-align the digest so only the M1 check can catch it.
 	cert.Tables[0].Rows[len(cert.Tables[0].Rows)-1].Values[0] = 1
-	dig, err := digestComponentsAndTables([]*Registry{pricing, catalog}, cert.Tables, cert.Monotone)
+	dig, err := digestComponentsAndTables([]*Registry{pricing, catalog}, cert.Tables, cert.Monotone, cert.InputPorts)
 	if err != nil {
 		t.Fatalf("digest: %v", err)
 	}

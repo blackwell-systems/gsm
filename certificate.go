@@ -12,25 +12,46 @@ import (
 // EmbedCertified as a black box: the embedding checks only the boundary and skips re-verifying
 // the subsystem's internals. See CERTIFICATE-DESIGN.md.
 //
-// The digest covers each component's serializable policy AND the extracted morphism tables (see
-// MorphismTable), so it is tamper-complete: it changes if a component rule, the wiring, or any
-// morphism's behavior changes. A consumer can re-check the federated conditions from the tables,
-// independently of the producer's morphism closures, via Verify.
+// The digest covers each component's serializable policy, the extracted morphism tables (see
+// MorphismTable), and the declared input ports, so it is tamper-complete: it changes if a component
+// rule, the wiring, a morphism's behavior, or the port declaration changes. A consumer can re-check
+// the federated conditions from the tables, independently of the producer's morphism closures, via
+// Verify.
 //
-// Remaining scope:
-//   - Reuse is restricted to the output-port case: an outer morphism may read a certified
-//     subsystem (the subsystem as a source) but may not write into it. Writing in needs the
-//     input-port (assume-guarantee) extension and is rejected at Build for now.
-//   - Verify re-derives validity preservation and acyclicity, and matches the digest, using the
-//     component invariants. The strongest form, an axiom-free-Coq-extracted oracle that re-checks
-//     the federated conditions the way astchecker re-checks single-registry rules, is future work
-//     (it requires mechanizing the federation conditions in Coq first).
+// Ports (assume-guarantee, Theorem 2' of the categorical note): a certified subsystem may declare
+// input ports at Certify time (Certify(ports...)). An input port is a shared variable that no
+// internal morphism writes (it is free inside the sub); once embedded, an outer morphism may write
+// it, and Build verifies that boundary morphism at the seam (M1/R2) while still skipping the
+// subsystem's internals. The certificate is inherently parametric over the input port's whole
+// domain because Build already verifies every component and source state exhaustively. A shared
+// variable not declared an input port stays sealed, and an inbound morphism to it is rejected.
+//
+// Verify re-derives validity preservation and acyclicity, matches the digest, and confirms declared
+// input ports are free (no table writes them), using the component invariants. The strongest form,
+// an axiom-free-Coq-extracted oracle that re-checks the federated conditions the way astchecker
+// re-checks single-registry rules, is future work (it needs the federation conditions mechanized in
+// Coq first).
 type Certificate struct {
-	Name     string          // the certified sub-federation's name
-	Digest   string          // covers component policies AND the extracted morphism tables (tamper-complete)
-	Report   *FedReport      // the verdict from the sub's own Build
-	Tables   []MorphismTable // the morphisms and resolvers in extensional form (see MorphismTable)
-	Monotone bool            // whether the sub used AllowMonotoneCycles
+	Name       string          // the certified sub-federation's name
+	Digest     string          // covers component policies, morphism tables, and input ports (tamper-complete)
+	Report     *FedReport      // the verdict from the sub's own Build
+	Tables     []MorphismTable // the morphisms and resolvers in extensional form (see MorphismTable)
+	Monotone   bool            // whether the sub used AllowMonotoneCycles
+	InputPorts []PortRef       // shared variables an outer morphism may write into this subsystem
+}
+
+// Port declares a shared variable of a sub-federation component as an input port: a variable an
+// outer morphism may write when the subsystem is embedded on certificate. It must be free inside the
+// sub (no internal morphism writes it), which Certify verifies.
+type Port struct {
+	Registry *Registry
+	Var      Var
+}
+
+// PortRef is a Port in serialized (name) form, as stored in a Certificate.
+type PortRef struct {
+	Registry string
+	Var      string
 }
 
 // MorphismTable is a morphism or resolver in extensional form: for each valid source state (or,
@@ -63,9 +84,15 @@ type certifiedEmbed struct {
 }
 
 // Certify builds the federation, verifies it converges, and returns a certificate naming it. The
-// certificate can then be handed to EmbedCertified on a larger federation.
-func (f *Federation) Certify() (*Certificate, error) {
+// certificate can then be handed to EmbedCertified on a larger federation. Any input ports passed
+// here are the shared variables an outer morphism may later write into the subsystem; each must be
+// free (no internal morphism writes it), which Certify checks.
+func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
 	_, rep, err := f.Build()
+	if err != nil {
+		return nil, err
+	}
+	refs, err := f.validateInputPorts(inputPorts)
 	if err != nil {
 		return nil, err
 	}
@@ -73,18 +100,59 @@ func (f *Federation) Certify() (*Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	dig, err := digestComponentsAndTables(f.comps, tables, f.allowCycles)
+	dig, err := digestComponentsAndTables(f.comps, tables, f.allowCycles, refs)
 	if err != nil {
 		return nil, err
 	}
-	return &Certificate{Name: f.name, Digest: dig, Report: rep, Tables: tables, Monotone: f.allowCycles}, nil
+	return &Certificate{Name: f.name, Digest: dig, Report: rep, Tables: tables, Monotone: f.allowCycles, InputPorts: refs}, nil
+}
+
+// validateInputPorts checks each declared input port names a component of this federation and is
+// free (no internal morphism writes it), and returns the ports in serialized, deterministic form.
+// Freeness is the precondition for the assume-guarantee reuse: a variable an internal morphism
+// controls is an output the sub owns, so letting an outer morphism also write it would make the
+// target multi-source in a way the certificate never covered.
+func (f *Federation) validateInputPorts(ports []Port) ([]PortRef, error) {
+	written := map[*Registry]map[int]bool{}
+	for _, e := range f.edges {
+		if written[e.dst] == nil {
+			written[e.dst] = map[int]bool{}
+		}
+		for _, v := range e.shared {
+			written[e.dst][v.index] = true
+		}
+	}
+	refs := make([]PortRef, 0, len(ports))
+	for _, p := range ports {
+		if _, ok := f.idx[p.Registry]; !ok {
+			return nil, fmt.Errorf("gsm: input port %s.%s names a registry not in federation %q", p.Registry.name, p.Var.name, f.name)
+		}
+		if written[p.Registry][p.Var.index] {
+			return nil, fmt.Errorf("gsm: input port %s.%s is written by an internal morphism; an input port must "+
+				"be free (no internal writer)", p.Registry.name, p.Var.name)
+		}
+		refs = append(refs, PortRef{Registry: p.Registry.name, Var: p.Var.name})
+	}
+	sortPortRefs(refs)
+	return refs, nil
+}
+
+// sortPortRefs orders port refs deterministically for digesting.
+func sortPortRefs(refs []PortRef) {
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].Registry != refs[j].Registry {
+			return refs[i].Registry < refs[j].Registry
+		}
+		return refs[i].Var < refs[j].Var
+	})
 }
 
 // EmbedCertified composes a sub-federation into this one on the strength of its certificate: like
 // Embed, but Build does not re-verify the subsystem's internals. Only the seam (morphisms crossing
 // the boundary) plus the whole-graph acyclicity/monotonicity check run. The certificate's digest
-// must match the sub at Build, and (first-cut limitation) no outer morphism may target a component
-// inside the sub. Use Embed for the full-re-verification form.
+// must match the sub at Build. An outer morphism may read the subsystem (subsystem as source) or
+// write one of the subsystem's declared input ports; an inbound morphism to any other (sealed)
+// variable is rejected. Use Embed for the full-re-verification form.
 func (f *Federation) EmbedCertified(sub *Federation, cert *Certificate) *Federation {
 	ce := &certifiedEmbed{comps: make(map[*Registry]bool, len(sub.comps)), cert: cert, sub: sub}
 	for _, r := range sub.comps {
@@ -123,36 +191,70 @@ func internalEdge(subOf map[*Registry]int, e edgeDef) bool {
 }
 
 // validateCertificates checks, before any component is built, that every certified embed still
-// matches its certificate (digest) and that the seam obeys the output-port restriction (no outer
-// morphism writes into a certified subsystem).
+// matches its certificate (digest recomputed over the sub plus the certificate's declared input
+// ports) and that the seam is legal: an inbound morphism into a certified subsystem is allowed only
+// when every variable it writes is a declared input port of that subsystem.
 func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
 	for _, ce := range f.certified {
 		if ce.cert == nil {
 			return fmt.Errorf("gsm: certified embed of %q has a nil certificate", ce.sub.name)
 		}
-		got, err := ce.sub.subDigest()
+		tables, err := ce.sub.extractTables()
 		if err != nil {
 			return fmt.Errorf("gsm: cannot digest certified sub-federation %q: %w", ce.sub.name, err)
+		}
+		got, err := digestComponentsAndTables(ce.sub.comps, tables, ce.sub.allowCycles, ce.cert.InputPorts)
+		if err != nil {
+			return err
 		}
 		if got != ce.cert.Digest {
 			return fmt.Errorf("gsm: certificate for %q does not match the embedded sub-federation; "+
 				"rebuild the certificate from the current subsystem", ce.sub.name)
 		}
 	}
-	// Output-port restriction: reject any morphism whose target is inside a certified sub but whose
-	// source is outside that same sub (writing into the subsystem).
+	// Seam rule: an inbound morphism (target inside a certified sub, source outside it) is allowed
+	// only if every variable it writes is a declared input port; a write to a sealed variable is
+	// rejected, because the certificate does not cover an external writer of an internal variable.
 	for _, e := range f.edges {
 		did, dok := subOf[e.dst]
 		if !dok {
 			continue
 		}
-		if sid, sok := subOf[e.src]; !sok || sid != did {
-			return fmt.Errorf("gsm: morphism %s→%s writes into certified sub-federation %q; only reading a "+
-				"certified subsystem is supported (use Embed to write into it)",
-				e.src.name, e.dst.name, f.certified[did].sub.name)
+		if sid, sok := subOf[e.src]; sok && sid == did {
+			continue // internal edge, covered by the certificate
+		}
+		ce := f.certified[did]
+		for _, v := range e.shared {
+			if !ce.isInputPort(e.dst.name, v.name) {
+				return fmt.Errorf("gsm: morphism %s→%s writes %q into certified sub-federation %q, which is not a "+
+					"declared input port; declare it via Certify(gsm.Port{...}) or embed with Embed for full re-verification",
+					e.src.name, e.dst.name, v.name, ce.sub.name)
+			}
 		}
 	}
 	return nil
+}
+
+// isInputPort reports whether (reg, varName) is a declared input port of this certified embed.
+func (ce *certifiedEmbed) isInputPort(reg, varName string) bool {
+	for _, p := range ce.cert.InputPorts {
+		if p.Registry == reg && p.Var == varName {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSeamIncoming reports whether any of a target's incoming edges comes from outside the target's
+// own certified sub (an external writer). Such a target must be re-verified at the seam rather than
+// trusted, because the certificate only covers its internal sources.
+func hasSeamIncoming(subOf map[*Registry]int, tid int, edges []edgeDef) bool {
+	for _, e := range edges {
+		if sid, ok := subOf[e.src]; !ok || sid != tid {
+			return true
+		}
+	}
+	return false
 }
 
 // reportFor returns the certificate's per-component report for the named registry, or nil.
@@ -168,25 +270,13 @@ func (ce *certifiedEmbed) reportFor(name string) *Report {
 	return nil
 }
 
-// subDigest is a stable digest over the federation's component policies and the extracted morphism
-// tables, so it covers both the components and the full semantics of every morphism and resolver
-// (the tables are their exact extensional form). It is tamper-complete: changing a component rule,
-// a wiring edge, or a morphism's behavior changes the digest.
-func (f *Federation) subDigest() (string, error) {
-	tables, err := f.extractTables()
-	if err != nil {
-		return "", err
-	}
-	return digestComponentsAndTables(f.comps, tables, f.allowCycles)
-}
-
-// digestComponentsAndTables computes the certificate digest from the component registries and the
-// morphism tables. Domain-separated and deterministic: components sorted by name, tables sorted by
-// their canonical serialization. Used both to produce a certificate (Certify) and to re-check one
-// against a consumer's own components (Certificate.Verify).
-func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowCycles bool) (string, error) {
+// digestComponentsAndTables computes the certificate digest from the component registries, the
+// morphism tables, and the declared input ports. Domain-separated and deterministic: components
+// sorted by name, tables and ports sorted by their canonical serialization. Used both to produce a
+// certificate (Certify) and to re-check one against a consumer's own components (Certificate.Verify).
+func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowCycles bool, inputPorts []PortRef) (string, error) {
 	h := sha256.New()
-	h.Write([]byte("gsm-fedcert-v2\n"))
+	h.Write([]byte("gsm-fedcert-v3\n"))
 
 	cs := append([]*Registry(nil), comps...)
 	sort.Slice(cs, func(i, j int) bool { return cs[i].name < cs[j].name })
@@ -207,6 +297,12 @@ func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowC
 	sort.Strings(serialized)
 	for _, s := range serialized {
 		h.Write([]byte(s))
+	}
+
+	prefs := append([]PortRef(nil), inputPorts...)
+	sortPortRefs(prefs)
+	for _, p := range prefs {
+		h.Write([]byte("inport " + p.Registry + "." + p.Var + "\n"))
 	}
 	if allowCycles {
 		h.Write([]byte("allowcycles\n"))
@@ -341,6 +437,8 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 //     must equal the certificate's digest;
 //   - validity preservation (M1 for single-source, R2 for resolvers): for every table row, writing
 //     the recorded shared values into every valid target state must keep the target valid;
+//   - input-port freeness: no morphism table writes a declared input port (so the port is genuinely
+//     free for an outer morphism to drive);
 //   - acyclicity: unless the certificate is marked Monotone, the morphism graph must be acyclic.
 //
 // The component invariants are evaluated from the provided registries (part of the shared, digest
@@ -351,12 +449,27 @@ func (c *Certificate) Verify(comps map[string]*Registry) error {
 	for _, r := range comps {
 		list = append(list, r)
 	}
-	dig, err := digestComponentsAndTables(list, c.Tables, c.Monotone)
+	dig, err := digestComponentsAndTables(list, c.Tables, c.Monotone, c.InputPorts)
 	if err != nil {
 		return err
 	}
 	if dig != c.Digest {
-		return fmt.Errorf("gsm: certificate %q digest does not match the provided components and tables", c.Name)
+		return fmt.Errorf("gsm: certificate %q digest does not match the provided components, tables, and ports", c.Name)
+	}
+
+	// Input ports must be free: no morphism table may write a declared input port.
+	for _, p := range c.InputPorts {
+		for _, t := range c.Tables {
+			if t.Target != p.Registry {
+				continue
+			}
+			for _, sv := range t.Shared {
+				if sv == p.Var {
+					return fmt.Errorf("gsm: certificate %q declares input port %s.%s but a morphism table writes it; "+
+						"an input port must be free", c.Name, p.Registry, p.Var)
+				}
+			}
+		}
 	}
 
 	for _, t := range c.Tables {

@@ -403,10 +403,11 @@ func (f *Federation) verify(subOf map[*Registry]int) error {
 
 	// Multi-source (resolved) targets: exhaustively verify the Resolver over every combination
 	// of valid source states. Deterministic order in ti keeps error reporting stable. A target
-	// inside a certified sub is trusted by its certificate and skipped.
+	// fully inside a certified sub is trusted and skipped; but one that also receives an external
+	// (seam) morphism into an input port is re-verified, so the external source's R2 is covered.
 	for ti := range f.comps {
 		target := f.comps[ti]
-		if _, internal := subOf[target]; internal {
+		if tid, internal := subOf[target]; internal && !hasSeamIncoming(subOf, tid, inEdges[ti]) {
 			continue
 		}
 		if resolver, resolved := f.resolvers[target]; resolved {

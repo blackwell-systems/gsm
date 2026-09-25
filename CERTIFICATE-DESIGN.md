@@ -11,9 +11,11 @@ Implemented (`certificate.go`): `Certificate`, `Federation.Certify`, `Federation
 (boundary-only build, skipping per-component CC re-enumeration and internal-edge re-verification),
 morphism/resolver table extraction, a tamper-complete digest over component policies plus those
 tables, and `Certificate.Verify`, a standalone differential re-checker that re-derives the federated
-conditions from the tables rather than the producer's closures. Outstanding: writing into a
-certified subsystem (the input-port / assume-guarantee case) is rejected for now, and the strongest
-trust form (an axiom-free-Coq-extracted federation oracle, matching how `astchecker` re-checks
+conditions from the tables rather than the producer's closures. Input ports are implemented
+(`Certify(Port{...})`): a subsystem may declare free shared variables an outer morphism drives once
+embedded, the inbound boundary morphism is verified at the seam (M1/R2), and the port declaration is
+folded into the digest (the assume-guarantee / Theorem 2' case). Outstanding: the strongest trust
+form (an axiom-free-Coq-extracted federation oracle, matching how `astchecker` re-checks
 single-registry rules) waits on mechanizing the federation conditions in Coq.
 
 ## Problem
