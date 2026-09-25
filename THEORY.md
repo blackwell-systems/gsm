@@ -788,6 +788,16 @@ if cond(s) then s' = update(s)
 
 **Relationship**: gsm can be viewed as ASMs with specific termination and confluence guarantees.
 
+### 10.6 The Convergence Lattice: Floor and Ceiling
+
+Placing gsm among these formalisms gives its regime a floor and a ceiling, established by opposite kinds of argument.
+
+**Floor.** CRDTs and invariant confluence are the *compensation-free* fragment: operations designed so repair never fires (compensation depth zero on every reachable state). This is a strict lower bound proven by construction: every such machine embeds as a gsm registry (§10.1, `cmrdt_SEC` / `cvrdt_SEC`), and membership is decidable and extracted (`compensationFree_step_no_repair`, §9.7). gsm can detect when a machine sits on the floor.
+
+**Ceiling.** The top of the coordination-free lattice is normalization confluence itself. WFC and CC are necessary, not merely sufficient (Section 7 and the paper's necessity results), so there is no strictly more general coordination-free convergence regime to climb into. What lies *above* is not a larger free-lunch regime but coordination: consensus and serialization (§10.4), which buy the cases compensation cannot. That boundary is CC-satisfiability, and it is marked constructively. `Registry.Synthesize` (§9.5) returns an **impossibility witness**, a critical pair of distinct valid states no repair can reconcile, exactly when a machine crosses it. Where the floor is detected by embedding, the ceiling is detected by counterexample: gsm certifies both edges of its own regime.
+
+**A caveat on "ceiling".** This is the ceiling of *compensation as a mechanism*. Whether the CC-satisfiability frontier coincides with the absolute limit of coordination-freedom is subtler: invariant confluence (Bailis et al., §10.3) is a necessary-and-sufficient characterization for the invariant-preserving subcase, while WFC + CC is a constructive sufficient condition via one mechanism. A system that is coordination-free by some non-compensation argument could still fall on the impossible side of `Synthesize`. gsm marks the edge of what compensation reaches, which is the edge that matters when building on gsm.
+
 ---
 
 ## 11. Limitations and Extensions

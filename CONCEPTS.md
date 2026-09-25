@@ -440,7 +440,10 @@ WFC failure: compensation does not terminate
 > for a normal-form map on invalid states that satisfies CC — returning a convergent
 > compensation (least-invasive by default; steer it with `Prefer`, or get the provably minimal
 > one with `Optimal`), or proving that none converges. Convergent is not the same as desirable:
-> it only makes orderings agree, so inspect or steer the repair.
+> it only makes orderings agree, so inspect or steer the repair. When it proves none converges,
+> the witness is the **ceiling** of the compensation regime (the dual of the CRDT floor): no repair
+> reconciles the orderings, so only coordination can, and gsm has shown compensation is not enough
+> here.
 
 ---
 

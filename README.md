@@ -437,6 +437,12 @@ scales well past naive enumeration, and it is precise about the boundary:
 - **Undetermined** (search budget hit) — none found within budget; one may exist. (A SAT/SMT
   backend would settle these.)
 
+Impossibility is the **ceiling** of the compensation regime, the dual of the CRDT floor. A
+`compensation_free` machine sits at the bottom (it is a CRDT: repair is never needed); an
+`Impossible` witness marks the top, where no repair converges and only coordination (consensus,
+locking) can. gsm certifies both edges of what compensation reaches: the floor by embedding (every
+CRDT is a gsm machine), the ceiling by counterexample (the witnessed critical pair).
+
 **Convergent ≠ desirable.** A synthesized repair only makes orderings agree. By default
 synthesis returns the **least-invasive** repair (fewest variables changed). Steer it with a
 policy, or get the provably minimum-cost repair:
