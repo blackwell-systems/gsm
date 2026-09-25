@@ -407,7 +407,7 @@ The nondeterminism is genuine: when multiple events are enabled and the state is
 
 **Lemma**: Under WFC, G is terminating.
 
-**Proof**: Define the measure μ(σ, B) = (|B|, Φ(σ)) taking values in N x N under the **lexicographic order**.
+**Proof**: Define the measure μ(σ, B) = (|B|, Φ(σ)) taking values in N x N under the **lexicographic order**, where Φ(σ) is the compensation depth of σ: the number of repair steps in σ's normalization sequence, finite by WFC (Section 5), with Φ(σ) = 0 exactly when σ is valid.
 
 The lexicographic order on N x N is **well-founded**: there is no infinite descending chain. This is because the first component is bounded below by 0, and for any fixed first component, the second component is also bounded below by 0. Any infinite descending chain would require the first component to decrease infinitely (impossible in N) or stay constant while the second decreases infinitely (also impossible in N).
 
@@ -629,8 +629,12 @@ a machine that applies events by computing at runtime rather than by table looku
 
 The Convergence Theorem (Newman's Lemma plus the WFC/CC discharge), the soundness of gsm's own
 certification (footprint disjointness implies commutation; potential-decreasing repair
-terminates), and the federated monotone-cycles result in full (the least fixed point by Kleene
-iteration, and asynchronous chaotic order-independent convergence to it) are mechanized in
+terminates), the federated monotone-cycles result in full (the least fixed point by Kleene
+iteration, and asynchronous chaotic order-independent convergence to it), the strict subsumption
+of CRDTs as the compensation-free fragment (op-based `cmrdt_SEC` and state-based `cvrdt_SEC`, with
+witnesses `witness_not_cmrdt` / `witness_leaves_valid_space` showing the inclusion is proper), and
+the decidability of the compensation-free classification (`compensationFree_step_no_repair`: under
+it every event-step is exactly its guarded effect, with no repair) are mechanized in
 Coq/Rocq, axiom-free (`Print Assumptions` reports "Closed under the global context"), with CI
 that gates on the axiom-free property. See the
 [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq).
@@ -650,7 +654,10 @@ cannot make a non-convergent machine pass:
    AST (apply the event, then normalize by iterated repair), confirming convergence from scratch.
    It trusts neither gsm's enumeration nor its tables: it re-derives the verdict straight from the
    declarations. Proven sound in Coq via `check_sound_converges` / `check_sound_commute`.
-   Cross-checked in `astoracle_test.go` (`GSM_AST_CHECKER`).
+   Cross-checked in `astoracle_test.go` (`GSM_AST_CHECKER`). The same oracle also emits a
+   machine-checked `compensation_free` verdict (whether repair is ever needed on any in-domain
+   state), so the CRDT-fragment classification is certified from the rules, not asserted (Coq:
+   `compensationFree_step_no_repair`).
 
 **Fragment covered by the rules oracle.** The Coq model of the rules is precise about its scope,
 and `WriteMachineAST` returns an error for anything outside it, so a passing differential test
@@ -714,6 +721,8 @@ op₁ ; op₂ = op₂ ; op₁
 **Trade-offs**:
 - CRDTs: stronger requirement (hard to express business rules)
 - gsm: weaker requirement (can enforce invariants, but requires verification)
+
+**Subsumption (machine-checked)**: CRDTs are not merely comparable to gsm, they are a *special case* of it. A CRDT is a governed machine whose operations were designed so compensation never fires: a machine with compensation depth zero on every reachable state. Normalization confluence keeps the convergence guarantee after dropping that design restriction, so every CRDT embeds as a gsm registry, and the inclusion is **strict**: governed machines exist that no CRDT can express, because they leave the valid space and rely on compensation to return. This is proven axiom-free in `coq/CRDT.v` for both op-based (`cmrdt_SEC`) and state-based (`cvrdt_SEC`) CRDTs, with the strictness witnesses `witness_not_cmrdt` and `witness_leaves_valid_space`; the full statement is in [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md). So the trade-off bullets above are the pragmatic view; the structural relationship is containment, not peerage. The compensation-free corner is itself a decidable, extracted classification (see §9.7), so gsm can tell you whether a given machine is in the CRDT fragment.
 
 ### 10.2 Operational Transformation (OT)
 
@@ -868,13 +877,13 @@ The mathematical foundations of gsm rest on three key pillars:
 
 2. **Newman's Lemma**: Termination + local confluence → global confluence. WFC provides termination, CC provides local confluence.
 
-3. **Finite enumeration**: Exhaustive verification is possible because state spaces are finite.
+3. **Finite enumeration**: Exhaustive verification is possible because each variable's domain is finite. `Build` enumerates the global product (capped at ~1M states), while `BuildCompositional` and federation verify per footprint component, so the machine's global state space may itself be astronomically large.
 
 Together, these provide a **constructive proof** of convergence: if verification passes, convergence is mathematically guaranteed.
 
 The trade-off is clear:
 - **Gain**: Proven convergence, no runtime coordination, O(1) event application
-- **Cost**: Finite domains, build-time verification overhead, state space limits
+- **Cost**: Finite variable domains, build-time verification overhead, and a ~1M-state cap on monolithic `Build` (lifted by compositional and federated verification)
 
 For business logic state machines within these constraints, gsm provides convergence guarantees that are difficult or impossible to achieve with other approaches.
 
