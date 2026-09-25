@@ -41,14 +41,14 @@ func TestMachineAST_WriteAndVerify(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.WriteMachineAST(&buf); err != nil {
+	if err = r.WriteMachineAST(&buf); err != nil {
 		t.Fatalf("WriteMachineAST: %v", err)
 	}
 	if buf.Len() == 0 {
 		t.Fatal("machine AST not written")
 	}
 	path := filepath.Join(t.TempDir(), "commuting.machine")
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+	if err = os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write machine file: %v", err)
 	}
 
@@ -91,11 +91,11 @@ func TestMachineAST_WidenedFragment(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := r.WriteMachineAST(&buf); err != nil {
+	if err = r.WriteMachineAST(&buf); err != nil {
 		t.Fatalf("WriteMachineAST: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "widened.machine")
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+	if err = os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write machine file: %v", err)
 	}
 

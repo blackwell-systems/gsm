@@ -40,7 +40,7 @@ func TestConvergenceTables_WriteAndVerify(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), "commuting.tables")
-	if err := m.WriteConvergenceTables(path); err != nil {
+	if err = m.WriteConvergenceTables(path); err != nil {
 		t.Fatalf("WriteConvergenceTables: %v", err)
 	}
 	data, err := os.ReadFile(path)
