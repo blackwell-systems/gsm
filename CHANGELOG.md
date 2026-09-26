@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Accept-with-coordination for cyclic federations** (`Federation.CoordinationPlan`,
+  `Federation.BuildCoordinated`, `CoordinationPoint`): when a cyclic morphism network is not monotone,
+  `Build` rejects it; `CoordinationPlan` now says WHERE to put coordination, returning a set of
+  morphism edges (shared variables) to place under an external single writer or consensus so the rest
+  of the network converges coordination-free. `BuildCoordinated(plan)` accepts the federation given
+  that coordination: the coordinated edges become external inputs and the acyclic residual is built as
+  usual. The plan is a feedback edge set (correct, polynomial, at most the number of independent
+  cycles); it is not necessarily the minimum, which is the group feedback edge set problem, NP-hard in
+  general (see the categorical structure note in the papers repo). This turns a blunt cyclic rejection
+  into a localized mixed-consistency partition: consensus only on the obstructing edges, everything
+  else coordination-free.
+
 ## [0.9.2] - 2026-09-25
 
 ### Fixed
