@@ -58,6 +58,35 @@ func Optimal() SynthOption {
 // to steer the choice with a preference.
 func (r *Registry) Synthesize() (*Synthesis, error) { return r.SynthesizeWith() }
 
+// BuildOrSynthesize verifies the registry with Build and, when the rules as written do not converge,
+// falls back to synthesizing a convergent compensation and building that instead. On success it
+// returns a ready-to-use Machine; the returned *Synthesis is nil when Build succeeded as written, and
+// non-nil when a synthesized compensation was substituted, in which case Repairs() and String()
+// describe exactly what changed. It returns an error only when neither path works: Build failed and
+// no convergent compensation exists (the error carries the impossibility witness when the search was
+// exhaustive) or could not be searched. This ties gsm's two mechanisms together, verification (Build,
+// which reports failures) and repair generation (Synthesize), so a caller can say "build this, and if
+// my repair does not converge, give me one that does."
+func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis, error) {
+	if m, _, err := r.Build(); err == nil {
+		return m, nil, nil
+	}
+	s, serr := r.SynthesizeWith(opts...)
+	if serr != nil {
+		return nil, nil, fmt.Errorf("gsm: build failed and synthesis could not run: %w", serr)
+	}
+	if !s.Convergent {
+		if s.Exhaustive {
+			if w := s.Witness(); w != "" {
+				return nil, s, fmt.Errorf("gsm: build failed and no convergent compensation exists (%s); redesign the events", w)
+			}
+			return nil, s, fmt.Errorf("gsm: build failed and no convergent compensation exists; redesign the events")
+		}
+		return nil, s, fmt.Errorf("gsm: build failed and no convergent compensation was found within the search budget")
+	}
+	return s.Machine(), s, nil
+}
+
 // SynthesizeWith is Synthesize with options (see Prefer). Any Repair functions on the
 // invariants are IGNORED: the point is to generate one. It returns a representative convergent
 // compensation if one exists (a ready-to-use Machine and inspectable Repairs), proves
