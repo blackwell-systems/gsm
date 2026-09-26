@@ -17,7 +17,7 @@ If you're looking for:
 - [When It Just Works: No Loops](#when-it-just-works-no-loops)
 - [When It Gets Hard: Cycles](#when-it-gets-hard-cycles)
 - [Holonomy: Walk the Loop and See](#holonomy-walk-the-loop-and-see)
-- [The Two Escape Hatches](#the-two-escape-hatches)
+- [The Escape Hatches](#the-escape-hatches)
 - [What gsm Does About It](#what-gsm-does-about-it)
 - [The Real Names (Bridge to Rigor)](#the-real-names-bridge-to-rigor)
 - [Glossary: Federation Terms → Code](#glossary-federation-terms--code)
@@ -217,9 +217,11 @@ For the negation loop above, `CycleDiagnostic.Converges` is `false` and `CycleDi
 
 ---
 
-## The Two Escape Hatches
+## The Escape Hatches
 
-If cycles are where convergence can fail, there are exactly two ways to be safe.
+If cycles are where convergence can fail, there are three ways to handle it: avoid the loop, tame it
+with monotone repair, or (when neither applies) accept it by coordinating the few variables that
+actually obstruct.
 
 **Escape hatch 1: be acyclic.** No loops, so the local-to-global question never even arises. This is the [tree/DAG case above](#when-it-just-works-no-loops): resolve in topological order, once each, done. It is the default, and it is the one you should reach for unless you truly need a cycle.
 
@@ -231,6 +233,12 @@ That "a monotone map on a finite ordered set must reach a fixed point" is the pl
 
 The negation loop from Example 2 fails exactly here: flipping `0` to `1` and `1` to `0` is not "only ever up." It goes up, then down, then up. That is why it orbits. A `max` rule, by contrast, only ever raises a value, so it is monotone. gsm's monotone mesh test wires a 3-cycle `A → B → C → A` where each node takes the `max` of its predecessor's request and shared value; the highest request (3) climbs all the way around the loop and everything settles at 3, order-independently.
 
+**Escape hatch 3: coordinate the obstruction.** Suppose your loop is neither acyclic nor monotone (the negation loop is exactly this): it genuinely cannot converge on its own. You do not have to throw it away. You can pick a few shared variables and put them under a single writer, or a consensus round, so they are agreed externally rather than fought over around the loop. Fixing a shared value breaks the cycle through it, and once every loop is broken the rest of the network converges on its own, coordination-free.
+
+The intuition: cutting a shared variable out of the fight is like pinning one link of a chain. Pin the right links and the chain can no longer pull against itself. The question is *which* links, and *how few*. gsm answers the first exactly and the second well: it walks the loops, finds a set of arrows whose coordination breaks every cycle, and hands it back as a plan. That set is a correct choice and never larger than the number of independent loops. (The truly smallest such set is a hard problem in general, so gsm gives you a correct, small one rather than promising the minimum; see the theory note for why.)
+
+The payoff is a *mixed-consistency* system: strong consistency (consensus) only on the handful of coordinated variables, eventual consistency (coordination-free) everywhere else. You pay the availability cost of coordination on a minimal-ish core, not the whole network.
+
 ---
 
 ## What gsm Does About It
@@ -240,8 +248,9 @@ Each of the following sentences is a real API behavior you can call.
 - **`Build` rejects cycles by default.** With no opt-in, the network must be acyclic. If it finds a loop, `Build` refuses and its error *names the offending loop* (`A -> B -> A`), pointing you at `DiagnoseCycle`.
 - **`AllowMonotoneCycles` opts into loops.** Call `Federation.AllowMonotoneCycles()` and `Build` stops requiring acyclicity. Instead it runs the monotonicity check (escape hatch 2): it verifies, by enumeration, that every morphism and resolver only pushes shared values one direction on the ladder. A network that passes converges by Kleene iteration to the least fixed point. A non-monotone cyclic network (the negation counterexample) is still rejected even with the opt-in.
 - **`DiagnoseCycle` explains a rejected cycle.** When you hit a cycle rejection, `Federation.DiagnoseCycle` walks the loop from the zero seed and hands back a `CycleDiagnostic`: the `Cycle` (loop order), whether it `Converges`, and if not, the `Orbit` witness (the settle-or-orbit verdict from the [holonomy section](#holonomy-walk-the-loop-and-see)).
+- **`CoordinationPlan` names what to coordinate, and `BuildCoordinated` accepts it (escape hatch 3).** `Federation.CoordinationPlan()` returns the arrows (shared variables) to place under an external single writer or consensus so the network converges; `Federation.BuildCoordinated(plan)` then builds it, treating those variables as external inputs and converging on everything else. This turns a rejection into a deployable mixed-consistency plan.
 
-So the flow is: build acyclic and it just works; if you need a loop, opt in with `AllowMonotoneCycles` and gsm proves the repair climbs one direction; and if a build is rejected for a cycle, `DiagnoseCycle` shows you whether that loop settles or orbits.
+So the flow is: build acyclic and it just works; if you need a loop, opt in with `AllowMonotoneCycles` and gsm proves the repair climbs one direction; if a build is rejected for a cycle, `DiagnoseCycle` shows you whether that loop settles or orbits; and if it orbits and you still need it, `CoordinationPlan` + `BuildCoordinated` accept it by coordinating the few obstructing variables. The full loop, start with something that cannot converge, get the exact adjustment, apply it, and watch it converge, is a worked example in the test suite (`Example_acceptWithCoordination`).
 
 ---
 
@@ -271,6 +280,9 @@ These names are the rigorous version of the pictures in this doc, nothing more. 
 | **Build the network** | `Federation.Build()` | Prove the whole network converges, or refuse and say why |
 | **Cycle diagnosis** | `Federation.DiagnoseCycle()` | Walk a loop from the zero seed; report settle vs orbit |
 | **Settle-or-orbit verdict** | `CycleDiagnostic.Converges` / `.Orbit` | `true` = loop settled; `false` = orbit witness (definitive obstruction) |
+| **Coordination plan** | `Federation.CoordinationPlan()` | The arrows (shared variables) to coordinate so the network converges (a correct feedback edge set) |
+| **Accept with coordination** | `Federation.BuildCoordinated(plan)` | Build the network given that coordination: coordinated variables become external inputs; the rest converges |
+| **Coordination point** | `CoordinationPoint` | One arrow to coordinate: its `Src`, `Dst`, and the `Shared` variables it controls |
 | **Acyclic sweep** | topological order in `Build` | Resolve sources first, each arrow once, no iteration |
 | **Monotone least fixed point** | Kleene iteration under `AllowMonotoneCycles` | Climb the ladder to the top rung; order-independent |
 
