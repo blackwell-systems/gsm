@@ -84,7 +84,11 @@ func Example_acceptWithCoordination() {
 	if _, _, err := fed.Build(); err != nil {
 		fmt.Println("build: rejected (non-monotone cycle)")
 	}
-	d, _ := fed.DiagnoseCycle()
+	d, err := fed.DiagnoseCycle()
+	if err != nil {
+		fmt.Println("diagnose error:", err)
+		return
+	}
 	fmt.Println("diagnose: converges =", d.Converges)
 
 	// 2. The exact adjustment.
@@ -92,7 +96,11 @@ func Example_acceptWithCoordination() {
 	fmt.Println("coordinate:", plan)
 
 	// 3. Make it, then 4. watch it converge.
-	m, _, _ := fed.BuildCoordinated(plan)
+	m, _, err := fed.BuildCoordinated(plan)
+	if err != nil {
+		fmt.Println("build error:", err)
+		return
+	}
 	s := m.Apply(m.NewState(), primary, "set")
 	fmt.Printf("after set: primary=%d mirror=%d valid=%v\n",
 		m.Of(s, primary).GetInt(pv), m.Of(s, mirror).GetInt(mv), m.IsValid(s))

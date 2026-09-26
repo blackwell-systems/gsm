@@ -381,7 +381,9 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 		}
 	}
 	dstRep := representativeTarget(target)
-	_ = forEachCombo(srcValids, func(cs []State) error {
+	// The callback never returns an error (it only records rows), so forEachCombo returns nil here;
+	// check it anyway to keep the error explicitly handled.
+	if err := forEachCombo(srcValids, func(cs []State) error {
 		combo := make(map[string]State, len(sources))
 		ids := make([]uint64, len(sources))
 		for k, s := range sources {
@@ -395,7 +397,9 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 		}
 		t.Rows = append(t.Rows, row)
 		return nil
-	})
+	}); err != nil {
+		return t
+	}
 	return t
 }
 
