@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-26
+
+### Added
+- **Verify-or-repair for registries** (`Registry.BuildOrSynthesize`): ties gsm's two mechanisms
+  together. It verifies with `Build` and, when the rules as written do not converge, falls back to
+  synthesizing a convergent compensation and building that. Returns the machine plus a `*Synthesis`
+  that is nil when `Build` succeeded as written and non-nil (with `Repairs()` and `String()`
+  describing what changed) when a synthesized compensation was substituted; it errors only when
+  neither works, carrying the impossibility witness when the search is exhaustive. So a caller can say
+  "build this, and if my repair does not converge, give me one that does."
+
 ## [0.10.0] - 2026-09-25
 
 ### Added
