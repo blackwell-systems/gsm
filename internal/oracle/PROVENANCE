@@ -9,7 +9,7 @@
 # internal/oracle/regenerate.sh <commit> and update NC_COMMIT and both hashes.
 # GOGEN_ARGS must match the proof repository's coq/goextract/Makefile (gen).
 NC_REPO=blackwell-systems/normalization-confluence
-NC_COMMIT=e0031329e80b8b09cdc5d1e5f8ae52d6a0ca48ed
+NC_COMMIT=42f2cff6b5a31244852d57e537cc8c5a8bccaada
 ROCQ_IMAGE=rocq/rocq-prover:9.3@sha256:c357e8864f80359db21725ea8371347a75a1cb439545b47219d7ad5683ba1782
 GOGEN_ARGS=-pkg oracle -allow-unary add,min,mul
 JSON_SHA256=6d685c7aeede31fc20930fe8f78a666cdc6ffb967e11cb1949d4b9ac825cd05c
