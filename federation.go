@@ -241,10 +241,13 @@ type FedState struct {
 func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	g, before := f.frozen()
 	m, rep, err := g.build()
-	if err != nil {
-		return nil, rep, err
+	// A closure that declares on a component can also make a later check fail (the
+	// component's variable list no longer matches the states verified). The change is the
+	// cause, so it is reported over any error it caused, as Registry.Build does.
+	if cerr := checkComponentsUnchanged(g.comps, before); cerr != nil {
+		return nil, rep, cerr
 	}
-	if err = checkComponentsUnchanged(g.comps, before); err != nil {
+	if err != nil {
 		return nil, rep, err
 	}
 	return m, rep, nil

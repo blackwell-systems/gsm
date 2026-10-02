@@ -284,7 +284,7 @@ s = s.SetBool(enabledVar, true)
 s = s.SetInt(countVar, 42)
 ```
 
-**Rules must return a state of their own machine.** An event effect, a repair, a morphism `Map` and a `Resolver` must return a state with the machine's variable schema and every variable within its declared range. Deriving the result from the input with `Set`/`SetBool`/`SetInt` always does. Membership is by value: a `State` from another machine with an identical variable declaration list is accepted. `Build`, `BuildCompositional`, `Synthesize` and `Federation.Build` reject a rule that returns anything else (a state of a different machine, an out-of-range value), with an error naming the rule, the input state and the result. A lazy `BuildCompositional` machine and a `FedMachine` run closures at `Apply` time, so they check each result there and panic on a bad one.
+**Rules must return a state of their own machine.** An event effect, a repair, a morphism `Map` and a `Resolver` must return a state with the machine's variable schema and every variable within its declared range. Deriving the result from the input with `Set`/`SetBool`/`SetInt` always does. Membership is by value: a `State` from another machine with an identical variable declaration list is accepted. `Build`, `BuildCompositional`, `Synthesize` and `Federation.Build` reject a rule that returns anything else (a state of a different machine, an out-of-range value) on the states they run it on, with an error naming the rule, the input state and the result (`Report.DomainViolation`). A lazy `BuildCompositional` machine and a `FedMachine` run closures at `Apply` time, on states the build may not have enumerated, so they check each result there and panic on a bad one.
 
 ## Federated Registries
 

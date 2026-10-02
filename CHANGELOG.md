@@ -111,15 +111,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without checking that they were states of the machine: a state built from another machine's
   variables, a value outside a variable's range, or bits outside the encoding. Depending on the
   case `Build` certified the machine (and `Apply` then returned a state outside the certified
-  space) or panicked with an index out of range. Every path now checks: `Build`,
-  `BuildCompositional` (including its footprint check), `Synthesize`, `BuildOrSynthesize`,
-  `Federation.Build` (component, `Map` and `Resolver` results), `DiagnoseCycle`, `Certify` and
-  `EmbedCertified` (through `Build`), and the rejection names the rule, the input state and the
-  result. A state of the machine is defined by value: the same variable schema (each variable
+  space) or panicked with an index out of range. These paths now check every result they
+  compute and reject the machine with an error naming the rule, the input state and the result:
+  `Build`, `BuildCompositional` (including its footprint check; reported in the new
+  `Report.DomainViolation`, not as a WFC or footprint failure), `Synthesize`, `Federation.Build`
+  (components, and every `Map` and `Resolver` image computed while verifying M1, R1/R2 and
+  monotonicity), `DiagnoseCycle`, and `Certify` and `EmbedCertified`. Their reach is limited to
+  the results they compute: `BuildCompositional` runs closures only on each component's states
+  (other variables at zero) and their footprint perturbations; and an embedded sub's internal
+  `Map`s and `Resolver`s are run only at one representative target (when the tables are
+  extracted to match the certificate), so one edited after certification to go wrong at other
+  targets is not caught by `Federation.Build`. `BuildOrSynthesize` reports a bad effect, but a
+  bad repair makes it fall back to synthesis, which replaces the repair (the returned `Synthesis`
+  says so). A state of the machine is defined by value: the same variable schema (each variable
   equal in name, kind, layout, range and labels, so a structurally identical machine's state is
   accepted), every variable within its range, and no bit outside the encoding. A lazy
   `BuildCompositional` machine and a `FedMachine` run closures at `Apply` time and now panic on
-  such a result, as `Apply` does for an unknown event. `Certificate.Verify` refuses table values
+  any such result, as `Apply` does for an unknown event, which also covers what the build-time
+  checks above cannot reach. `Certificate.Verify` refuses table values
   outside a variable's range and rows of the wrong length. The differential test now reports a
   certified machine whose tables cannot be exported instead of skipping it.
 - **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity

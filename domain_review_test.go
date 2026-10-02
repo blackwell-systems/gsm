@@ -203,7 +203,7 @@ func TestReview_NoFalseRejects(t *testing.T) {
 	r.Event("go").Writes(e, i, b).Apply(func(s State) State {
 		return twin.NewState().Set(te, "z").SetInt(ti, 3).SetBool(tb, true)
 	}).Add()
-	if _, _, err := r.Build(); err != nil {
+	if _, _, err = r.Build(); err != nil {
 		t.Errorf("Build false reject: %v", err)
 	}
 	m, _, err := r.BuildCompositional()

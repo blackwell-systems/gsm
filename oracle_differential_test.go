@@ -58,6 +58,9 @@ type diffCase struct {
 	// exported for the table oracle (an entry outside the in-domain encodings). That
 	// is a disagreement in itself, counted with the oracle results, not a skip.
 	tableClass string
+	// tableIOErr is set when the tables could not be written to or read from a temp
+	// file. That is a failure of the test harness, not a disagreement, and fails the run.
+	tableIOErr string
 }
 
 var (
@@ -116,43 +119,48 @@ func newDiffCase(r *Registry, m *Machine, rep *Report, err error) *diffCase {
 		}
 	}
 	if tm != nil {
-		var terr error
-		if c.tables, c.tableStates, terr = diffTables(tm); terr != nil {
-			c.tableClass = "BUG: the tables cannot be exported for the table oracle (" + firstLine(terr.Error()) + ")"
+		var refused, ioErr error
+		c.tables, c.tableStates, refused, ioErr = diffTables(tm)
+		switch {
+		case refused != nil:
+			c.tableClass = "BUG: the tables cannot be exported for the table oracle (" + firstLine(refused.Error()) + ")"
+		case ioErr != nil:
+			c.tableIOErr = ioErr.Error()
 		}
 	}
 	return c
 }
 
 // diffTables renders the machine's tables exactly as WriteConvergenceTables does.
-// Tables over the size cap return nil and no error. Any other failure returns the
-// error, so the case is reported instead of silently not compared: in particular a
-// certified machine whose tables WriteConvergenceTables refuses (an entry outside
-// the in-domain encodings).
-func diffTables(m *Machine) ([]byte, int, error) {
-	n := 0
+// Tables over the size cap return nil and no errors. A certified machine whose
+// tables the exporter refuses (an entry outside the in-domain encodings) returns
+// refused, so the case is reported as a disagreement instead of silently not
+// compared; a temp-file failure returns ioErr, which fails the run.
+func diffTables(m *Machine) (b []byte, n int, refused, ioErr error) {
 	for s := range m.valid {
 		if m.valid[s] {
 			n++
 		}
 	}
 	if n > diffMaxTableStates {
-		return nil, n, nil
+		return nil, n, nil, nil
+	}
+	if _, refused = m.convergenceTables(); refused != nil {
+		return nil, n, refused, nil
 	}
 	dir, err := os.MkdirTemp("", "gsm-diff-")
 	if err != nil {
-		return nil, n, err
+		return nil, n, nil, err
 	}
 	defer removeDir(dir)
 	p := filepath.Join(dir, "m.tables")
 	if err = m.WriteConvergenceTables(p); err != nil {
-		return nil, n, err
+		return nil, n, nil, err
 	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return nil, n, err
+	if b, err = os.ReadFile(p); err != nil {
+		return nil, n, nil, err
 	}
-	return b, n, nil
+	return b, n, nil, nil
 }
 
 func removeDir(dir string) {
@@ -267,6 +275,12 @@ func runDifferential() int {
 	diffMu.Lock()
 	cases := append([]*diffCase(nil), diffCases...)
 	diffMu.Unlock()
+	for _, c := range cases {
+		if c.tableIOErr != "" {
+			fmt.Fprintf(os.Stderr, "differential: %s: writing the tables for the table oracle: %s\n", c.name, c.tableIOErr)
+			return 1
+		}
+	}
 
 	results := make([]diffResult, len(cases))
 	var wg sync.WaitGroup
