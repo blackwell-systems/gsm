@@ -11,8 +11,9 @@
 #          rejected          Build rejects it (WFC or CC); every checker that can
 #                            run rejects it for the same reason.
 #          synthesized       a synthesized repair; the table checker verifies it.
-#          not-built         Build fails before its convergence check (an
-#                            invariant without a repair, left to synthesis).
+#          not-built         Build rejects it and nothing can be exported for
+#                            the checkers (an invariant without a repair, left
+#                            to synthesis).
 #
 # @exempt <program> <reason> lists an example that makes no machine.
 #
