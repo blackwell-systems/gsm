@@ -68,6 +68,10 @@ func (r *Registry) Synthesize() (*Synthesis, error) { return r.SynthesizeWith() 
 // which reports failures) and repair generation (Synthesize), so a caller can say "build this, and if
 // my repair does not converge, give me one that does."
 func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis, error) {
+	// A naming error is not a convergence failure, and no compensation can repair it.
+	if err := r.checkNames(); err != nil {
+		return nil, nil, err
+	}
 	if m, _, err := r.Build(); err == nil {
 		return m, nil, nil
 	}
@@ -104,6 +108,9 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 	var cfg synthConfig
 	for _, o := range opts {
 		o(&cfg)
+	}
+	if err := r.checkNames(); err != nil {
+		return nil, err
 	}
 	if r.totalBits > 20 {
 		return nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)

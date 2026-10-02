@@ -232,6 +232,12 @@ type FedState struct {
 // This is the federated analogue of gsm's single-registry contract: a FedMachine only
 // exists if convergence is guaranteed.
 func (f *Federation) Build() (*FedMachine, *FedReport, error) {
+	// Names first: certificate validation and replay address (registry, event) by name.
+	for _, r := range f.comps {
+		if err := r.checkNames(); err != nil {
+			return nil, &FedReport{Name: f.name, Edges: len(f.edges)}, err
+		}
+	}
 	m := &FedMachine{
 		name:   f.name,
 		comps:  make([]*Machine, len(f.comps)),

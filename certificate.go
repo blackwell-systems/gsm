@@ -429,6 +429,9 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 func (c *Certificate) Verify(comps map[string]*Registry) error {
 	list := make([]*Registry, 0, len(comps))
 	for _, r := range comps {
+		if err := r.checkNames(); err != nil {
+			return err
+		}
 		list = append(list, r)
 	}
 	dig, err := digestComponentsAndTables(list, c.Tables, c.Monotone, c.InputPorts)

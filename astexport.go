@@ -155,8 +155,13 @@ func (r *Registry) transformSexp(t Transform) (string, error) {
 
 // WriteMachineAST serializes this registry's combinator rules to the S-expression
 // format the verified AST oracle reads. It fails if any rule was not declared via
-// the combinator vocabulary (no retained AST) or if a guard is a closure.
+// the combinator vocabulary (no retained AST), if a guard is a closure, or if two
+// events share a name (the checker would certify the events by position while the
+// runtime resolves a name to only one of them).
 func (r *Registry) WriteMachineAST(w io.Writer) error {
+	if err := r.checkNames(); err != nil {
+		return err
+	}
 	doms := make([]string, len(r.vars))
 	mins := make([]string, len(r.vars))
 	for i, v := range r.vars {
@@ -223,8 +228,12 @@ func (r *Registry) WriteMachineAST(w io.Writer) error {
 // emits the events. It is a separate file, not part of WriteMachineAST's output,
 // so PolicyBytes and PolicyDigest do not depend on it. Without it the oracle
 // checks every pair, the stronger property, so a verdict obtained without the
-// pairs file holds for any declaration.
+// pairs file holds for any declaration. It fails if two events share a name, since
+// Independent resolved each name to one of them only.
 func (r *Registry) WriteDeclaredPairs(w io.Writer) error {
+	if err := r.checkNames(); err != nil {
+		return err
+	}
 	if r.allIndependent {
 		_, err := io.WriteString(w, "pairs all\n")
 		return err
