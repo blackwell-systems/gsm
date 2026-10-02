@@ -13,12 +13,15 @@ import "fmt"
 // the subspace of ITS OWN variables. Certification cost is then exponential in
 // the largest component, not in the whole machine.
 //
-// Footprint conformance is VERIFIED, not assumed: verifyFootprints (footprint.go)
-// checks that each invariant repair/check and event effect actually respects its
-// declared footprint (writes no undeclared variable, and its declared outputs do
-// not depend on any variable outside the footprint) before the disjointness
-// certificate is used. A component is verified with all other variables held at
-// zero, so BuildCompositional requires the zero state to be valid.
+// Footprint conformance is checked before the disjointness certificate is used:
+// verifyFootprints (footprint.go) confirms that each event (guard and effect)
+// reads and writes only its declared write set, and each invariant check and
+// repair only its footprint. That is the precondition disjoint_events_commute
+// assumes (an event reads only its own footprint). For combinator rules the check
+// is syntactic and exact; for closures it is a perturbation test that detects
+// dependence on any one or two outside variables but not a joint dependence on
+// three or more (see footprint.go). A component is verified with all other
+// variables held at zero, so BuildCompositional requires the zero state to be valid.
 
 // maxComponentBits caps a single component's subspace so enumeration stays cheap.
 const maxComponentBits = 20
@@ -181,18 +184,23 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 		}
 	}
 
-	// Cross-component (footprint-disjoint) pairs commute by construction.
-	inSameComponent := r.componentIndexOfEvent(comps)
+	// Cross-component pairs commute by construction, provided every closure respects
+	// its declared footprint (verified per component below; any violation aborts the
+	// build, so no cross-component pair is trusted unless every component passed).
+	//
+	// The test is component membership, not overlap of per-event footprints. A
+	// component is closed under everything that can link two events: shared write
+	// variables, an invariant footprint overlapping an event's writes, and chains of
+	// overlapping invariant footprints through which one event's repair cascade can
+	// reach another event's variables. Two events in different components therefore
+	// read and write disjoint variables, and so do all the repairs they can trigger.
+	// Two events in the same component are checked exhaustively over that component.
+	compOf := r.componentIndexOfEvent(comps)
 	var localPairs []pair
 	for _, p := range pairsToCheck {
-		if r.eventsDisjoint(p.i, p.j) {
+		if compOf[p.i] != compOf[p.j] {
 			pairsDisjoint++
 			continue
-		}
-		if inSameComponent[p.i] != inSameComponent[p.j] || inSameComponent[p.i] < 0 {
-			// Not footprint-disjoint yet not co-located: cannot localize safely.
-			return nil, report, fmt.Errorf("gsm: events %q and %q share footprint across components; cannot localize (use Build)",
-				r.events[p.i].name, r.events[p.j].name)
 		}
 		pairsBrute++
 		localPairs = append(localPairs, p)
@@ -212,6 +220,7 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 		// Footprint conformance: the closures actually respect their declared
 		// footprints, which the disjointness certificate depends on.
 		if err := r.verifyFootprints(c); err != nil {
+			report.FootprintViolation = err.Error()
 			return nil, report, err
 		}
 
@@ -227,7 +236,7 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 
 		// CC: brute-force the local pairs whose shared component is this one.
 		for _, p := range localPairs {
-			if inSameComponent[p.i] != ci {
+			if compOf[p.i] != ci {
 				continue
 			}
 			if err := r.verifyComponentCC(c, p.i, p.j, report); err != nil {
@@ -328,9 +337,11 @@ func (r *Registry) verifyComponentWFC(c *component, count int) (int, error) {
 	return maxDepth, outerErr
 }
 
-// verifyComponentCC brute-forces CC for one event pair over the component
-// subspace. localApply stays within the subspace (writes and repairs are
-// footprint-local), so this is sound.
+// verifyComponentCC brute-forces CC for one event pair over the valid states of
+// the component subspace (CC1 over valid states, the same domain Build checks; the
+// zero state, which BuildCompositional requires to be valid, is among them).
+// localApply stays within the subspace (writes and repairs are footprint-local,
+// verified by verifyFootprints), so this is sound.
 func (r *Registry) verifyComponentCC(c *component, i, j int, report *Report) error {
 	localApply := func(ev eventDef, s State) State {
 		after := s
@@ -345,7 +356,7 @@ func (r *Registry) verifyComponentCC(c *component, i, j int, report *Report) err
 	}
 	var ccErr error
 	r.enumComponent(c, func(s State) {
-		if ccErr != nil {
+		if ccErr != nil || !r.allInvariantsHold(s) {
 			return
 		}
 		ij := localApply(r.events[j], localApply(r.events[i], s))

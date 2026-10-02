@@ -68,11 +68,19 @@ func benchBuild(b *testing.B, mk func() *Registry) {
 	}
 }
 
-func BenchmarkBuild_Order(b *testing.B)          { benchBuild(b, benchOrder) }
-func BenchmarkBuild_WideCounters5(b *testing.B)  { benchBuild(b, func() *Registry { return wideCounters(5) }) }
-func BenchmarkBuild_WideCounters10(b *testing.B) { benchBuild(b, func() *Registry { return wideCounters(10) }) }
-func BenchmarkBuild_WideFlags10(b *testing.B)    { benchBuild(b, func() *Registry { return wideFlags(10) }) }
-func BenchmarkBuild_WideFlags20(b *testing.B)    { benchBuild(b, func() *Registry { return wideFlags(20) }) }
+func BenchmarkBuild_Order(b *testing.B) { benchBuild(b, benchOrder) }
+func BenchmarkBuild_WideCounters5(b *testing.B) {
+	benchBuild(b, func() *Registry { return wideCounters(5) })
+}
+func BenchmarkBuild_WideCounters10(b *testing.B) {
+	benchBuild(b, func() *Registry { return wideCounters(10) })
+}
+func BenchmarkBuild_WideFlags10(b *testing.B) {
+	benchBuild(b, func() *Registry { return wideFlags(10) })
+}
+func BenchmarkBuild_WideFlags20(b *testing.B) {
+	benchBuild(b, func() *Registry { return wideFlags(20) })
+}
 
 func BenchmarkBuildCompositional_WideCounters10(b *testing.B) {
 	r := wideCounters(10)

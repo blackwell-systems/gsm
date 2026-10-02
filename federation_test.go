@@ -123,11 +123,16 @@ func buildAccessControl(t *testing.T) (m *FedMachine, hr, sec, door *Registry, a
 	employed := hr.Bool("employed")
 	hr.Event("hire").Writes(employed).Apply(func(s State) State { return s.SetBool(employed, true) }).Add()
 	hr.Event("terminate").Writes(employed).Apply(func(s State) State { return s.SetBool(employed, false) }).Add()
+	// hire and terminate overwrite the same variable, so they do not commute; they are
+	// causally ordered for one employee, not independent. Declare no independent pairs
+	// (likewise grant_clearance/revoke below).
+	hr.OnlyDeclaredPairs()
 
 	sec = NewRegistry("security")
 	cleared := sec.Bool("cleared")
 	sec.Event("grant_clearance").Writes(cleared).Apply(func(s State) State { return s.SetBool(cleared, true) }).Add()
 	sec.Event("revoke").Writes(cleared).Apply(func(s State) State { return s.SetBool(cleared, false) }).Add()
+	sec.OnlyDeclaredPairs()
 
 	door = NewRegistry("door")
 	access = door.Enum("access", "denied", "granted")
