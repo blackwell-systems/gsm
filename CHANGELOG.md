@@ -8,18 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **Behaviour change: policy and certificate digests bind names and declared pairs.**
-  `PolicyDigest` and certificate digests covered the rules in the oracle's positional format only,
-  so two registries that differed only in an event name, a variable name or kind, an enum label,
-  or the declared `Independent` pairs had the same digest, although replay, projections,
-  certificate tables, input ports, `Set` and the CC check address those. The new
-  `Registry.PolicyNames` serializes them, and both digests now cover it. `PolicyBytes` (the
-  oracle's input) is unchanged. Every policy digest and certificate digest changes: certificates
-  issued earlier no longer match and must be re-issued with `Certify`. Per the development
-  versioning policy the version tags (`gsm-policy-v1`, `gsm-fedcert-v3`) are unchanged. The
-  test certificate `testdata/payship-cert-v0.11.0.json` has its `Digest` recomputed (its other
-  fields are as v0.11.0 issued them). `CERTIFICATE-DESIGN.md` states what the digest covers: a
-  morphism or resolver closure is bound only through its table, at one representative target.
+- **Behaviour change: certificate digests bind names and declared pairs.** Certificate digests
+  covered each component's rules in the oracle's positional format only, so two subsystems whose
+  components differed only in an event name, a variable name or kind, an enum label, or the
+  declared `Independent` pairs had the same digest, although replay, projections, certificate
+  tables, input ports, `Set` and the CC check address those. The new `Registry.PolicyNames`
+  serializes them, and certificate digests now cover it. Every certificate digest changes:
+  certificates issued earlier no longer match and must be re-issued with `Certify`. Per the
+  development versioning policy the tag (`gsm-fedcert-v3`) is unchanged. The test certificate
+  `testdata/payship-cert-v0.11.0.json` has its `Digest` recomputed (its other fields are as
+  v0.11.0 issued them). `CERTIFICATE-DESIGN.md` states what the digest covers: a morphism or
+  resolver closure is bound only through its table, at one representative target.
+- **`PolicyDigest` is unchanged and does not cover names.** It stays SHA-256(`gsm-policy-v1` "\n"
+  `PolicyBytes`), the oracle's input, which external audit layers recompute. That input addresses
+  variables and events by position, so registries that differ only in names, kinds, labels or
+  declared pairs share a `PolicyDigest`. The new `Registry.PolicyIdentityDigest` (tag
+  `gsm-policy-identity-v1`) covers `PolicyBytes` and `PolicyNames` together. Moving the names into
+  the serialized format, and so into `PolicyDigest`, is planned before 1.0.
 - **The extracted checkers decide exactly what `Build` checks.** Both oracles previously checked a
   different property, so the differential test had to excuse whole classes of disagreement. Now
   they check `Build`'s: repair terminates from every state (the rules oracle used to require it

@@ -98,11 +98,13 @@ func TestCertify_PortVariableCheckedBySchema(t *testing.T) {
 	}
 }
 
-// 5: the policy digest covered the rules but not the names they are addressed by, so
+// 5: the policy digest covers the rules but not the names they are addressed by, so
 // two registries that differ only in an event name, a variable name, an enum label,
-// or the declared Independent pairs digested the same (and so did certificates over
-// them), although replay, projections, ports and CC address them.
-func TestPolicyDigest_BindsNames(t *testing.T) {
+// or the declared Independent pairs digest the same, and so did certificates over
+// them, although replay, projections, ports and CC address them. PolicyDigest stays
+// exactly over PolicyBytes (the published contract); PolicyIdentityDigest and the
+// certificate digest bind the names.
+func TestPolicyIdentityDigest_BindsNames(t *testing.T) {
 	mk := func(evName, varName, label string, independent bool) *Registry {
 		r := NewRegistry("named")
 		v := r.Int(varName, 0, 2)
@@ -114,7 +116,7 @@ func TestPolicyDigest_BindsNames(t *testing.T) {
 		}
 		return r
 	}
-	base, err := mk("go", "n", "y", false).PolicyDigest()
+	base, err := mk("go", "n", "y", false).PolicyIdentityDigest()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,12 +126,12 @@ func TestPolicyDigest_BindsNames(t *testing.T) {
 		"enum label":        mk("go", "n", "z", false),
 		"independent pairs": mk("go", "n", "y", true),
 	} {
-		d, derr := r.PolicyDigest()
+		d, derr := r.PolicyIdentityDigest()
 		if derr != nil {
 			t.Fatal(derr)
 		}
 		if d == base {
-			t.Errorf("registries differing only in %s have the same policy digest", name)
+			t.Errorf("registries differing only in %s have the same identity digest", name)
 		}
 	}
 	// A Bool and an Int over 0..1 serialize alike in the oracle's format.
@@ -144,18 +146,18 @@ func TestPolicyDigest_BindsNames(t *testing.T) {
 		r.DeclEvent("set", Do(Set(v, Lit(1))))
 		return r
 	}
-	db, err := kind(true).PolicyDigest()
+	db, err := kind(true).PolicyIdentityDigest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	di, err := kind(false).PolicyDigest()
+	di, err := kind(false).PolicyIdentityDigest()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if db == di {
-		t.Error("registries differing only in a variable's kind have the same policy digest")
+		t.Error("registries differing only in a variable's kind have the same identity digest")
 	}
-	again, err := mk("go", "n", "y", false).PolicyDigest()
+	again, err := mk("go", "n", "y", false).PolicyIdentityDigest()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,6 +165,19 @@ func TestPolicyDigest_BindsNames(t *testing.T) {
 		t.Error("the same registry digests differently")
 	}
 
+	// PolicyDigest does not cover names (documented): the renamed registry has the
+	// same PolicyDigest.
+	p1, err := mk("go", "n", "y", false).PolicyDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := mk("went", "m", "z", true).PolicyDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1 != p2 {
+		t.Error("PolicyDigest changed with names only; it is documented to cover PolicyBytes alone")
+	}
 }
 
 // TestCertificateDigest_BindsEventNames: renaming an event of a certified component
