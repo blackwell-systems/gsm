@@ -63,18 +63,23 @@ func run(dumps, catalog, table, rules, scanRoot, summary, rerun, programs, gsmDi
 		if runFailures, err = runPrograms(programs, gsmDir, cat, dumps, rerun); err != nil {
 			return err
 		}
-		for _, f := range runFailures {
-			fmt.Fprintln(os.Stderr, f)
-		}
 	}
 	rep, err := gate.Run(dumps, cat, gate.Checkers{Table: table, Rules: rules})
 	if err != nil {
 		return err
 	}
-	scanProblems := runFailures
+	// Every check adds to problems; none replaces another's.
+	var problems []string
+	for _, f := range runFailures {
+		problems = append(problems, "(run) "+f)
+	}
 	if scanRoot != "" {
-		if scanProblems, err = scan(scanRoot, cat); err != nil {
-			return err
+		found, serr := scan(scanRoot, cat)
+		if serr != nil {
+			return serr
+		}
+		for _, f := range found {
+			problems = append(problems, "(coverage) "+f)
 		}
 	}
 	if rerun != "" {
@@ -82,13 +87,15 @@ func run(dumps, catalog, table, rules, scanRoot, summary, rerun, programs, gsmDi
 		if derr != nil {
 			return derr
 		}
-		scanProblems = append(scanProblems, diffs...)
+		for _, f := range diffs {
+			problems = append(problems, "(rerun) "+f)
+		}
 	}
 	var b strings.Builder
 	b.WriteString("### gsm machine gate\n\n")
 	b.WriteString(rep.String())
-	for _, p := range scanProblems {
-		fmt.Fprintf(&b, "\nFAIL (coverage): %s\n", p)
+	for _, p := range problems {
+		fmt.Fprintf(&b, "\nFAIL %s\n", p)
 	}
 	fmt.Print(b.String())
 	if summary != "" {
@@ -105,7 +112,7 @@ func run(dumps, catalog, table, rules, scanRoot, summary, rerun, programs, gsmDi
 			return cerr
 		}
 	}
-	if !rep.OK() || len(scanProblems) > 0 {
+	if !rep.OK() || len(problems) > 0 {
 		return fmt.Errorf("FAIL: a machine is rejected, disagrees with Build, or is not in the catalog (see above)")
 	}
 	return nil

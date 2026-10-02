@@ -71,13 +71,16 @@ go run . -run-programs <repo root> -gsm <gsm checkout> \
 
 `-run-programs` builds each catalog program (a main package's directory) with
 `-tags gsmgate` against that gsm checkout (through a copy of its module's
-`go.mod`, so the repository is not changed) and runs it twice, canonically: no
-arguments, an environment of only `PATH=/usr/bin:/bin`, a fresh empty `HOME` and
-`TMPDIR` and the gate directory, empty standard input, and a fresh empty working
-directory. What the gate certifies is the machines each program makes when run
-that way. The two runs must make the same machines. They start within moments of
-each other on the same host, so a machine that depends on the time of day is not
-detected, and randomness is detected only when the two runs happen to differ.
+`go.mod`, so the repository is not changed) and runs it twice. What the gate
+certifies is the machines each program makes when run with no arguments, an
+environment of only `PATH`, `HOME` and `TMPDIR` (plus `GSM_GATE_DIR`), empty
+stdin and an empty working directory. Files read by absolute path, the network,
+the host, the clock and randomness are not fixed. Programs are built with the
+runner's Go settings. The two runs must make the same machines, and a program
+that fails on either run (a panic, a non-zero exit, a timeout) fails the gate.
+The runs start within moments of each other on the same host, so a machine that
+depends on the time of day is not detected, and randomness is detected only when
+the two runs happen to differ.
 
 `-scan` loads every Go module under the repository root, hidden, `testdata`,
 `vendor` and `node_modules` directories included, with its full import graph
