@@ -7,11 +7,15 @@ package gsm
 // GSM_CONVERGENCE_CHECKER and GSM_AST_CHECKER name the binaries; with
 // GSM_REQUIRE_ORACLES=1 a missing binary fails the run.
 //
-// Every disagreement is classified. The known spec differences between Build and
-// the checkers (Build checks only declared pairs, and checks from the zero state
-// even when it is invalid; the table checker also checks invariant-invalid
-// encodings; the rules checker requires repair to terminate only where an event
-// can reach) are reported, not failed. Anything else fails the run.
+// The checkers decide the property Build checks (normalization-confluence
+// TableCheck.check_tables and AstChecker.checkBuild): repair terminates from
+// every state, and every declared pair commutes on the valid states and the zero
+// state. So the only expected disagreement is a rules-oracle refusal outside its
+// certified fragment (arithmetic that could wrap, or a possibly negative write
+// into a two-valued variable). Every other disagreement fails the run, in both
+// directions: the table oracle also runs on the tables of every machine Build
+// rejected for CC (rebuilt without the CC phase), and must reject them; and the
+// rules oracle must reject for the same reason Build did (WFC or CC).
 
 import (
 	"bytes"
@@ -35,31 +39,21 @@ const (
 )
 
 type diffCase struct {
-	name        string
-	goOK        bool
-	goErr       string
-	wfcFail     bool
-	ccFail      bool
-	ccAtZero    bool // the CC counterexample is the zero state
-	zeroValid   bool // the zero state satisfies every invariant
-	allPairs    bool // Build checked every pair (no Independent/OnlyDeclaredPairs)
-	boxStates   int
-	ast         []byte // nil when not exportable
-	astErr      string
-	tables      []byte // nil when Build failed or the tables are too large
+	name      string
+	goOK      bool
+	goErr     string
+	wfcFail   bool
+	ccFail    bool
+	allPairs  bool // Build checked every pair (no Independent/OnlyDeclaredPairs)
+	boxStates int
+	ast       []byte // nil when not exportable
+	astErr    string
+	pairs     []byte // the declared pairs, in the rules oracle's pairs-file format
+	// tables: the step tables Build returned, or for a CC failure the tables of
+	// the same registry rebuilt without the CC phase (so the table oracle must
+	// reject them). nil when Build failed otherwise or the tables are too large.
+	tables      []byte
 	tableStates int
-	// For a table-checker rejection: do all ordered pairs commute on Build's CC
-	// domain (nf-fixed states plus the zero state)? If so, the rejection comes
-	// from invariant-invalid encodings, which Build does not check.
-	allPairsCommuteOnDomain bool
-	// Evidence for classifying a rules-oracle acceptance of a machine Build
-	// rejected (computed only for exportable machines within the size cap):
-	// ccFailsOnValid: a checked pair fails to commute on some valid, nonzero state
-	// (then the rejection is not only about the zero state).
-	// wfcReachableOK: repair terminates from every state an event reaches from a
-	// valid state (then the WFC failure is only at states no event reaches).
-	ccFailsOnValid bool
-	wfcReachableOK bool
 }
 
 var (
@@ -79,12 +73,6 @@ func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 		c.boxStates = rep.StateCount
 		c.wfcFail = err != nil && !rep.WFC && strings.Contains(c.goErr, "WFC")
 		c.ccFail = err != nil && rep.WFC && rep.CCFailure != nil
-		if rep.CCFailure != nil {
-			c.ccAtZero = rep.CCFailure.State.packed == 0
-		}
-	}
-	if len(r.vars) > 0 && r.totalBits <= 20 {
-		c.zeroValid = r.allInvariantsHold(State{packed: 0, vars: r.vars})
 	}
 	var buf bytes.Buffer
 	if e := r.WriteMachineAST(&buf); e == nil {
@@ -92,20 +80,19 @@ func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 	} else {
 		c.astErr = e.Error()
 	}
-	if m != nil && !m.lazy {
+	c.pairs = diffPairsFile(r)
+	switch {
+	case m != nil && !m.lazy:
 		c.tables, c.tableStates = diffTables(m)
-		c.allPairsCommuteOnDomain = diffAllPairsCommute(m)
-	}
-	if c.ast != nil && c.boxStates > 0 && c.boxStates <= diffMaxBoxStates {
-		if c.ccFail {
-			c.ccFailsOnValid = diffCCFailsOnValid(r)
-		}
-		if c.wfcFail {
-			c.wfcReachableOK = diffReachableRepairTerminates(r)
+	case c.ccFail:
+		if m2, _, e := r.build(false); e == nil {
+			c.tables, c.tableStates = diffTables(m2)
 		}
 	}
 	id := []byte(fmt.Sprintf("%v|%s|%v|", c.goOK, c.goErr, c.allPairs))
 	id = append(id, c.ast...)
+	id = append(id, 0)
+	id = append(id, c.pairs...)
 	id = append(id, 0)
 	id = append(id, c.tables...)
 	key := sha256.Sum256(id)
@@ -115,6 +102,22 @@ func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 		diffSeen[key] = true
 		diffCases = append(diffCases, c)
 	}
+}
+
+// diffPairsFile renders the pairs Build checks (ccPairs) in the rules oracle's
+// pairs-file format.
+func diffPairsFile(r *Registry) []byte {
+	if r.allIndependent {
+		return []byte("pairs all\n")
+	}
+	ps := r.ccPairs()
+	var b strings.Builder
+	fmt.Fprintf(&b, "pairs %d", len(ps))
+	for _, p := range ps {
+		fmt.Fprintf(&b, " %d %d", p[0], p[1])
+	}
+	b.WriteString("\n")
+	return []byte(b.String())
 }
 
 // diffTables renders the machine's tables exactly as WriteConvergenceTables does,
@@ -151,73 +154,6 @@ func removeDir(dir string) {
 	}
 }
 
-func diffAllPairsCommute(m *Machine) bool {
-	for s := range m.nf {
-		if !m.valid[s] || (m.nf[s] != uint64(s) && s != 0) {
-			continue
-		}
-		for i := range m.step {
-			for j := range m.step {
-				if m.step[j][m.step[i][s]] != m.step[i][m.step[j][s]] {
-					return false
-				}
-			}
-		}
-	}
-	return true
-}
-
-// diffCCFailsOnValid rebuilds the step tables without the CC check and reports
-// whether some checked pair fails to commute on a valid state other than zero.
-func diffCCFailsOnValid(r *Registry) bool {
-	m, _, err := r.build(false)
-	if err != nil {
-		return true // be conservative: no evidence that only the zero state fails
-	}
-	for _, p := range r.ccPairs() {
-		i, j := p[0], p[1]
-		for s := 1; s < len(m.nf); s++ {
-			if !m.valid[s] || m.nf[s] != uint64(s) {
-				continue
-			}
-			if m.step[j][m.step[i][s]] != m.step[i][m.step[j][s]] {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// diffReachableRepairTerminates reports whether repair terminates from every state
-// an event reaches from a valid state: the only states the rules oracle normalizes.
-func diffReachableRepairTerminates(r *Registry) bool {
-	limit := 1
-	for _, v := range r.vars {
-		limit *= v.domain
-	}
-	for p := uint64(0); p < 1<<r.totalBits; p++ {
-		if !r.isValidEncoding(p) {
-			continue
-		}
-		s := State{packed: p, vars: r.vars}
-		if !r.allInvariantsHold(s) {
-			continue
-		}
-		for _, ev := range r.events {
-			t := r.clampState(r.applyEvent(ev, s))
-			seen := map[uint64]bool{t.packed: true}
-			for steps := 0; !r.allInvariantsHold(t); steps++ {
-				t = r.applyFirstRepair(t)
-				if seen[t.packed] || steps > limit {
-					return false
-				}
-				seen[t.packed] = true
-			}
-		}
-	}
-	return true
-}
-
 type diffResult struct {
 	c          *diffCase
 	astExit    int // -1 when not run
@@ -228,12 +164,21 @@ type diffResult struct {
 	tableClass string
 }
 
-func runChecker(bin string, content []byte, name string, dir string) (int, string, error) {
+// runChecker writes content (and, when non-nil, a pairs file) and runs the checker.
+func runChecker(bin string, content, pairs []byte, name string, dir string) (int, string, error) {
 	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, content, 0o644); err != nil {
 		return -1, "", err
 	}
-	out, err := exec.Command(bin, p).CombinedOutput()
+	args := []string{p}
+	if pairs != nil {
+		pp := p + ".pairs"
+		if err := os.WriteFile(pp, pairs, 0o644); err != nil {
+			return -1, "", err
+		}
+		args = append(args, pp)
+	}
+	out, err := exec.Command(bin, args...).CombinedOutput()
 	if err == nil {
 		return 0, string(out), nil
 	}
@@ -244,25 +189,23 @@ func runChecker(bin string, content []byte, name string, dir string) (int, strin
 	return -1, string(out), err
 }
 
-// Classes. "agree" and the spec:/fragment classes are expected; anything starting
-// with "BUG" fails the run.
+// Classes. "agree", "skip" and "fragment" are expected; anything starting with
+// "BUG" fails the run.
 func classifyAST(c *diffCase, exit int, out string) string {
-	goOther := !c.goOK && !c.wfcFail && !c.ccFail
+	oracleWFC := strings.Contains(out, "(WFC)")
 	switch {
-	case goOther:
+	case !c.goOK && !c.wfcFail && !c.ccFail:
 		return "skip: Build failed before WFC/CC (" + firstLine(c.goErr) + ")"
 	case exit == 2:
 		return "BUG: rules oracle rejected the exported input"
 	case exit == 1 && strings.Contains(out, "outside the certified fragment"):
 		return "fragment: rules oracle does not certify this machine's arithmetic"
-	case c.goOK && exit == 0, !c.goOK && exit == 1:
+	case c.goOK && exit == 0:
 		return "agree"
-	case c.goOK && exit == 1 && !c.allPairs && !c.allPairsCommuteOnDomain:
-		return "spec: declared pairs (Build checks only declared pairs; the rules oracle checks all)"
-	case c.ccFail && exit == 0 && c.ccAtZero && !c.zeroValid && !c.ccFailsOnValid:
-		return "spec: zero state (Build also checks from the invalid zero state; the rules oracle checks valid states only)"
-	case c.wfcFail && exit == 0 && c.wfcReachableOK:
-		return "spec: WFC domain (Build requires repair to terminate on every encoding; the rules oracle only where an event reaches)"
+	case c.wfcFail && exit == 1 && oracleWFC:
+		return "agree"
+	case c.ccFail && exit == 1 && !oracleWFC:
+		return "agree"
 	default:
 		return fmt.Sprintf("BUG: Build ok=%v (%s), rules oracle exit %d", c.goOK, firstLine(c.goErr), exit)
 	}
@@ -270,16 +213,16 @@ func classifyAST(c *diffCase, exit int, out string) string {
 
 func classifyTable(c *diffCase, exit int) string {
 	switch {
-	case exit == 0:
-		return "agree"
 	case exit == 2:
 		return "BUG: table oracle rejected the emitted tables"
-	case !c.allPairsCommuteOnDomain && !c.allPairs:
-		return "spec: declared pairs (Build checks only declared pairs; the table oracle checks all)"
-	case c.allPairsCommuteOnDomain:
-		return "spec: invalid states (the tables include invariant-invalid encodings; Build checks valid states and the zero state)"
+	case c.goOK && exit == 0:
+		return "agree"
+	case c.ccFail && exit == 1:
+		return "agree"
+	case c.goOK:
+		return "BUG: Build accepted tables the table oracle rejects"
 	default:
-		return "BUG: Build accepted tables in which a checked pair does not commute"
+		return "BUG: the table oracle accepts tables in which a pair Build checks does not commute"
 	}
 }
 
@@ -331,7 +274,7 @@ func runDifferential() int {
 			defer func() { <-sem }()
 			r := diffResult{c: c, astExit: -1, tableExit: -1}
 			if c.ast != nil && c.boxStates > 0 && c.boxStates <= diffMaxBoxStates {
-				x, out, cerr := runChecker(abin, c.ast, fmt.Sprintf("%d.machine", i), dir)
+				x, out, cerr := runChecker(abin, c.ast, c.pairs, fmt.Sprintf("%d.machine", i), dir)
 				if cerr != nil {
 					errMu.Lock()
 					runErr = cerr
@@ -340,7 +283,7 @@ func runDifferential() int {
 				r.astExit, r.astOut, r.astClass = x, out, classifyAST(c, x, out)
 			}
 			if c.tables != nil {
-				x, out, cerr := runChecker(tbin, c.tables, fmt.Sprintf("%d.tables", i), dir)
+				x, out, cerr := runChecker(tbin, c.tables, nil, fmt.Sprintf("%d.tables", i), dir)
 				if cerr != nil {
 					errMu.Lock()
 					runErr = cerr

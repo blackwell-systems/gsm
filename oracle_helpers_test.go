@@ -43,7 +43,14 @@ func runOracle(t *testing.T, bin, name string, content []byte) (int, string) {
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
-	out, err := exec.Command(bin, path).CombinedOutput()
+	return runOracleArgs(t, bin, path)
+}
+
+// runOracleArgs runs the checker on the given files and returns its exit code
+// and combined output.
+func runOracleArgs(t *testing.T, bin string, args ...string) (int, string) {
+	t.Helper()
+	out, err := exec.Command(bin, args...).CombinedOutput()
 	if err == nil {
 		return 0, string(out)
 	}
