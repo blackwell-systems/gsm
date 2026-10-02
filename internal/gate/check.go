@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+// Codes the gate records in place of a checker exit code.
+const (
+	notRun  = -1 // the checker had nothing to run on
+	crashed = -2 // the checker was killed by a signal: no verdict
+)
+
 // Checkers names the two extracted checker binaries. Exit codes: 0 verified, 1
 // not verified, 2 input rejected.
 type Checkers struct {
@@ -24,7 +30,8 @@ type Outcome struct {
 	Record  Record
 	Verdict Verdict // the catalog's verdict, "" when unlisted
 	Other   Verdict // when Verdict is "": the verdict listed for the machine as another kind
-	// Checker exit codes, -1 when the checker did not run.
+	// Checker exit codes; notRun (-1) when the checker did not run, crashed
+	// (-2) when a signal killed it.
 	RulesExit, TablesExit int
 	RulesOut, TablesOut   string
 	Problems              []string
@@ -53,8 +60,10 @@ func (r *Report) OK() bool {
 
 func exitText(code int) string {
 	switch code {
-	case -1:
+	case notRun:
 		return "not run"
+	case crashed:
+		return "crashed"
 	case 0:
 		return "verified"
 	case 1:
@@ -168,7 +177,7 @@ func Run(dumps string, cat *Catalog, ck Checkers) (*Report, error) {
 		rs := recs[prog]
 		sort.SliceStable(rs, func(i, j int) bool { return rs[i].stem < rs[j].stem })
 		for _, rec := range rs {
-			o := Outcome{Program: prog, Record: rec, RulesExit: -1, TablesExit: -1}
+			o := Outcome{Program: prog, Record: rec, RulesExit: notRun, TablesExit: notRun}
 			if rules := rec.input(".rules"); rules != "" {
 				args := []string{rules}
 				if pairs := rec.input(".pairs"); pairs != "" {
@@ -231,8 +240,11 @@ func judge(o Outcome, listed bool) []string {
 		name string
 		exit int
 	}{{"rules", o.RulesExit}, {"table", o.TablesExit}} {
-		if c.exit == 2 {
+		switch c.exit {
+		case 2:
 			p = append(p, "the "+c.name+" checker refused the exported input")
+		case crashed:
+			p = append(p, "the "+c.name+" checker crashed (killed by a signal), so it gave no verdict")
 		}
 	}
 	switch {
@@ -256,23 +268,22 @@ func judge(o Outcome, listed bool) []string {
 	switch o.Verdict {
 	case Certified:
 		switch o.RulesExit {
-		case -1:
+		case notRun:
 			p = append(p, "listed certified, but its rules were not exported: "+rec.RulesErr)
-		case 0:
-		case 2: // reported above
+		case 0, 2, crashed: // 2 and crashed are reported above
 		default:
 			p = append(p, "the rules checker does not verify it ("+exitText(o.RulesExit)+"): "+firstLine(o.RulesOut))
 		}
 		p = append(p, tablesVerified(o)...)
 	case CertifiedTables:
-		if o.RulesExit != -1 {
+		if o.RulesExit != notRun {
 			p = append(p, "listed certified-tables, but its rules export: list it certified")
 		}
 		p = append(p, tablesVerified(o)...)
 	case Synthesized:
 		p = append(p, tablesVerified(o)...)
 	case NotBuilt:
-		if o.RulesExit != -1 || o.TablesExit != -1 {
+		if o.RulesExit != notRun || o.TablesExit != notRun {
 			p = append(p, "listed not-built, but a checker can run on it: list it rejected")
 		}
 	case Rejected:
@@ -280,18 +291,18 @@ func judge(o Outcome, listed bool) []string {
 			p = append(p, "Build failed before the convergence check, so no checker can confirm the rejection (list it not-built): "+firstLine(rec.BuildErr))
 			break
 		}
-		if o.RulesExit == -1 && o.TablesExit == -1 {
+		if o.RulesExit == notRun && o.TablesExit == notRun {
 			p = append(p, "no checker could run on it")
 		}
 		switch o.TablesExit {
-		case -1, 1, 2:
+		case notRun, 1, 2, crashed:
 		case 0:
 			p = append(p, "Build rejects it but the table checker verifies it")
 		default:
 			p = append(p, "the table checker failed ("+exitText(o.TablesExit)+"): "+firstLine(o.TablesOut))
 		}
 		switch {
-		case o.RulesExit == -1, o.RulesExit == 2:
+		case o.RulesExit == notRun, o.RulesExit == 2, o.RulesExit == crashed:
 		case o.RulesExit == 0:
 			p = append(p, "Build rejects it but the rules checker verifies it")
 		case o.RulesExit != 1:
@@ -307,9 +318,9 @@ func judge(o Outcome, listed bool) []string {
 
 func tablesVerified(o Outcome) []string {
 	switch o.TablesExit {
-	case -1:
+	case notRun:
 		return []string{"its tables were not exported: " + o.Record.TablesErr}
-	case 0, 2: // 2 is reported by judge
+	case 0, 2, crashed: // 2 and crashed are reported by judge
 		return nil
 	}
 	return []string{"the table checker does not verify it (" + exitText(o.TablesExit) + "): " + firstLine(o.TablesOut)}
@@ -330,7 +341,10 @@ func execChecker(bin string, args ...string) (int, string, error) {
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
+		if ee.ExitCode() < 0 { // killed by a signal (ExitCode is -1 then)
+			return crashed, string(out), nil
+		}
 		return ee.ExitCode(), string(out), nil
 	}
-	return -1, string(out), fmt.Errorf("run %s: %w", bin, err)
+	return notRun, string(out), fmt.Errorf("run %s: %w", bin, err)
 }
