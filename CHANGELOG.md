@@ -16,8 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dependencies). `internal/oracle/PROVENANCE` pins the proof commit, the prover image and the
     hashes. CI regenerates the file from them and requires the same bytes.
   - **Failing closed.** If the oracle does not certify the tables, the call returns an error and
-    no machine. Such a disagreement means a bug in gsm's Go verification, and
-    `Report.OracleDisagreement` names it.
+    no machine, and `Report.OracleDisagreement` holds the oracle's error. With deterministic
+    rules, a disagreement points at a bug in gsm's verification or in the oracle's generator. An
+    impure rule, which gives different results when `BuildCompositional` runs it again, can cause
+    one too.
+  - **`Federation.Build` and `Certificate.Verify`.** They rebuild components with `Build`, so
+    every component's tables are gated. The morphism checks (M1, acyclicity, monotone-cycle
+    iteration) and certificate re-derivation are gsm's Go code and are not oracle-gated.
+  - **Limits.** Running out of memory or goroutine stack kills the process rather than returning
+    an error. At 2^20 states the gate's peak RSS is about 2.1 to 2.3 GB with 20 events.
   - **`Report.Assurance`** (and `Synthesis.Assurance`) record what certified a machine:
     `AssuranceOracleTables`, or `AssuranceOracleComponents` for `BuildCompositional`, where
     cross-component independence still rests on gsm's footprint check.

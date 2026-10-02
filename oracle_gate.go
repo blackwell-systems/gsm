@@ -66,7 +66,8 @@ func certifyTables(tb oracle.Tables, what string) error {
 	}
 	if !ok {
 		return &oracleError{fmt.Sprintf("gsm: the verified table oracle rejects %s, which gsm's verification accepted; "+
-			"not certified (a bug in gsm's verification or in the tables it built: please report it)", what)}
+			"not certified (with deterministic rules, a bug in gsm's verification or in the oracle; an impure rule re-run with "+
+			"a different result can also cause it)", what)}
 	}
 	return nil
 }
