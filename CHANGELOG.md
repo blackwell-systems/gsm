@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly what `WriteMachineAST` and `WriteDeclaredPairs` write. It re-derives every step from the
   expression trees, so it does not trust gsm's tables.
   - It runs on machines whose rules are all combinators, whose work is at most
-    `RulesOracleMaxWork` (2^21), and that are inside its fragment. The work (`oracle.RulesCost`)
+    `RulesOracleMaxWork` (2^29), and that are inside its fragment. The work (`oracle.RulesCost`)
     is an upper bound on the steps `checkBuild` takes in the generated Go, counted from the
     expression trees, the checked pairs (every pair when none is declared) and the repair depth:
     per state, normalizing it, and for each checked pair both events' guards, effects and
@@ -26,10 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     fails `Build` closed, with the error in `Report.OracleDisagreement`.
   - `SynthesizeWith` and `BuildCompositional` run the table oracle only.
   - Cost (generated Go, Apple M-series, `TestRulesOracleCostPerStep`): at most about 4 ns per
-    step (4.04 ns on a wide Int domain; 0.7 to 3.2 ns elsewhere). Memory is the box, about
-    states x (variables + 1) list cells: about 210 bytes per state at 20 variables (213 MB at
-    2^20 states), plus a few MB. Within the cap that is at most about 8 ms and a few MB; at 2^29
-    about 2.2 s and under about 150 MB; at 2^30 about 4.3 s and under about 300 MB.
+    step (4.04 ns on a wide Int domain; 0.7 to 3.2 ns elsewhere). Memory is mostly the box, about
+    states x (variables + 1) list cells: from about 100 bytes per state at 2 variables to about
+    220 at 20, plus a few MB. Within the cap that is at most about 2.2 s and under about 170 MB
+    (the most measured within it: 160 MB, at 2^20 states of 10 four-valued Ints).
   - Output change: the report's oracle-failure header is now `Verified oracle: did not certify`,
     and a certified report that skipped the rules oracle ends with a `Rules oracle: not run:` line.
 - **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`

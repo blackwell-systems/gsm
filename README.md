@@ -505,7 +505,7 @@ tables: it re-derives every step by evaluating the expression trees, so it does 
 tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` says which did not:
 - every rule is a combinator (`DeclInvariant`, `DeclEvent`, `DeclEventGuarded`), so the machine
   has rules to read;
-- its work is at most `RulesOracleMaxWork` (2^21). The work (`oracle.RulesCost`) is an upper
+- its work is at most `RulesOracleMaxWork` (2^29). The work (`oracle.RulesCost`) is an upper
   bound on the steps the generated `checkBuild` takes, counted from the expression trees, the
   checked pairs (every pair when none is declared) and the repair depth (`Report.MaxRepairLen`).
   Per state it counts what the oracle evaluates there: normalizing the state (each repair step
@@ -513,10 +513,9 @@ tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` s
   guards and effects, each followed by a normalization, twice. So rule size, pairs, invariants
   and repair depth all count. Measured on the generated Go, the rules oracle takes at most about
   4 ns per step (the worst, 4.04 ns, on a wide Int domain; 0.7 to 3.2 ns elsewhere). Its memory is
-  the box, about states × (variables + 1) list cells: about 210 bytes per state at 20 variables
-  (213 MB at 2^20 states, the most measured), plus a few MB. Within the cap it adds at most about
-  8 ms and a few MB (2^29 would be about 2.2 s and under about 150 MB; 2^30 about 4.3 s and under
-  about 300 MB);
+  mostly the box, about states × (variables + 1) list cells: from about 100 bytes per state at 2
+  variables to about 220 at 20, plus a few MB. Within the cap it adds at most about 2.2 s and
+  under about 170 MB (the most measured within it: 160 MB, at 2^20 states of 10 four-valued Ints);
 - the machine is inside the rules oracle's fragment, which two static checks on the rules decide:
   no expression can leave |2^31-1| (`bounded`), and no write can store a negative value into a
   two-valued variable with minimum 0 (`signSafe`; a gsm `Bool` stores value != 0 where the model
@@ -684,9 +683,9 @@ Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather tha
 | 2²⁰ states, 20 events, every pair (190) | 0.76 s | 5.6 s (peak RSS about 330 MB, against 240 MB without the gate) |
 
 The rules oracle's own cost, per step of its work (`oracle.CheckRules` alone, Apple M-series;
-`GSM_RULES_COST=14 go test -run TestRulesOracleCostPerStep -v .`). These machines are above the
-cap, so that the times are measurable; within the cap (2^21 steps) the most it adds is about 4 ns
-x 2^21, 8 ms (the worst per step, 4.04 ns, was measured on a wide Int domain in the review of #17):
+`GSM_RULES_COST=14 go test -run TestRulesOracleCostPerStep -v .`). They are large, some above the
+cap (2^29 steps), so that the times are measurable; within the cap the most it adds is about 4 ns
+x 2^29, 2.2 s (the worst per step, 4.04 ns, was measured on a wide Int domain in the review of #17):
 
 | Combinator machine | Work (steps) | Rules oracle | Per step | Live heap |
 |---------|------------------|---------------|---------------|---------------|
@@ -699,8 +698,10 @@ x 2^21, 8 ms (the worst per step, 4.04 ns, was measured on a wide Int domain in 
 | 2¹⁴ states, 100 writes in an event | 5.9 × 10⁸ | 1.2 s | 2.0 ns | 6 MB |
 | 2¹⁴ states, guards of 100 terms | 1.7 × 10⁸ | 0.12 s | 0.7 ns | 4 MB |
 
-Within the cap, `Build` with both oracles takes 2.9 ms on 2¹¹ states with one event (work about
-2²⁰) and 4.2 ms on 2⁴ states with 20 events and every pair (about 1.3 M).
+Within the cap, `Build` with both oracles takes 0.70 s on 2¹⁹ states with one event (work
+4.4 × 10⁸, 0.55 GB allocated in all) and 1.6 s on 2¹² states with 20 events and every pair
+(5.3 × 10⁸). 2²⁰ states with one event (9.3 × 10⁸) and 2¹³ states with 20 events and every pair
+(1.1 × 10⁹) are above it: the table oracle alone certifies them.
 
 For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast.
 
