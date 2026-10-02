@@ -43,12 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BuildCompositional` machine's `Apply` could run a rewritten, unverified rule (an event writing
   outside its declared write set, order-dependent), and the policy digest changed after the build.
   The declarations and `And`/`Or` now copy what they are given. `Enum` also copies its labels.
-- **`Certify` could digest declarations no check saw.** It builds the federation, then runs
-  morphism closures (verification and table extraction) before digesting. A closure that declared
-  on a component there, or added a morphism to the federation, got that into the certificate.
-  `Certify` now works on a copy of the federation's wiring taken when it is called, and rejects a
-  component registry changed while it runs (`gsm: registry "r" was changed while it was being
-  verified ...`).
+- **`Federation.Build` and `Certify` could act on declarations no check saw.** Both build the
+  components, then run morphism closures (verification, and for `Certify` table extraction). A
+  closure that declared on a component there left the registry and the `FedMachine`'s machine for
+  it differing silently, and `Certify` digested the declaration. A closure that added a morphism
+  to the federation reached the later passes (the monotonicity check) but not the machine, and
+  `Certify` put its unverified table into the certificate. Both now work on a copy of the
+  federation's wiring taken when they are called, and reject a component registry changed while
+  they run (`gsm: registry "r" was changed while it was being verified ...`). **Behaviour
+  change:** such a federation is now rejected.
 - **The rules oracle used the wrong arithmetic.** `astchecker` (normalization-confluence) evaluated
   rules over the natural numbers, so `Sub` truncated at 0 and a guard such as
   `Lt(Sub(V(a), V(b)), Lit(0))` was never true. It certified machines that `Build` correctly

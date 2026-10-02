@@ -147,9 +147,12 @@ builds, certifies, or exports therefore rejects a registry that declares two eve
 variables, with the same name. `Build`, `BuildCompositional` and `Synthesize` also reject a
 registry that a rule closure changes while they verify it, so a declaration cannot slip in after
 their check. (`Synthesis.Machine` is the machine as synthesized: it is built from a snapshot taken
-when `Synthesize` returns, so a later declaration does not reach it.) `Certify` certifies the
-federation as it was when called: it works on a copy of the wiring, so a morphism a closure adds
-while it runs is not in the certificate, and it rejects a component changed while it runs.
+when `Synthesize` returns, so a later declaration does not reach it.) `Federation.Build` and
+`Certify` verify the federation as it was when called: they work on a copy of the wiring, so a
+morphism a closure adds while they run is neither verified nor in the machine or certificate, and
+they reject a component changed while they run. `Certificate.Verify` runs no user code between
+digesting and rebuilding (the digest requires combinator rules, and the tables replace the
+morphism closures), so there is nothing there for a closure to change.
 
 The recorded verdict (`Certificate.Report`) is informational. These re-checks are gsm's Go code:
 they remove trust in stored results, not in the Go verifier. An extracted federation oracle and a
