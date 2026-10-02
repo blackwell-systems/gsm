@@ -156,7 +156,8 @@ func TestCompositionalReport_Pass(t *testing.T) {
 		"  WFC: PASS (max repair depth: 1)\n" +
 		"  CC (Compensation Commutativity): PASS (3 pairs: 3 disjoint, 0 brute-force)\n" +
 		"\n" +
-		"  Convergence: GUARANTEED\n"
+		"  Convergence: GUARANTEED\n" +
+		"  Assurance: component tables certified by the verified table oracle; cross-component independence by gsm's footprint check\n"
 	if got := rep.String(); got != want {
 		t.Fatalf("report text:\n%s\nwant:\n%s", got, want)
 	}
