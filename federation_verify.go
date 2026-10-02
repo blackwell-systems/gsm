@@ -88,8 +88,12 @@ func imageResultError(what func() string, target string, vars []Var, dst, out St
 		what(), dst, out, target, err)
 }
 
-func (e edgeDef) describe() string { return fmt.Sprintf("morphism %s→%s Map", e.src.name, e.dst.name) }
+// describe names the morphism's Map, for imageResultError.
+func (e edgeDef) describe() string {
+	return fmt.Sprintf("morphism %s→%s Map", e.src.name, e.dst.name)
+}
 
+// resolverName names target's Resolver, for imageResultError.
 func resolverName(target string) func() string {
 	return func() string { return fmt.Sprintf("resolver for %q", target) }
 }
