@@ -25,10 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A rejection (repair does not terminate, or a declared pair does not commute), or no verdict,
     fails `Build` closed, with the error in `Report.OracleDisagreement`.
   - `SynthesizeWith` and `BuildCompositional` run the table oracle only.
-  - Cost (generated Go, Apple M-series, `TestRulesOracleCostPerStep`): at most about 3.2 ns per
-    step (pairs-heavy machines; 0.7 to 2 ns for expressions, predicates, invariants and repair
-    depth) and about 0.25 bytes of live heap per step plus a few MB. Within the cap that is at
-    most about 7 ms and a few MB.
+  - Cost (generated Go, Apple M-series, `TestRulesOracleCostPerStep`): at most about 4 ns per
+    step (4.04 ns on a wide Int domain; 0.7 to 3.2 ns elsewhere). Memory is the box, about
+    states x (variables + 1) list cells: about 210 bytes per state at 20 variables (213 MB at
+    2^20 states), plus a few MB. Within the cap that is at most about 8 ms and a few MB; at 2^29
+    about 2.2 s and under about 150 MB; at 2^30 about 4.3 s and under about 300 MB.
   - Output change: the report's oracle-failure header is now `Verified oracle: did not certify`,
     and a certified report that skipped the rules oracle ends with a `Rules oracle: not run:` line.
 - **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`

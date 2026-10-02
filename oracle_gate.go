@@ -41,11 +41,18 @@ var (
 // evaluated. Above the cap the table oracle alone certifies the machine, and
 // Report.RulesOracleSkipped gives the work.
 //
-// Measured on the generated Go (Apple M-series, TestRulesOracleCostPerStep),
-// the rules oracle takes at most about 3.2 ns per step (machines whose work is
-// mostly pairs; 0.7 to 2 ns for expressions, predicates, invariants and repair
-// depth) and at most about 0.25 bytes of live heap per step, plus a few MB. So
-// within the cap it adds at most about 7 ms and a few MB. The bound takes the
+// Measured on the generated Go (Apple M-series, TestRulesOracleCostPerStep and
+// the review of #17), the rules oracle takes at most about 4 ns per step (the
+// worst, 4.04 ns, on a wide Int domain; 0.7 to 3.2 ns elsewhere). Its memory is
+// the box, about states x (variables + 1) list cells: about 210 bytes per state
+// at 20 variables (213 MB at 2^20 states, 20 flags, the most measured), plus a
+// few MB. A state costs at least 24 x (variables + 1) steps, so the cap also
+// bounds the states. Within the cap the rules oracle adds at most:
+//   - 2^21 (this value): about 8 ms and a few MB;
+//   - 2^29: about 2.2 s and under about 150 MB;
+//   - 2^30: about 4.3 s and under about 300 MB (Build allows at most 2^20 states).
+//
+// The bound takes the
 // repair depth from gsm's verification (Report.MaxRepairLen): if the oracle's
 // repair chains were longer than gsm's, it would take longer, up to its fuel
 // (the number of states) of repair steps per normalization.
