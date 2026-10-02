@@ -20,6 +20,8 @@ type Machine struct {
 
 	valid []bool // valid[stateID]: encoding is in-domain (every variable within its domain)
 
+	dom *domainCheck // decides whether a State is a state of this machine
+
 	// The event pairs CC was verified for (Registry.ccPairs, each with i < j), and
 	// whether that is every pair (no Independent declarations). Recorded so the
 	// tables can be re-checked against the same property.
@@ -99,12 +101,12 @@ func (m *Machine) allHold(s State) bool {
 }
 
 // mustBeState panics unless out, which a rule returned for input in, is a state of this
-// machine (notStateOf). BuildCompositional checked the rules on every state of each
+// machine (domainCheck). BuildCompositional checked the rules on every state of each
 // component, but a lazy machine runs them again at Apply time on states it never saw, so
 // the result is checked here, where it is computed. Returns out with this machine's
 // variable list.
 func (m *Machine) mustBeState(kind, name, part string, in, out State) State {
-	if err := ruleResultError(m.name, m.vars, kind, name, part, in, out); err != nil {
+	if err := m.dom.ruleError(m.name, kind, name, part, in, out); err != nil {
 		panic(err.Error())
 	}
 	return State{packed: out.packed, vars: m.vars}

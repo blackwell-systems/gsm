@@ -125,10 +125,11 @@ func (s State) checkVar(v Var) {
 }
 
 // sameVar reports whether a and b declare the same variable: name, kind, position and
-// width in the packed encoding, domain, minimum and enum labels.
+// width in the packed encoding, domain, minimum and enum labels. (The index is not
+// compared: callers compare variables found at the same index.)
 func sameVar(a, b Var) bool {
-	if a.name != b.name || a.kind != b.kind || a.index != b.index || a.offset != b.offset ||
-		a.bits != b.bits || a.domain != b.domain || a.min != b.min || len(a.labels) != len(b.labels) {
+	if a.name != b.name || a.kind != b.kind || a.offset != b.offset || a.bits != b.bits ||
+		a.domain != b.domain || a.min != b.min || len(a.labels) != len(b.labels) {
 		return false
 	}
 	for i := range a.labels {
@@ -139,11 +140,11 @@ func sameVar(a, b Var) bool {
 	return true
 }
 
-// notStateOf returns why s is not a state of the machine whose variables are vars, or nil
-// when it is. Membership is by value, so it does not matter which Registry or Machine
-// produced s:
+// domainCheck decides whether a State is a state of the machine whose variables are vars.
+// Membership is by value, so it does not matter which Registry or Machine produced the
+// state:
 //
-//   - s has the machine's variable schema: as many variables, each the same as the
+//   - it has the machine's variable schema: as many variables, each the same as the
 //     machine's at that position (sameVar). A State from another machine instance with an
 //     identical declaration list qualifies; one with a different list does not, because its
 //     packed value means something else under this machine's layout.
@@ -151,32 +152,74 @@ func sameVar(a, b Var) bool {
 //     count, an Int within min..max, a Bool 0 or 1);
 //   - no bit is set outside the variables' fields.
 //
-// These are exactly the encodings Build enumerates, so a state passes iff Build's tables
-// have an entry for it.
-func notStateOf(vars []Var, s State) error {
-	if len(s.vars) != len(vars) {
-		return fmt.Errorf("it has %d variables, the machine has %d", len(s.vars), len(vars))
+// These are exactly the encodings Build enumerates (isValidEncoding), so a state passes iff
+// Build's tables have an entry for it. The parts that depend only on the machine are
+// precomputed, so a check on a state that shares the machine's variable slice costs one
+// mask test plus one comparison per variable whose domain does not fill its field.
+type domainCheck struct {
+	vars  []Var
+	used  uint64 // the bits of every variable's field
+	tight []Var  // variables whose domain is smaller than their field (not a power of two)
+}
+
+func newDomainCheck(vars []Var) *domainCheck {
+	d := &domainCheck{vars: vars}
+	for _, v := range vars {
+		mask := uint64((1 << v.bits) - 1)
+		d.used |= mask << v.offset
+		if uint64(v.domain) <= mask {
+			d.tight = append(d.tight, v)
+		}
+	}
+	return d
+}
+
+// notStateOf returns why s is not a state of the machine, or nil when it is.
+func (d *domainCheck) notStateOf(s State) error {
+	if len(s.vars) != len(d.vars) {
+		return fmt.Errorf("it has %d variables, the machine has %d", len(s.vars), len(d.vars))
 	}
 	// Fast path: a state that shares the machine's variable slice has its schema.
-	if len(vars) > 0 && &s.vars[0] != &vars[0] {
-		for i := range vars {
-			if !sameVar(s.vars[i], vars[i]) {
-				return fmt.Errorf("its variable %d is %s, the machine's is %s", i, s.vars[i].describe(), vars[i].describe())
+	if len(d.vars) > 0 && &s.vars[0] != &d.vars[0] {
+		for i := range d.vars {
+			if !sameVar(s.vars[i], d.vars[i]) {
+				return fmt.Errorf("its variable %d is %s, the machine's is %s", i, s.vars[i].describe(), d.vars[i].describe())
 			}
 		}
 	}
-	var used uint64
-	for _, v := range vars {
-		mask := uint64((1 << v.bits) - 1)
-		used |= mask << v.offset
-		if raw := (s.packed >> v.offset) & mask; raw >= uint64(v.domain) {
+	if extra := s.packed &^ d.used; extra != 0 {
+		return fmt.Errorf("it sets bits outside the machine's encoding (%#x)", extra)
+	}
+	for _, v := range d.tight {
+		if raw := (s.packed >> v.offset) & uint64((1<<v.bits)-1); raw >= uint64(v.domain) {
 			return fmt.Errorf("variable %q holds %s, outside %s", v.name, v.rawLabel(raw), v.describeDomain())
 		}
 	}
-	if extra := s.packed &^ used; extra != 0 {
-		return fmt.Errorf("it sets bits outside the machine's encoding (%#x)", extra)
-	}
 	return nil
+}
+
+// ruleError reports a rule (an event's effect or an invariant's repair) that returned, for
+// input state in, something that is not a state of the machine named machine, or returns
+// nil. kind is "event" or "invariant"; part names the closure ("effect", "repair").
+func (d *domainCheck) ruleError(machine, kind, name, part string, in, out State) error {
+	err := d.notStateOf(out)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("gsm: %s %q %s on state %s returned %s, which is not a state of machine %q: %v",
+		kind, name, part, in, out, machine, err)
+}
+
+// imageError reports a morphism Map or Resolver (what) that returned, for target state dst,
+// something that is not a state of the target registry, or returns nil. what is called only
+// on failure, so callers on a hot path pay nothing to name the closure.
+func (d *domainCheck) imageError(what func() string, target string, dst, out State) error {
+	err := d.notStateOf(out)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("gsm: %s on target state %s returned %s, which is not a state of %q: %v",
+		what(), dst, out, target, err)
 }
 
 // ID returns the packed integer, usable as a table index.

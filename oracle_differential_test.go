@@ -106,19 +106,19 @@ func newDiffCase(r *Registry, m *Machine, rep *Report, err error) *diffCase {
 	if e := r.WriteDeclaredPairs(&pb); e == nil {
 		c.pairs = pb.Bytes()
 	}
-	var terr error
+	var tm *Machine // the tables to compare
 	switch {
 	case m != nil && !m.lazy:
-		c.tables, c.tableStates, terr = diffTables(m)
-		if terr != nil {
-			c.tableClass = "BUG: Build certified tables that cannot be exported for the table oracle (" + firstLine(terr.Error()) + ")"
-		}
+		tm = m
 	case c.ccFail:
 		if m2, _, e := r.build(false); e == nil {
-			c.tables, c.tableStates, terr = diffTables(m2)
-			if terr != nil {
-				c.tableClass = "BUG: the CC-failing machine's tables cannot be exported for the table oracle (" + firstLine(terr.Error()) + ")"
-			}
+			tm = m2
+		}
+	}
+	if tm != nil {
+		var terr error
+		if c.tables, c.tableStates, terr = diffTables(tm); terr != nil {
+			c.tableClass = "BUG: the tables cannot be exported for the table oracle (" + firstLine(terr.Error()) + ")"
 		}
 	}
 	return c

@@ -460,3 +460,142 @@ func TestDiagnoseCycle_RejectsOutOfDomainMap(t *testing.T) {
 		t.Fatalf("want an out-of-domain error naming the morphism A→B, got: %v", err)
 	}
 }
+
+// TestSameVar_EveryField: a variable of another registry differs from this one's if
+// any part of its declaration differs, since each part changes what a packed value
+// means.
+func TestSameVar_EveryField(t *testing.T) {
+	base := Var{name: "v", kind: EnumKind, index: 1, offset: 3, bits: 2, domain: 3, labels: []string{"a", "b", "c"}, min: 0}
+	if !sameVar(base, base) {
+		t.Fatal("a variable differs from itself")
+	}
+	cp := func(f func(v *Var)) Var {
+		v := base
+		v.labels = append([]string(nil), base.labels...)
+		f(&v)
+		return v
+	}
+	for name, v := range map[string]Var{
+		"name":   cp(func(v *Var) { v.name = "w" }),
+		"kind":   cp(func(v *Var) { v.kind = IntKind }),
+		"offset": cp(func(v *Var) { v.offset = 4 }),
+		"bits":   cp(func(v *Var) { v.bits = 3 }),
+		"domain": cp(func(v *Var) { v.domain = 4 }),
+		"min":    cp(func(v *Var) { v.min = -1 }),
+		"labels": cp(func(v *Var) { v.labels[2] = "z" }),
+		"count":  cp(func(v *Var) { v.labels = v.labels[:2] }),
+	} {
+		if sameVar(base, v) || sameVar(v, base) {
+			t.Errorf("a variable differing only in %s is treated as the same", name)
+		}
+	}
+}
+
+// TestCombinatorForeignVar_Rejected: a combinator rule can leave the domain only
+// through a Var of another registry with the same name and index, which writes with
+// that registry's layout. BuildCompositional runs no closure for a combinator
+// event's footprint check, so it runs every combinator effect on its component's
+// states for the domain check; a combinator repair is checked by the WFC pass.
+func TestCombinatorForeignVar_Rejected(t *testing.T) {
+	wide := NewRegistry("wide")
+	fa := wide.Int("a", 0, 7) // 3 bits where the machine's "a" has 1
+
+	ev := NewRegistry("foreign_effect")
+	ev.Bool("a")
+	ev.DeclEvent("set5", Do(Set(fa, Lit(5))))
+
+	inv := NewRegistry("foreign_repair")
+	a := inv.Bool("a")
+	inv.DeclInvariant("a_off", Eq(V(a), Lit(0)), Do(Set(fa, Lit(4))))
+
+	for _, r := range []*Registry{ev, inv} {
+		for _, b := range []struct {
+			name  string
+			build func() error
+		}{
+			{"Build", func() error { _, _, err := r.Build(); return err }},
+			{"BuildCompositional", func() error { _, _, err := r.BuildCompositional(); return err }},
+		} {
+			var err error
+			if msg := catchPanic(func() { err = b.build() }); msg != "" {
+				t.Fatalf("%s(%s) panicked: %s", b.name, r.name, msg)
+			}
+			if err == nil || !strings.Contains(err.Error(), "not a state of machine") {
+				t.Errorf("%s(%s): want an out-of-domain error, got: %v", b.name, r.name, err)
+			}
+		}
+	}
+}
+
+// TestBuildCompositional_ChecksPerturbedResults: the footprint check runs closures
+// on states with outside variables changed, which neither WFC nor CC enumerates. A
+// result out of the domain there is reported as such, not only as the footprint
+// read it also is (here the high bit it sets is outside every field, so the
+// footprint comparison alone would not see it).
+func TestBuildCompositional_ChecksPerturbedResults(t *testing.T) {
+	r := NewRegistry("perturbed")
+	n := r.Int("n", 0, 2)
+	o := r.Bool("o")
+	r.Event("set_one").Writes(n).Apply(func(s State) State {
+		if s.GetBool(o) {
+			return State{packed: s.packed | 1<<40, vars: s.vars}
+		}
+		return s.SetInt(n, 1)
+	}).Add()
+	r.Event("flip").Writes(o).Apply(func(s State) State { return s.SetBool(o, true) }).Add()
+	_, _, err := r.BuildCompositional()
+	if err == nil || !strings.Contains(err.Error(), "not a state of machine") || !strings.Contains(err.Error(), "o=true") {
+		t.Fatalf("want an out-of-domain error from the perturbed state {o=true}, got: %v", err)
+	}
+}
+
+// TestFedMachine_EveryRuntimeImageChecked: SharedProjection, IsValid and a
+// resolver's merge also run closures at call time, and check their results.
+func TestFedMachine_EveryRuntimeImageChecked(t *testing.T) {
+	leak := false
+	f, dst := fedPair(func(s, d State, n Var) State {
+		if leak {
+			return rawState(d, n, 3)
+		}
+		return d.SetInt(n, 2)
+	})
+	fm, _, err := f.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := f.comps[0]
+	fs := fm.NewState()
+	leak = true
+	if msg := catchPanic(func() { _, _ = fm.SharedProjection(fs.states[0], src, dst) }); !strings.Contains(msg, "not a state of") {
+		t.Errorf("SharedProjection did not reject the out-of-domain image: %q", msg)
+	}
+	if msg := catchPanic(func() { fm.IsValid(fs) }); !strings.Contains(msg, "not a state of") {
+		t.Errorf("IsValid did not reject the out-of-domain image: %q", msg)
+	}
+
+	a := NewRegistry("ra")
+	a.Bool("x")
+	b := NewRegistry("rb")
+	b.Bool("y")
+	rdst := NewRegistry("rdst")
+	n := rdst.Int("n", 0, 2)
+	keep := func(s, d State) State { return d }
+	rleak := false
+	rf := NewFederation("resolver_runtime").
+		Morphism(a, rdst).Shared(n).Map(keep).Add().
+		Morphism(b, rdst).Shared(n).Map(keep).Add().
+		Resolve(rdst, func(d State, _ map[string]State) State {
+			if rleak {
+				return rawState(d, n, 3)
+			}
+			return d.SetInt(n, 2)
+		})
+	rm, _, err := rf.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rleak = true
+	if msg := catchPanic(func() { rm.Normalize(rm.NewState()) }); !strings.Contains(msg, `resolver for "rdst"`) {
+		t.Errorf("FedMachine did not reject the resolver's out-of-domain merge: %q", msg)
+	}
+}
