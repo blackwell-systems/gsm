@@ -118,7 +118,7 @@ func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
 		return nil, err
 	}
 	for i, r := range g.comps {
-		if err := r.checkUnchanged(before[i]); err != nil {
+		if err = r.checkUnchanged(before[i]); err != nil {
 			return nil, err
 		}
 	}
