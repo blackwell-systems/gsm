@@ -53,6 +53,7 @@ uint64: ...0000 0011 1101
 
 Variables are assigned offsets and bit widths during declaration:
 
+<!-- gocheck: check registry -->
 ```go
 status := b.Enum("status", "pending", "paid", "shipped")
 // domain=3, bits=2, offset=0
@@ -139,6 +140,7 @@ start from valid or invalid states.
 
 ### Machine Structure
 
+<!-- gocheck: excerpt simplified view of the unexported Machine fields -->
 ```go
 type Machine struct {
     name   string
@@ -151,6 +153,7 @@ type Machine struct {
 
 ### Event Application (O(1))
 
+<!-- gocheck: excerpt simplified copy of the internal Apply -->
 ```go
 func (m *Machine) Apply(s State, event string) State {
     ei := m.events[event]           // O(1) map lookup
@@ -202,6 +205,7 @@ Step[ship][0] = NF(apply(ship, 0)) = NF(2) = 0  // pending→shipped, unpaid →
 
 Runtime execution:
 
+<!-- gocheck: check machine -->
 ```go
 s := machine.NewState()          // s.packed = 0
 s = machine.Apply(s, "ship")     // s.packed = step[ship][0] = 0
@@ -216,6 +220,7 @@ Final state: `{status=paid, paid=true}` - converged despite invalid intermediate
 
 Invariants are checked in declaration order. When multiple invariants are violated, the first one fires:
 
+<!-- gocheck: check registry -->
 ```go
 b.Invariant("inv1") // Higher priority
 b.Invariant("inv2") // Lower priority
@@ -227,17 +232,21 @@ If both are violated, `inv1`'s repair fires first. After repair, if `inv2` is st
 
 Each invariant declares its footprint - which variables it reads/writes:
 
+<!-- gocheck: check registry -->
 ```go
 b.Invariant("cap").
-    Over(count).  // Footprint: {count}
-    Check(...)
-    Repair(...)
+    Watches(count). // Footprint: {count}
+    Holds(func(s State) bool { return s.GetInt(count) <= 10 }).
+    Repair(func(s State) State { return s.SetInt(count, 10) }).
+    Add()
 ```
 
-Repairs must only modify variables in the footprint. This enables:
-- Independent compensation analysis
-- Disjointness optimizations for CC checking
-- Clear separation of concerns
+Repairs must only modify variables in the footprint, and checks and repairs must only read it.
+`Build` does not rely on this: it checks every event pair exhaustively from the step tables.
+`BuildCompositional` does rely on it, so it checks it first (`verifyFootprints`): exactly from the
+tree for combinator rules, and by perturbation for closures (every value of each outside variable
+and each pair of outside variables). Events must also read only their write set there. Only then
+does it skip event pairs that lie in different footprint components.
 
 ### Idempotence on Valid States
 
@@ -288,6 +297,7 @@ Maximum: 1,048,576 states (2^20)
 
 This is checked during `Build()`:
 
+<!-- gocheck: excerpt simplified copy of the internal size check -->
 ```go
 if b.totalBits > 20 {
     return nil, nil, fmt.Errorf("state space too large")

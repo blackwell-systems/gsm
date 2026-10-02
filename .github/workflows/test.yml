@@ -33,6 +33,14 @@ jobs:
       shell: bash
       run: go vet .
 
+    - name: Check doc snippets
+      # Every Go block in the top-level docs type-checks, and every README example
+      # marked `run` executes (and so Builds its machine). Also part of go test above;
+      # run on its own so a doc failure is visible by name.
+      if: matrix.os == 'ubuntu-latest'
+      shell: bash
+      run: go test -count=1 -run 'TestDocSnippets' -v .
+
     - name: Upload coverage
       if: matrix.os == 'ubuntu-latest' && matrix.go == '1.23'
       uses: codecov/codecov-action@v4
