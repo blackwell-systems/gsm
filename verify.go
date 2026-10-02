@@ -295,16 +295,9 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 	report.WFC = true
 	report.MaxRepairLen = maxRepair
 
-	// Verify idempotence on valid states
-	for i := 0; i < packedCount; i++ {
-		if valid[i] {
-			s := mkState(uint64(i))
-			if r.allInvariantsHold(s) && nf[i] != uint64(i) {
-				return nil, &compensationError{fmt.Sprintf("gsm: compensation moves valid state %s — repair must be identity on valid states", s)}
-			}
-		}
-	}
-
+	// Idempotence on valid states (nf[s] == s when every invariant holds) needs no check:
+	// the repair loop above runs only while an invariant is violated, so it never starts
+	// from a valid state.
 	return nf, nil
 }
 

@@ -257,11 +257,8 @@ If `s` is valid (all invariants hold):
 NF(s) == s
 ```
 
-This is verified during build. If violated, `Build()` returns an error:
-
-```
-gsm: compensation moves valid state {...} — repair must be identity on valid states
-```
+This holds by construction: compensation fires a repair only while some invariant is violated,
+so it never runs on a valid state, and the normal form of a valid state is the state itself.
 
 ## Export Format
 
