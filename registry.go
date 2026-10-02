@@ -90,7 +90,8 @@ func (r *Registry) OnlyDeclaredPairs() *Registry {
 // addressed by name in certificate tables, input ports, and shared projections,
 // where a duplicate would let a re-check or a merge act on the wrong variable.
 // Every path that produces a machine, a certificate, or an export for the
-// checkers calls it.
+// checkers calls it, except Synthesis.Machine, which builds from the snapshot
+// SynthesizeWith took after calling it.
 func (r *Registry) checkNames() error {
 	seen := make(map[string]bool, len(r.events))
 	for _, ev := range r.events {

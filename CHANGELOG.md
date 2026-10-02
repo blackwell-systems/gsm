@@ -64,8 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SynthesizeWith`, `BuildOrSynthesize` (reported as itself, not as a failed synthesis),
   `Federation.Build` (every component, before certificate validation), `Certify`,
   `BuildCoordinated`, `EmbedCertified` builds, `Certificate.Verify`, `WriteMachineAST`,
-  `PolicyBytes`, `PolicyDigest`, and `WriteDeclaredPairs`. **Behaviour change:** a registry that
-  reused an event name, which used to build, is now rejected; rename one of the events.
+  `PolicyBytes`, `PolicyDigest`, and `WriteDeclaredPairs`. `Synthesis.Machine` is built from a
+  snapshot of the registry taken when `Synthesize` ran (after the check), so a duplicate declared
+  afterwards does not reach it. **Behaviour change:** a registry that reused an event name, which
+  used to build, is now rejected; rename one of the events.
 - **Duplicate variable names misrouted certificate re-checks and projections.** Certificate tables,
   input ports, and shared projections name variables, so with two variables of the same name
   `Certificate.Verify` re-checked a table against the last one while `MergeProjection` wrote the
@@ -75,8 +77,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Certificate.Verify` re-checked tables against whichever registry a key named.** The digest names
   components by registry name but the re-check looked a table's target up by map key, so a map
   whose keys did not match the registries' names (for example two keys swapped) still matched the
-  digest and re-checked a table against the wrong registry. `Verify` now requires each key to be
-  its registry's name.
+  digest and re-checked a table against the wrong registry. **Behaviour change:** `Verify` now
+  requires each key to be its registry's name.
+- **`Synthesis.Machine` read the registry when called, not when synthesized.** An event declared
+  after `Synthesize` (a duplicate name made `Apply` and `Events` panic), or a pair declared
+  `Independent` afterwards, reached the machine; the second was recorded as CC-checked and written
+  by `WriteConvergenceTables`, although synthesis never checked it and the pair need not commute.
+  `Synthesis` now keeps the variables, event names, and pairs it ran on, and `Machine` and
+  `Repairs` use them.
 - **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity
   check for any event pair whose triggered invariant footprints were disjoint, and never checked
   what an event's guard or effect reads. The shortcut's theorem (`disjoint_events_commute` in
