@@ -1,6 +1,7 @@
 package gsm
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -71,13 +72,26 @@ func (r *Registry) Synthesize() (*Synthesis, error) { return r.SynthesizeWith() 
 // exhaustive) or could not be searched. This ties gsm's two mechanisms together, verification (Build,
 // which reports failures) and repair generation (Synthesize), so a caller can say "build this, and if
 // my repair does not converge, give me one that does."
+//
+// It falls back only when the compensation is what failed: an invariant has no Repair, or
+// WFC or CC fails. Any other Build error is returned as is, without synthesis: a rule
+// result that is not a state of the machine (see EffectFunc), a registry changed while it
+// was verified, a duplicate name, or a state space too large.
 func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis, error) {
 	// A naming error is not a convergence failure, and no compensation can repair it.
 	if err := r.checkNames(); err != nil {
 		return nil, nil, err
 	}
-	if m, _, err := r.Build(); err == nil {
+	m, _, err := r.Build()
+	if err == nil {
 		return m, nil, nil
+	}
+	// Synthesis replaces the compensation, so it can only help when the compensation is
+	// what failed. Any other error (a rule result outside the machine, a registry changed
+	// while it was verified, a duplicate name, a state space too large) is returned as is.
+	var ce *compensationError
+	if !errors.As(err, &ce) {
+		return nil, nil, err
 	}
 	s, serr := r.SynthesizeWith(opts...)
 	if serr != nil {
@@ -110,9 +124,7 @@ func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis,
 // encoding would push the ceiling further.
 //
 // It returns an error if an event effect returns something that is not a state of this
-// machine (see EffectFunc). Repairs are not run, so a malformed repair does not matter here:
-// BuildOrSynthesize falls back to synthesis when Build rejects a repair's result, and the
-// returned Synthesis then reports the substituted compensation.
+// machine (see EffectFunc). Repairs are not run, since synthesis replaces them.
 func (r *Registry) SynthesizeWith(opts ...SynthOption) (_ *Synthesis, err error) {
 	var cfg synthConfig
 	for _, o := range opts {

@@ -121,14 +121,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (other variables at zero) and their footprint perturbations; and an embedded sub's internal
   `Map`s and `Resolver`s are run only at one representative target (when the tables are
   extracted to match the certificate), so one edited after certification to go wrong at other
-  targets is not caught by `Federation.Build`. `BuildOrSynthesize` reports a bad effect, but a
-  bad repair makes it fall back to synthesis, which replaces the repair (the returned `Synthesis`
-  says so). A state of the machine is defined by value: the same variable schema (each variable
+  targets is not caught by `Federation.Build`. A state of the machine is defined by value: the same variable schema (each variable
   equal in name, kind, layout, range and labels, so a structurally identical machine's state is
   accepted), every variable within its range, and no bit outside the encoding. A lazy
   `BuildCompositional` machine and a `FedMachine` run closures at `Apply` time and now panic on
   any such result, as `Apply` does for an unknown event, which also covers what the build-time
-  checks above cannot reach. `Certificate.Verify` refuses table values
+  checks above cannot reach. A lazy machine's `Apply` and `Normalize` also check their input
+  and panic, naming it, on one that is not a state of the machine (before, a correct rule was
+  blamed, or the input was returned unchanged). On a table machine the input is a documented
+  precondition and not checked, since the check costs 30% to 150% of the lookup. `Certificate.Verify` refuses table values
   outside a variable's range and rows of the wrong length. The differential test now reports a
   certified machine whose tables cannot be exported instead of skipping it.
 - **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity
@@ -160,11 +161,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   past bit 64 were frozen at 0 yet the machine was certified. It now returns an error.
 
 ### Changed
+- **Behaviour change:** `Machine.MergeProjection` returns an error, and leaves the state
+  unchanged, for a projection value outside its variable's domain (out of range, or wider than
+  the variable's bit field, which it used to truncate silently) and for a state that is not a
+  state of the machine. It used to write such values, producing a state outside the machine.
+- **Behaviour change:** `BuildOrSynthesize` falls back to synthesis only when the compensation
+  failed (an invariant has no `Repair`, or WFC or CC fails). Any other `Build` error, such as a
+  rule result outside the machine or a registry changed while it was verified, is returned as
+  is; it used to be followed by synthesis, which could return a machine for it.
 - An event effect that returns a variable outside its range is rejected instead of clamped.
   `Build`, `BuildCompositional`, `Synthesize` and the lazy runtime used to clamp each variable of
   an effect's result into its range. `Set`, `SetBool`, `SetInt` and the combinators never produce
-  such a value, so only a result built some other way (another machine's state, a raw
-  `MergeProjection` value) was affected, and clamping hid the bug.
+  such a value, so only a result built some other way (another machine's state, a raw field
+  write) was affected, and clamping hid the bug.
 - The CC check runs over the valid states plus the zero state `NewState` returns (CC1 as THEORY.md
   §6.3 states it), instead of every encodable state for the pairs it did check. Checking invalid
   states that no run reaches rejected convergent machines (the order-fulfillment test machine fails

@@ -299,6 +299,20 @@ func TestReview_MergeProjectionOutOfDomain(t *testing.T) {
 	if _, err := m.MergeProjection(m.NewState(), Projection{Shared: map[string]uint64{"n": 2}}); err != nil {
 		t.Errorf("an in-domain value was refused: %v", err)
 	}
+	// Two bad values: the error names the same one (the first by name) on every call.
+	r2 := NewRegistry("rev_merge2")
+	r2.Int("a", 0, 2)
+	r2.Int("b", 0, 2)
+	m2, _, err := r2.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		_, err := m2.MergeProjection(m2.NewState(), Projection{Shared: map[string]uint64{"b": 3, "a": 3}})
+		if err == nil || !strings.Contains(err.Error(), `for "a"`) {
+			t.Fatalf("want the error for \"a\" on every call, got: %v", err)
+		}
+	}
 	w := foreignMachine(t, "wider", func(r *Registry) { r.Int("n", 0, 3) })
 	if _, err := m.MergeProjection(w.NewState(), Projection{Shared: map[string]uint64{"n": 1}}); err == nil ||
 		!strings.Contains(err.Error(), "is not a state of machine") {
