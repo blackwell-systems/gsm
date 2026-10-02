@@ -411,6 +411,9 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 // federated conditions from the certificate's morphism tables, NOT from the producer's morphism
 // closures, so it confirms the composition without trusting the producer's code:
 //
+//   - names: comps is keyed by registry name, so each key must equal its registry's name, and no
+//     registry may declare two events or two variables with the same name (the tables and the
+//     runtime address both by name);
 //   - tamper check: the digest recomputed from the provided components and the certificate's tables
 //     must equal the certificate's digest;
 //   - validity preservation (M1 for single-source, R2 for resolvers): for every table row, writing
@@ -427,8 +430,21 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 // covered definition); only the morphism closures are replaced by the tables. The monotonicity of a
 // cyclic (Monotone) certificate is not re-derived here and is left to the component-level oracle.
 func (c *Certificate) Verify(comps map[string]*Registry) error {
+	// The digest names each component by its registry name and the tables name
+	// their targets the same way, so a key must be its registry's name; otherwise
+	// a table would be re-checked against a different registry than the digest
+	// covers under that name.
+	keys := make([]string, 0, len(comps))
+	for k := range comps {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	list := make([]*Registry, 0, len(comps))
-	for _, r := range comps {
+	for _, k := range keys {
+		r := comps[k]
+		if r.name != k {
+			return fmt.Errorf("gsm: certificate %q: component key %q names registry %q", c.Name, k, r.name)
+		}
 		if err := r.checkNames(); err != nil {
 			return err
 		}
