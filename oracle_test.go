@@ -48,10 +48,7 @@ func TestConvergenceTables_WriteAndVerify(t *testing.T) {
 		t.Fatalf("tables not written: %v", err)
 	}
 
-	checker := os.Getenv("GSM_CONVERGENCE_CHECKER")
-	if checker == "" {
-		t.Skip("set GSM_CONVERGENCE_CHECKER to the verified checker binary to run the differential cross-check")
-	}
+	checker := oracleBinary(t, envTableOracle)
 	out, err := exec.Command(checker, path).CombinedOutput()
 	t.Logf("verified checker: %s", out)
 	if err != nil {

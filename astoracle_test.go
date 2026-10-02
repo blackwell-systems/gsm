@@ -52,10 +52,7 @@ func TestMachineAST_WriteAndVerify(t *testing.T) {
 		t.Fatalf("write machine file: %v", err)
 	}
 
-	checker := os.Getenv("GSM_AST_CHECKER")
-	if checker == "" {
-		t.Skipf("set GSM_AST_CHECKER to the verified astchecker binary to run the rules-level differential cross-check\nserialized machine:\n%s", buf.String())
-	}
+	checker := oracleBinary(t, envASTOracle)
 	out, err := exec.Command(checker, path).CombinedOutput()
 	t.Logf("verified AST oracle: %s", out)
 	if err != nil {
@@ -99,10 +96,7 @@ func TestMachineAST_WidenedFragment(t *testing.T) {
 		t.Fatalf("write machine file: %v", err)
 	}
 
-	checker := os.Getenv("GSM_AST_CHECKER")
-	if checker == "" {
-		t.Skipf("set GSM_AST_CHECKER to run the widened-fragment cross-check\nserialized machine:\n%s", buf.String())
-	}
+	checker := oracleBinary(t, envASTOracle)
 	out, err := exec.Command(checker, path).CombinedOutput()
 	t.Logf("verified AST oracle: %s", out)
 	if err != nil {
@@ -131,10 +125,7 @@ func TestMachineAST_RejectsNonConvergent(t *testing.T) {
 		t.Fatalf("write machine file: %v", err)
 	}
 
-	checker := os.Getenv("GSM_AST_CHECKER")
-	if checker == "" {
-		t.Skip("set GSM_AST_CHECKER to the verified astchecker binary to run the rejection cross-check")
-	}
+	checker := oracleBinary(t, envASTOracle)
 	out, err := exec.Command(checker, path).CombinedOutput()
 	t.Logf("verified AST oracle: %s", out)
 	if err == nil {
