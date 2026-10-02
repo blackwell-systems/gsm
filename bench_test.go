@@ -82,8 +82,9 @@ func BenchmarkBuild_WideFlags20(b *testing.B) {
 	benchBuild(b, func() *Registry { return wideFlags(20) })
 }
 
-func BenchmarkBuildCompositional_WideCounters10(b *testing.B) {
-	r := wideCounters(10)
+func benchCompositional(b *testing.B, n int) {
+	b.Helper()
+	r := wideCounters(n)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -92,3 +93,7 @@ func BenchmarkBuildCompositional_WideCounters10(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkBuildCompositional_WideCounters10(b *testing.B) { benchCompositional(b, 10) }
+func BenchmarkBuildCompositional_WideCounters20(b *testing.B) { benchCompositional(b, 20) }
+func BenchmarkBuildCompositional_WideCounters32(b *testing.B) { benchCompositional(b, 32) }
