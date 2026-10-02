@@ -66,7 +66,7 @@ func TestVerify_ComponentKeyMustBeItsName(t *testing.T) {
 		t.Fatal(err)
 	}
 	cert := &Certificate{Name: "forged", Digest: dig, Tables: tables}
-	if err := cert.Verify(map[string]*Registry{"s": s, "t": strict, "u": lax}); err == nil {
+	if cert.Verify(map[string]*Registry{"s": s, "t": strict, "u": lax}) == nil {
 		t.Fatal("premise: Verify must refuse the table against the real target")
 	}
 	// Repeated, because map order is random: the error must name the same key every time.

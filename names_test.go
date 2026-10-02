@@ -160,7 +160,7 @@ func TestDuplicateEventName_CertificateAfterTheFact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cert.Verify(map[string]*gsm.Registry{"src": src, "dst": dst}); err != nil {
+	if err = cert.Verify(map[string]*gsm.Registry{"src": src, "dst": dst}); err != nil {
 		t.Fatalf("premise: the certificate verifies before the duplicate: %v", err)
 	}
 	addDupA(src)
