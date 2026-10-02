@@ -151,8 +151,8 @@ func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 	withRulesCap(t, 3)
 	r := NewRegistry("no_events")
 	r.Int("a", 0, 3)
-	if _, rep, _ := r.Build(); rep.Assurance != AssuranceOracleTables {
-		t.Errorf("4 states, no pairs, cap 3: Assurance = %v, want tables only", rep.Assurance)
+	if _, rep, err := r.Build(); err != nil || rep.Assurance != AssuranceOracleTables {
+		t.Errorf("4 states, no pairs, cap 3: Assurance = %v, err %v; want tables only", rep.Assurance, err)
 	}
 }
 
