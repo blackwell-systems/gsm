@@ -272,8 +272,8 @@ func judge(o Outcome, listed bool) []string {
 	case Synthesized:
 		p = append(p, tablesVerified(o)...)
 	case NotBuilt:
-		if rec.WFCFail || rec.CCFail {
-			p = append(p, "listed not-built, but Build reached its convergence check and rejects it: list it rejected")
+		if o.RulesExit != -1 || o.TablesExit != -1 {
+			p = append(p, "listed not-built, but a checker can run on it: list it rejected")
 		}
 	case Rejected:
 		if !rec.WFCFail && !rec.CCFail {

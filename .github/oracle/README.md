@@ -40,9 +40,10 @@ verdict:
 - `rejected`: `Build` rejects it for WFC or CC, and every checker that can run
   rejects it for the same reason.
 - `synthesized`: a synthesized repair, which the table checker verifies.
-- `not-built`: `Build` fails before its convergence check (an invariant left
-  without a repair for `BuildOrSynthesize`), so there is no machine to check; the
-  machine the program uses instead is listed separately.
+- `not-built`: `Build` rejects the registry as written and neither its rules
+  nor its tables can be exported (an invariant left without a repair for
+  `BuildOrSynthesize`), so no checker can run on it; the machine the program uses
+  instead is listed separately.
 
 The step fails if a checker rejects a machine listed as accepted, a checker
 disagrees with `Build`, a program makes a machine `machines.txt` does not list,

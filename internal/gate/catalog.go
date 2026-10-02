@@ -25,9 +25,10 @@ const (
 	// Synthesized: a machine with a synthesized repair (BuildOrSynthesize), which
 	// the table checker verifies. Its repair is a table, not rules.
 	Synthesized Verdict = "synthesized"
-	// NotBuilt: Build fails before its convergence check (an invariant left
-	// without a repair for BuildOrSynthesize to synthesize, say), so there is no
-	// machine to check. The machine the program then uses is listed separately.
+	// NotBuilt: Build rejects the registry as written and neither its rules nor
+	// its tables can be exported (an invariant left without a repair for
+	// BuildOrSynthesize to synthesize, say), so no checker can run on it. The
+	// machine the program then uses is listed separately.
 	NotBuilt Verdict = "not-built"
 )
 
