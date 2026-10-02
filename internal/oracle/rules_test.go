@@ -42,3 +42,16 @@ func TestCheckRulesRefusesMalformedInput(t *testing.T) {
 		}
 	}
 }
+
+// Any panic while reading the rules is an error, never a verdict.
+func TestCatchTurnsEveryPanicIntoAnError(t *testing.T) {
+	if err := catch(func() { panic("boom") }); err == nil {
+		t.Error("catch(panic) = nil; want an error")
+	}
+	if err := catch(func() { var m map[int]int; m[0] = 1 }); err == nil {
+		t.Error("catch(runtime panic) = nil; want an error")
+	}
+	if err := catch(func() { failf("bad") }); err == nil || err.Error() != "bad" {
+		t.Errorf("catch(parseError) = %v; want bad", err)
+	}
+}

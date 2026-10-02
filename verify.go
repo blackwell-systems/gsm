@@ -54,7 +54,7 @@ type Report struct {
 
 	// RulesOracleSkipped is non-empty when Build certified the machine with the
 	// table oracle alone; it says why the rules oracle did not run (no
-	// combinator rules, above RulesOracleMaxStatePairs, or outside the rules
+	// combinator rules, above RulesOracleMaxWork, or outside the rules
 	// oracle's fragment).
 	RulesOracleSkipped string
 }
@@ -168,7 +168,7 @@ func (r *Report) String() string {
 // oracle: check_fn from the normalization-confluence proof, generated as Go from the
 // Rocq extraction (internal/oracle). The machine is returned only if the oracle certifies
 // the tables. Build then runs the verified rules oracle (checkBuild, generated the same
-// way) on the machine's combinator rules, when it can (see RulesOracleMaxStatePairs):
+// way) on the machine's combinator rules, when it can (see RulesOracleMaxWork):
 // Report.Assurance is AssuranceOracleTablesAndRules when both certified, and
 // AssuranceOracleTables when the rules oracle did not run (Report.RulesOracleSkipped says
 // why). If either oracle rejects the machine or cannot check it, Build returns an error
