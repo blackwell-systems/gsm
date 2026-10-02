@@ -686,7 +686,8 @@ events reach the same state (trace equivalence; with every pair declared, any pe
    of gsm's Go, that normal forms and steps land on valid states (`nf[s] = s`) and that the
    declared pairs commute on the valid states and the zero state. It trusts that gsm computed the
    tables, and confirms those tables converge. Proven sound in Coq via `check_tables_converges`
-   (`TableCheck.v`). Cross-checked in `oracle_test.go` and `oracle_buildspec_test.go`
+   (`TableCheck.v`); the extracted checker runs `check_fast` (`TableFast.v`), proven equal to
+   `check_tables` (`check_fast_eq`), which handles gsm's largest machines. Cross-checked in `oracle_test.go` and `oracle_buildspec_test.go`
    (`GSM_CONVERGENCE_CHECKER`).
 2. **Rules oracle.** `Registry.WriteMachineAST` serializes the combinator **rules** themselves
    (and `Registry.WriteDeclaredPairs` the declared pairs, as a separate file), and a second
