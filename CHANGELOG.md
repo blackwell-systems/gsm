@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     iteration) and certificate re-derivation are gsm's Go code and are not oracle-gated.
   - **Limits.** Running out of memory or goroutine stack kills the process rather than returning
     an error. At 2^20 states the gate's peak RSS is about 2.1 to 2.3 GB with 20 events.
+  - **Output change: `Report.String` ends with an `Assurance:` line.**
+    - A certified report prints it after `Convergence: GUARANTEED`.
+    - Every report that is not certified now ends with `Assurance: not certified`. This covers a
+      failed WFC or CC as well as an oracle rejection (which prints `Convergence: NOT CERTIFIED
+      (no machine)`).
+    - Code that pins or parses report text sees the new line.
+  - **`Synthesis.Machine` decides from what `SynthesizeWith` recorded.** Changing the exported
+    `Convergent` or `Assurance` fields does not make it return a machine.
   - **`Report.Assurance`** (and `Synthesis.Assurance`) record what certified a machine:
     `AssuranceOracleTables`, or `AssuranceOracleComponents` for `BuildCompositional`, where
     cross-component independence still rests on gsm's footprint check.
