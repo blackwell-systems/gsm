@@ -34,13 +34,7 @@ func (r *Registry) ownVar(v Var) error {
 	if v.index < 0 || v.index >= len(r.vars) {
 		return fmt.Errorf("gsm: variable %q (index %d) is not declared in registry %q", v.name, v.index, r.name)
 	}
-	w := r.vars[v.index]
-	same := w.name == v.name && w.kind == v.kind && w.offset == v.offset && w.bits == v.bits &&
-		w.domain == v.domain && w.min == v.min && len(w.labels) == len(v.labels)
-	for i := 0; same && i < len(w.labels); i++ {
-		same = w.labels[i] == v.labels[i]
-	}
-	if !same {
+	if !sameVar(r.vars[v.index], v) {
 		return fmt.Errorf("gsm: variable %q (index %d) belongs to another registry, not %q", v.name, v.index, r.name)
 	}
 	return nil

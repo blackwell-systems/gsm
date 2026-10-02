@@ -31,7 +31,10 @@
 // Registry Networks" (Blackwell, 2026).
 package gsm
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // VarKind distinguishes variable types.
 type VarKind int
@@ -80,6 +83,32 @@ func (v *Var) enumIndex(val string) (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("gsm: enum %q has no value %q", v.name, val)
+}
+
+// describeDomain renders the variable's domain: "0..2", "{a, b}" or "bool".
+func (v *Var) describeDomain() string {
+	switch v.kind {
+	case BoolKind:
+		return "bool"
+	case EnumKind:
+		return fmt.Sprintf("{%s}", strings.Join(v.labels, ", "))
+	default:
+		return fmt.Sprintf("%d..%d", v.min, v.min+v.domain-1)
+	}
+}
+
+// describe renders the variable's declaration, for schema mismatch messages.
+func (v *Var) describe() string {
+	return fmt.Sprintf("%q %s (%d bits at offset %d)", v.name, v.describeDomain(), v.bits, v.offset)
+}
+
+// rawLabel renders a raw field value in the variable's terms (the Int value, or the
+// enum index or Bool field, which is out of range when this is called).
+func (v *Var) rawLabel(raw uint64) string {
+	if v.kind == IntKind {
+		return fmt.Sprintf("%d", int(raw)+v.min)
+	}
+	return fmt.Sprintf("raw value %d", raw)
 }
 
 // enumLabel returns the string label for an integer enum index.

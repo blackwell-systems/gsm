@@ -522,6 +522,18 @@ func (c *Certificate) recheckTables(comps map[string]*Registry) error {
 		}
 		dstValid := target.validStates()
 		for _, row := range t.Rows {
+			// The values are data, not closure results: each must be a value of its variable,
+			// or writing it would leave the target's domain (or, past the field, corrupt others).
+			if len(row.Values) != len(sharedVars) {
+				return fmt.Errorf("gsm: certificate table for %q has a row with %d values for %d shared variables",
+					t.Target, len(row.Values), len(sharedVars))
+			}
+			for i, v := range sharedVars {
+				if row.Values[i] >= uint64(v.domain) {
+					return fmt.Errorf("gsm: certificate table for %q records %s for %q, outside %s",
+						t.Target, v.rawLabel(row.Values[i]), v.name, v.describeDomain())
+				}
+			}
 			for _, dv := range dstValid {
 				s := dv
 				for i, v := range sharedVars {

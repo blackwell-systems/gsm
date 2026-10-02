@@ -161,12 +161,7 @@ func (r *Registry) verifyFootprints(c *component) error {
 			}
 			continue
 		}
-		apply := func(s State) State {
-			if ev.guard != nil && !ev.guard(s) {
-				return s
-			}
-			return ev.effect(s)
-		}
+		apply := func(s State) (State, error) { return r.applyEvent(ev, s) }
 		if err := r.checkTransformFootprint(c, apply, ws, ws, "event", ev.name); err != nil {
 			return err
 		}
@@ -178,7 +173,8 @@ func (r *Registry) verifyFootprints(c *component) error {
 		}
 		fp := indexSet(inv.footprint)
 		// Repair may write only its footprint and depend only on its footprint.
-		if err := r.checkTransformFootprint(c, inv.repair, fp, fp, "invariant repair", inv.name); err != nil {
+		repair := func(s State) (State, error) { return r.repairResult(inv, s) }
+		if err := r.checkTransformFootprint(c, repair, fp, fp, "invariant repair", inv.name); err != nil {
 			return err
 		}
 		// Check must read only its footprint.
@@ -193,8 +189,9 @@ func (r *Registry) verifyFootprints(c *component) error {
 // writeSet and declared footprint is footprint (writeSet is a subset). Over the
 // component subspace, and for every change of one or two variables outside the footprint, it
 // confirms fn writes nothing outside writeSet and its writeSet outputs do not
-// depend on the outside variable.
-func (r *Registry) checkTransformFootprint(c *component, fn func(State) State, writeSet, footprint map[int]bool, kind, name string) error {
+// depend on the outside variable. fn returns an error for a result that is not a
+// state of the machine (applyEvent, repairResult), which stops the check.
+func (r *Registry) checkTransformFootprint(c *component, fn func(State) (State, error), writeSet, footprint map[int]bool, kind, name string) error {
 	var outErr error
 	wm := r.fieldMask(writeSet)
 	pt := r.newPerturber(footprint)
@@ -202,14 +199,22 @@ func (r *Registry) checkTransformFootprint(c *component, fn func(State) State, w
 		if outErr != nil {
 			return
 		}
-		base := fn(s)
+		base, err := fn(s)
+		if err != nil {
+			outErr = err
+			return
+		}
 		if v := r.firstOutsideWrite(s, base, writeSet, wm); v >= 0 {
 			outErr = fmt.Errorf("gsm: %s %q writes variable %q outside its declared footprint",
 				kind, name, r.vars[v].name)
 			return
 		}
 		pt.run(s, func(s2 State, changed changedVars) bool {
-			t2 := fn(s2)
+			t2, err := fn(s2)
+			if err != nil {
+				outErr = err
+				return false
+			}
 			if w := r.firstOutsideWrite(s2, t2, writeSet, wm); w >= 0 {
 				outErr = fmt.Errorf("gsm: %s %q writes variable %q outside its declared footprint",
 					kind, name, r.vars[w].name)

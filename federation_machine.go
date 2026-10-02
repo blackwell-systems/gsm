@@ -92,10 +92,29 @@ func (m *FedMachine) Normalize(fs FedState) FedState {
 // repair recomputes target j's state from its sources (single-source morphism or resolver).
 func (m *FedMachine) repair(fs FedState, j int) State {
 	if r := m.resolvers[j]; r != nil {
-		return r(fs.states[j], m.sourcesOf(fs, j))
+		return m.mustBeTarget(j, resolverName(m.comps[j].name), fs.states[j], r(fs.states[j], m.sourcesOf(fs, j)))
 	}
 	e := m.edges[m.in[j][0]] // exactly one incoming (multi-source without a resolver is rejected)
-	return e.mapFn(fs.states[e.src], fs.states[j])
+	return m.mapImage(e, fs.states[e.src], fs.states[j])
+}
+
+// mapImage runs edge e's Map on (src, dst) and checks the image is a state of the target.
+func (m *FedMachine) mapImage(e fedEdge, src, dst State) State {
+	what := func() string { return fmt.Sprintf("morphism %s→%s Map", m.comps[e.src].name, m.comps[e.dst].name) }
+	return m.mustBeTarget(e.dst, what, dst, e.mapFn(src, dst))
+}
+
+// mustBeTarget panics unless out, which a Map or Resolver (what) returned for target state
+// dst, is a state of component j. Build checked every image over valid source and target
+// states, but FedMachine runs the closures again at Apply time, on states Build may not
+// have enumerated (a cyclic network's reset shared components, for one), so the result is
+// checked here, where it is computed, as Machine.Apply does on a lazy machine.
+func (m *FedMachine) mustBeTarget(j int, what func() string, dst, out State) State {
+	c := m.comps[j]
+	if err := imageResultError(what, c.name, c.vars, dst, out); err != nil {
+		panic(err.Error())
+	}
+	return State{packed: out.packed, vars: c.vars}
 }
 
 // normalizeCyclic computes the federated normal form on a cyclic (but monotone) network by
@@ -223,7 +242,7 @@ func (m *FedMachine) SharedProjection(srcState State, src, dst *Registry) (Proje
 	// state); source-determinacy (checked at Build) guarantees the shared values are independent of
 	// which valid target we use, and a normalized state stays within the morphism's contract.
 	dstRep := m.comps[di].Normalize(m.comps[di].NewState())
-	projected := e.mapFn(srcState, dstRep)
+	projected := m.mapImage(*e, srcState, dstRep)
 	shared := make(map[string]uint64, len(e.shared))
 	for _, v := range e.shared {
 		shared[v.name] = projected.getRaw(v)
@@ -246,12 +265,7 @@ func (m *FedMachine) IsValid(fs FedState) bool {
 		// The morphism/merge invariant holds iff recomputing the target's shared component is a
 		// no-op — it already equals the (single) morphism image or the resolver's merge.
 		var want State
-		if r := m.resolvers[j]; r != nil {
-			want = r(fs.states[j], m.sourcesOf(fs, j))
-		} else {
-			e := m.edges[m.in[j][0]]
-			want = e.mapFn(fs.states[e.src], fs.states[e.dst])
-		}
+		want = m.repair(fs, j)
 		if want.ID() != fs.states[j].ID() {
 			return false
 		}
