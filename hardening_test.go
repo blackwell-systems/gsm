@@ -236,3 +236,175 @@ func TestDiagnoseCycle_ComponentChangedRejected(t *testing.T) {
 		t.Errorf("want the change reported, got diagnostic %v, err %v", diag, err)
 	}
 }
+
+// Review of #11 (G1-G5 and a DiagnoseCycle gap).
+
+// G1: a morphism's Shared() variables were never checked against the target, so a
+// Var of another registry at the same index made Federation.Build panic, or a wider
+// one with the same name was taken for the target's.
+func TestShared_VariableCheckedBySchema(t *testing.T) {
+	cases := map[string]func() Var{
+		"same name, wider range": func() Var { o := NewRegistry("other"); return o.Int("n", 0, 7) },
+		"other name, same index": func() Var { o := NewRegistry("other"); return o.Int("m", 0, 2) },
+		"index past the end":     func() Var { o := NewRegistry("other"); o.Bool("x"); o.Bool("y"); return o.Bool("z") },
+	}
+	for name, foreign := range cases {
+		t.Run(name, func(t *testing.T) {
+			src := NewRegistry("src")
+			a := src.Bool("a")
+			dst := NewRegistry("dst")
+			n := dst.Int("n", 0, 2)
+			dst.Bool("f")
+			fv := foreign()
+			mk := func() *Federation {
+				return NewFederation("shared_foreign").Morphism(src, dst).Shared(fv).
+					Map(func(s, d State) State {
+						if s.GetBool(a) {
+							return d.SetInt(n, 2)
+						}
+						return d.SetInt(n, 0)
+					}).Add()
+			}
+			want := `morphism src→dst: Shared() variable "` + fv.name + `" is not a variable of registry "dst"`
+			var err error
+			if msg := catchPanic(func() { _, _, err = mk().Build() }); msg != "" {
+				t.Fatalf("Federation.Build panicked on a foreign Shared() variable: %s", msg)
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("Build: want %q, got %v", want, err)
+			}
+			if msg := catchPanic(func() { _, err = mk().DiagnoseCycle() }); msg != "" {
+				t.Fatalf("DiagnoseCycle panicked: %s", msg)
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("DiagnoseCycle: want %q, got %v", want, err)
+			}
+		})
+	}
+}
+
+// G2: a coordination point's Shared names what is coordinated; one that does not match
+// the morphism's shared variables removed the morphism anyway.
+func TestBuildCoordinated_PointSharedChecked(t *testing.T) {
+	f, _, _ := hardPair()
+	for _, shared := range [][]string{{"f"}, nil, {"n", "f"}} {
+		_, _, err := f.BuildCoordinated([]CoordinationPoint{{Src: "src", Dst: "dst", Shared: shared}})
+		if err == nil || !strings.Contains(err.Error(), "shares [n]") {
+			t.Errorf("Shared %v: want a mismatch error naming the morphism's [n], got %v", shared, err)
+		}
+	}
+}
+
+// G3, G4: the certificate digest framed names without quoting, so different port and
+// table declarations could serialize alike.
+func TestCertificateDigest_FramingUnambiguous(t *testing.T) {
+	d := func(tables []MorphismTable, ports []PortRef) string {
+		s, err := digestComponentsAndTables(nil, tables, false, ports)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if d(nil, []PortRef{{Registry: "a.b", Var: "c"}}) == d(nil, []PortRef{{Registry: "a", Var: "b.c"}}) {
+		t.Error("two different port declarations share a certificate digest")
+	}
+	row := []TableRow{{SourceIDs: []uint64{0}, Values: []uint64{1}}}
+	tab := func(target string, sources, shared []string) []MorphismTable {
+		return []MorphismTable{{Target: target, Sources: sources, Shared: shared, Rows: row}}
+	}
+	if d(tab("t", []string{"a,b"}, []string{"x"}), nil) == d(tab("t", []string{"a", "b"}, []string{"x"}), nil) {
+		t.Error("tables with different source lists share a certificate digest")
+	}
+	if d(tab("t", []string{"a"}, []string{"x,y"}), nil) == d(tab("t", []string{"a"}, []string{"x", "y"}), nil) {
+		t.Error("tables with different shared lists share a certificate digest")
+	}
+	if d(tab("t <- [a]", []string{"b"}, []string{"x"}), nil) == d(tab("t", []string{"a] <- [b"}, []string{"x"}), nil) {
+		t.Error("tables with different targets and sources share a certificate digest")
+	}
+	// The component line: with the name unquoted, one component whose name embeds the
+	// framing of a second digested exactly like the two components.
+	empty := func(name string) []byte {
+		r := NewRegistry(name)
+		b, err := r.PolicyBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		names, err := r.PolicyNames()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return append(b, names...)
+	}
+	e := string(empty("x"))
+	one, err := digestComponentsAndTables([]*Registry{NewRegistry("x\n" + e + "\ncomp y")}, nil, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := digestComponentsAndTables([]*Registry{NewRegistry("x"), NewRegistry("y")}, nil, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one == two {
+		t.Error("one component and two components share a certificate digest")
+	}
+}
+
+// G5: the same set of Independent pairs, declared in another order or twice, is the
+// same policy, so it digests alike.
+func TestPolicyNames_PairsCanonical(t *testing.T) {
+	mk := func(decl func(r *Registry)) string {
+		r := NewRegistry("pairs")
+		v := r.Int("v", 0, 2)
+		for _, e := range []string{"a", "b", "c"} {
+			r.DeclEvent(e, Do(Set(v, Lit(1))))
+		}
+		decl(r)
+		d, err := r.PolicyIdentityDigest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	base := mk(func(r *Registry) { r.Independent("a", "b").Independent("b", "c") })
+	for name, decl := range map[string]func(r *Registry){
+		"other order":     func(r *Registry) { r.Independent("b", "c").Independent("a", "b") },
+		"other direction": func(r *Registry) { r.Independent("b", "a").Independent("c", "b") },
+		"repeated":        func(r *Registry) { r.Independent("a", "b").Independent("b", "c").Independent("a", "b") },
+	} {
+		if mk(decl) != base {
+			t.Errorf("the same pair set declared with %s digests differently", name)
+		}
+	}
+	if mk(func(r *Registry) { r.Independent("a", "c") }) == base {
+		t.Error("a different pair set digests the same")
+	}
+}
+
+// DiagnoseCycle works on a frozen copy: a closure that adds a component to f while it
+// runs does not reach the analysis or the change check (which compares the components
+// it analyzed).
+func TestDiagnoseCycle_FrozenWiring(t *testing.T) {
+	a := NewRegistry("A")
+	av := a.Int("v", 0, 2)
+	b := NewRegistry("B")
+	bv := b.Int("v", 0, 2)
+	var f *Federation
+	added := false
+	f = NewFederation("diag_frozen").
+		Morphism(a, b).Shared(bv).Map(func(src, d State) State {
+		if !added {
+			added = true
+			f.Add(NewRegistry("late_component"))
+		}
+		return d.SetInt(bv, src.GetInt(av))
+	}).Add().
+		Morphism(b, a).Shared(av).Map(func(src, d State) State { return d.SetInt(av, src.GetInt(bv)) }).Add()
+	var diag *CycleDiagnostic
+	var err error
+	if msg := catchPanic(func() { diag, err = f.DiagnoseCycle() }); msg != "" {
+		t.Fatalf("DiagnoseCycle panicked: %s", msg)
+	}
+	if err != nil || diag == nil || !diag.Converges || len(diag.Cycle) != 2 {
+		t.Fatalf("want the converging A-B diagnostic of the federation as called, got %v, %v", diag, err)
+	}
+}
