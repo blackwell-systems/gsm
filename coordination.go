@@ -98,6 +98,13 @@ func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *F
 	return f.withoutEdges(remove).Build()
 }
 
+// clone returns a copy of the federation's wiring (components, morphisms, resolvers, cycle
+// opt-in, certified embeds) that later changes to f do not reach. The registries, morphism
+// closures, and certificates are shared.
+func (f *Federation) clone() *Federation {
+	return f.withoutEdges(nil)
+}
+
 // withoutEdges returns a shallow copy of the federation with the given edge indices removed. The
 // component registries and resolvers are shared; only the edge set is filtered.
 func (f *Federation) withoutEdges(remove map[int]bool) *Federation {
