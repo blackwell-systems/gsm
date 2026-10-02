@@ -7,9 +7,10 @@
 # requires the JSON and the Go to have exactly these hashes, and the Go to equal
 # oracle_gen.go byte for byte. To move to a new proof commit, run
 # internal/oracle/regenerate.sh <commit> and update NC_COMMIT and both hashes.
+# GOGEN_ARGS must match the proof repository's coq/goextract/Makefile (gen).
 NC_REPO=blackwell-systems/normalization-confluence
-NC_COMMIT=a12053a66a394d208351c7e722d8e24c7f00050a
+NC_COMMIT=2000162ad1b66f7022e26ad5c0f9780a67de598f
 ROCQ_IMAGE=rocq/rocq-prover:9.3@sha256:c357e8864f80359db21725ea8371347a75a1cb439545b47219d7ad5683ba1782
-GOGEN_ARGS=-pkg oracle
+GOGEN_ARGS=-pkg oracle -allow-unary add,min,mul
 JSON_SHA256=6d685c7aeede31fc20930fe8f78a666cdc6ffb967e11cb1949d4b9ac825cd05c
-GO_SHA256=fbf866ae3038d4fadc14aed5439e40a173cc44f513794c1e6ea52071b1f124a9
+GO_SHA256=3db82389bde57104357329326f8c1227053bcba0c1c6a2bbccb4ad906168c2ea
