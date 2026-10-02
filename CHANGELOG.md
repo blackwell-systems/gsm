@@ -121,6 +121,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PolicyBytes`, `PolicyDigest` and certificate digests are unchanged.
 
 ### Fixed
+- **The example-machine gate recorded synthesis candidates.** `SynthesizeWith` builds a candidate
+  machine to have the table oracle certify it, and the `gsmgate` hook sat where that candidate is
+  built, so a gate run recorded it as well as the machine `Synthesis.Machine` hands out (twice for
+  `BuildOrSynthesize`), and recorded a candidate the oracle refused. The hook is now in
+  `Synthesis.Machine`, after its certified check: the gate records only machines a program receives.
 - **Behaviour change: `FedMachine.Of` and `FedMachine.Apply` panic for a registry outside the
   federation.** They used the lookup's zero value and acted on component 0. They now panic naming
   the registry, as `Apply` does for an unknown event (`ApplyNamed` already returned an error).
