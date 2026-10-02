@@ -45,6 +45,13 @@ func (m *Machine) NewState() State {
 // Apply processes an event, returning the unique normal form.
 // This is a single table lookup — O(1).
 // Panics if the event name is unknown.
+//
+// A lazy machine (BuildCompositional) has no tables: Apply runs the event's effect and
+// the repairs at call time, and panics if one returns something that is not a state of
+// this machine (see EffectFunc), naming the rule, the input state and the result.
+// BuildCompositional checked every result on each component's states, so this fires only
+// for a closure whose behavior differs at runtime (for example, one that reads mutable
+// outside data). The check costs one comparison per variable per closure call.
 func (m *Machine) Apply(s State, event string) State {
 	ei, ok := m.events[event]
 	if !ok {
@@ -60,7 +67,8 @@ func (m *Machine) Apply(s State, event string) State {
 }
 
 // Normalize returns the normal form of a state.
-// If the state is already valid, returns it unchanged.
+// If the state is already valid, returns it unchanged. On a lazy machine it runs the
+// repairs and panics on a result outside the machine, as Apply does.
 func (m *Machine) Normalize(s State) State {
 	if m.lazy {
 		return m.lazyNormalize(s)

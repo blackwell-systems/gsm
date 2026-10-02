@@ -130,6 +130,10 @@ func overlaps(a, b []int) bool {
 // global tables). It certifies convergence for machines whose global state space
 // is far too large for Build, provided every component is individually small.
 //
+// Like Build, it rejects any effect or repair result it computes that is not a state of
+// this machine (see EffectFunc). The returned machine runs the rules again at Apply time
+// and panics on such a result (see Machine.Apply).
+//
 // Preconditions (else it returns an error, and you should use Build): every
 // invariant declares a footprint (Watches) and every event declares its writes
 // (Writes); the zero state is valid; and no single component exceeds

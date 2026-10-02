@@ -108,6 +108,11 @@ func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis,
 // The search is backtracking with forward-checking (pure Go, no solver dependency); it prunes
 // the assignment tree but is worst-case exponential (CC synthesis is NP-hard). A SAT/SMT
 // encoding would push the ceiling further.
+//
+// It returns an error if an event effect returns something that is not a state of this
+// machine (see EffectFunc). Repairs are not run, so a malformed repair does not matter here:
+// BuildOrSynthesize falls back to synthesis when Build rejects a repair's result, and the
+// returned Synthesis then reports the substituted compensation.
 func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 	var cfg synthConfig
 	for _, o := range opts {

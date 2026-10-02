@@ -93,6 +93,13 @@ func (r *Report) String() string {
 }
 
 // Build verifies WFC and CC, then returns an immutable Machine.
+//
+// Build runs every event effect on every valid encoding and every repair while computing
+// normal forms, and returns an error if any of them returns something that is not a state
+// of this machine (see EffectFunc): a different variable schema, a variable outside its
+// range, or bits outside the encoding. The error names the event or invariant, the input
+// state and the result. Membership is by value, so a state built from another machine
+// with an identical variable declaration list is accepted.
 func (r *Registry) Build() (*Machine, *Report, error) {
 	m, rep, err := r.build(true)
 	if buildObserver != nil {
