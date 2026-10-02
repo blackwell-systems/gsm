@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"sync"
 	"testing/fstest"
 
@@ -68,8 +69,14 @@ var (
 func load(ctx context.Context) (*engine, error) {
 	once.Do(func() {
 		// 65536 pages is the whole 4 GiB wasm32 address space: the bound is the
-		// module's own, not a host policy.
-		cfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(65536).WithCloseOnContextDone(true)
+		// module's own, not a host policy. WithCloseOnContextDone (context
+		// cancellation inside a running module) is off by default: it adds a
+		// check at every function entry and loop header, which the spike measured
+		// at about 13x on the checkers. GSM_WASM_CANCEL=1 turns it on.
+		cfg := wazero.NewRuntimeConfig().WithMemoryLimitPages(65536)
+		if os.Getenv("GSM_WASM_CANCEL") == "1" {
+			cfg = cfg.WithCloseOnContextDone(true)
+		}
 		rt := wazero.NewRuntimeWithConfig(context.Background(), cfg)
 		if _, err := wasi_snapshot_preview1.Instantiate(context.Background(), rt); err != nil {
 			engErr = err

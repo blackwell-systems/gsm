@@ -177,6 +177,10 @@ jobs:
             fi
             RUNNER_TIMEOUT=50m t ./runner checker_fast $f
           done
-          if [ "${{ matrix.os }}" = ubuntu-latest ]; then RUNNER_TIMEOUT=25m t ./runner checker big.tables; fi
+          if [ "${{ matrix.os }}" = ubuntu-latest ]; then
+            RUNNER_TIMEOUT=25m t ./runner checker big.tables
+            # The cost of in-module cancellation (wazero WithCloseOnContextDone).
+            GSM_WASM_CANCEL=1 RUNNER_TIMEOUT=20m t ./runner checker_fast big.tables
+          fi
         } | tee timings.txt
         { echo '### worst case (${{ matrix.os }})'; echo '```'; cat timings.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
