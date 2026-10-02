@@ -82,12 +82,15 @@ func (r *Registry) OnlyDeclaredPairs() *Registry {
 	return r
 }
 
-// checkNames rejects a registry in which two events share a name. An event is
-// addressed by name everywhere after declaration (Independent resolves the first
-// match, a built Machine's Apply the last, and replay logs and federations hold
-// (registry, event) strings), so a duplicate would let the CC check cover one
-// event while the runtime applies another. Every path that produces a machine,
-// a certificate, or an export for the checkers calls it.
+// checkNames rejects a registry in which two events, or two variables, share a
+// name. An event is addressed by name everywhere after declaration (Independent
+// resolves the first match, a built Machine's Apply the last, and replay logs and
+// federations hold (registry, event) strings), so a duplicate would let the CC
+// check cover one event while the runtime applies another. A variable is
+// addressed by name in certificate tables, input ports, and shared projections,
+// where a duplicate would let a re-check or a merge act on the wrong variable.
+// Every path that produces a machine, a certificate, or an export for the
+// checkers calls it.
 func (r *Registry) checkNames() error {
 	seen := make(map[string]bool, len(r.events))
 	for _, ev := range r.events {
@@ -95,6 +98,13 @@ func (r *Registry) checkNames() error {
 			return fmt.Errorf("gsm: registry %q: duplicate event name %q", r.name, ev.name)
 		}
 		seen[ev.name] = true
+	}
+	seenVar := make(map[string]bool, len(r.vars))
+	for _, v := range r.vars {
+		if seenVar[v.name] {
+			return fmt.Errorf("gsm: registry %q: duplicate variable name %q", r.name, v.name)
+		}
+		seenVar[v.name] = true
 	}
 	return nil
 }
