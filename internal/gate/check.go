@@ -23,6 +23,7 @@ type Outcome struct {
 	Program string
 	Record  Record
 	Verdict Verdict // the catalog's verdict, "" when unlisted
+	Other   Verdict // when Verdict is "": the verdict listed for the machine as another kind
 	// Checker exit codes, -1 when the checker did not run.
 	RulesExit, TablesExit int
 	RulesOut, TablesOut   string
@@ -88,7 +89,10 @@ func (r *Report) String() string {
 			res = "FAIL: " + strings.Join(o.Problems, "; ")
 		}
 		exp := string(o.Verdict)
-		if exp == "" {
+		switch {
+		case exp == "" && o.Other != "":
+			exp = "(listed " + string(o.Other) + ")"
+		case exp == "":
 			exp = "(unlisted)"
 		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s |\n", o.Program, o.Record.Name, o.Record.Kind, build,
@@ -179,16 +183,15 @@ func Run(dumps string, cat *Catalog, ck Checkers) (*Report, error) {
 					return nil, err
 				}
 			}
-			var other Verdict // the verdict of an entry for this machine of another kind
 			if listed {
 				o.Verdict = match(entries, rec, matched)
 				for _, e := range entries {
-					if e.Machine == rec.Name {
-						other = e.Verdict
+					if o.Verdict == "" && e.Machine == rec.Name {
+						o.Other = e.Verdict
 					}
 				}
 			}
-			o.Problems = judge(o, listed, other)
+			o.Problems = judge(o, listed)
 			rep.Outcomes = append(rep.Outcomes, o)
 		}
 	}
@@ -221,7 +224,7 @@ func match(entries []Entry, rec Record, matched map[Entry]bool) Verdict {
 }
 
 // judge returns why o fails the gate, or nothing when it passes.
-func judge(o Outcome, listed bool, other Verdict) []string {
+func judge(o Outcome, listed bool) []string {
 	var p []string
 	rec := o.Record
 	for _, c := range []struct {
@@ -245,8 +248,8 @@ func judge(o Outcome, listed bool, other Verdict) []string {
 		case !rec.BuildOK:
 			what = "a rejected"
 		}
-		if other != "" {
-			return append(p, fmt.Sprintf("listed %s, but it is %s machine (Build: %s)", other, what, firstLine(rec.BuildErr)))
+		if o.Other != "" {
+			return append(p, fmt.Sprintf("listed %s, but it is %s machine (Build: %s)", o.Other, what, firstLine(rec.BuildErr)))
 		}
 		return append(p, fmt.Sprintf("%s machine %q is not in the catalog (Build: %s)", what, rec.Name, firstLine(rec.BuildErr)))
 	}
