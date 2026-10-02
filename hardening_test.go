@@ -559,3 +559,63 @@ func TestBuildCoordinated_AcceptsOwnPlan(t *testing.T) {
 		}
 	}
 }
+
+// Review of #11, final pass.
+
+// H4: identical parallel morphisms, a point naming a set with repeats, and order.
+func TestReview11v2_IdenticalParallelAndSetForms(t *testing.T) {
+	mk := func() *Federation {
+		a := NewRegistry("A")
+		a1 := a.Bool("a1")
+		a2 := a.Bool("a2")
+		b := NewRegistry("B")
+		bx := b.Bool("bx")
+		c := NewRegistry("C")
+		c.Bool("c")
+		keep := func(s, d State) State { return d }
+		return NewFederation("par2").
+			Morphism(c, a).Shared(a1, a2).Map(keep).Add().
+			Morphism(b, a).Shared(a1, a2).Map(keep).Add().
+			Morphism(b, a).Shared(a2, a1).Map(keep).Add().
+			Morphism(a, b).Shared(bx).Map(func(s, d State) State { return d.SetBool(bx, !s.GetBool(a1)) }).Add().
+			Resolve(a, func(d State, _ map[string]State) State { return d.SetBool(a1, false).SetBool(a2, false) })
+	}
+	f := mk()
+	plan := f.CoordinationPlan()
+	if _, _, err := f.BuildCoordinated(plan); err != nil {
+		t.Errorf("own plan %v rejected: %v", plan, err)
+	}
+	if _, _, err := mk().BuildCoordinated([]CoordinationPoint{{Src: "B", Dst: "A", Shared: []string{"a2", "a1", "a1"}}}); err != nil {
+		t.Errorf("one point covering both identical morphisms, with a repeated name, rejected: %v", err)
+	}
+	_, _, err := mk().BuildCoordinated([]CoordinationPoint{{Src: "B", Dst: "A", Shared: []string{"a1"}}})
+	if err == nil || !strings.Contains(err.Error(), "no morphism B→A shares [a1]") {
+		t.Errorf("subset point: %v", err)
+	}
+}
+
+// H5: a point names its target. B->A and B->D share variables of the same name; the
+// point {B, A, [x]} must remove only B->A, so the B->D morphism still drives D.x.
+func TestReview11v3_PointMatchesDst(t *testing.T) {
+	b := NewRegistry("B")
+	by := b.Bool("y")
+	a := NewRegistry("A")
+	ax := a.Bool("x")
+	d := NewRegistry("D")
+	dx := d.Bool("x")
+	f := NewFederation("dst").
+		Morphism(b, a).Shared(ax).Map(func(s, t State) State { return t.SetBool(ax, s.GetBool(by)) }).Add().
+		Morphism(b, d).Shared(dx).Map(func(s, t State) State { return t.SetBool(dx, s.GetBool(by)) }).Add()
+	b.DeclEvent("set", Do(Set(by, Lit(1))))
+	fm, _, err := f.BuildCoordinated([]CoordinationPoint{{Src: "B", Dst: "A", Shared: []string{"x"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := fm.Apply(fm.NewState(), b, "set")
+	if !fm.Of(fs, d).GetBool(dx) {
+		t.Error("coordinating B->A also removed B->D")
+	}
+	if fm.Of(fs, a).GetBool(ax) {
+		t.Error("B->A still drives A.x after it was coordinated")
+	}
+}
