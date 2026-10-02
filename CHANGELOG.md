@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity
+  check for any event pair whose triggered invariant footprints were disjoint, and never checked
+  what an event's guard or effect reads. The shortcut's theorem (`disjoint_events_commute` in
+  normalization-confluence) assumes each event reads only its own footprint. Any event whose guard
+  reads a variable another event writes could be certified convergent when it is not; the naive
+  pay/ship machine (ship guarded on paid) was. The same shortcut also ignored write sets no
+  invariant watches, so two events overwriting the same variable were certified. `Build` now checks
+  every pair exactly, with no shortcut. Machines built with v0.11.0 or earlier should be rebuilt;
+  a machine that now fails was never convergent, and the report gives the counterexample.
+  Affected through `Build`: `Federation.Build` (every component), `Certify`, `BuildCoordinated`,
+  and `BuildOrSynthesize` (a wrongly accepted machine was returned instead of being repaired).
+  `Synthesize` and both extracted oracles never used the shortcut.
+- **`BuildCompositional` footprint check missed ordinary reads.** It changed one outside variable
+  at a time, to one value, from a zero background, so it never saw a dependence on any value but 1
+  or a guard over two outside variables (`paid && inStock`). It now tries every value of each
+  outside variable and of each pair of outside variables, and checks combinator rules exactly from
+  the tree. Closures that depend only on three or more outside variables jointly remain undetected;
+  this is documented. Pairs are now skipped only across footprint components (which also fixes the
+  write-set and invariant-chain gaps above for `BuildCompositional`).
+- **Certificates were trusted for their recorded verdict.** `Certificate.Verify` and
+  `EmbedCertified` did not re-check component convergence, so a certificate issued by v0.11.0 for a
+  non-convergent component would still be accepted after the fix above. Both now rebuild every
+  component with `Build`, and `EmbedCertified` re-checks internal morphisms from the certificate's
+  tables. Certificates issued by v0.11.0 are re-verified on load by the fixed checker; the
+  certificate version is unchanged (see "Versioning and trust policy" in CERTIFICATE-DESIGN.md).
+- **`BuildCompositional` accepted machines wider than 64 bits.** `State` is one `uint64`; variables
+  past bit 64 were frozen at 0 yet the machine was certified. It now returns an error.
+
+### Changed
+- The CC check runs over the valid states plus the zero state `NewState` returns (CC1 as THEORY.md
+  §6.3 states it), instead of every encodable state for the pairs it did check. Checking invalid
+  states that no run reaches rejected convergent machines (the order-fulfillment test machine fails
+  only at the invalid state {shipped, unpaid}); runs started from a hand-built invalid state are
+  outside the guarantee, as documented.
+- `Report.PairsDisjoint` is always 0 for `Build`. New `Report.FootprintViolation` names the cause
+  when `BuildCompositional` rejects a rule for reading or writing outside its footprint; the report
+  then shows WFC and CC as "not evaluated" instead of "WFC: FAIL". Compositional reports show
+  `Components` instead of a `States: 0` line.
+- `EmbedCertified` re-checks certified components' CC (it still skips re-verifying internal
+  morphisms from their closures). Cost: two table lookups per state per pair, on tables it builds
+  anyway.
+
+### Fixed
+- The README's flagship example did not build (`Build` correctly rejects it), so pasting it
+  panicked. It is replaced by a convergent order-fulfillment machine that shows the pattern (events
+  record facts; an invariant derives the outcome) and explains why the guarded draft fails.
+  CONCEPTS.md taught the same guard as a fix for a CC failure; it now shows why it diverges.
+- Docs that described `Build`'s footprint shortcut, CC2 as holding "structurally", or combinator
+  rules as needing no read check are corrected (README, THEORY, ARCHITECTURE, CONCEPTS).
+
+### Added
+- `TestDocSnippets`: every Go block in the top-level docs type-checks, and README examples marked
+  `run` execute (so an example whose machine does not `Build` fails CI).
+- A property test and fuzz target comparing `Build` and `BuildCompositional` against brute-force
+  enumeration of event orderings on random machines whose guards read other events' writes.
+- Benchmarks for `Build` and `BuildCompositional`.
+
 ## [0.11.0] - 2026-09-26
 
 ### Added

@@ -376,7 +376,16 @@ For local confluence, these must reach the same configuration. Path 1 produces N
 
 Without CC2, the convergence proof breaks: a processor that eagerly compensates before applying an event could reach a different state than one that applies first and compensates after. CC1 alone only handles the case where two different events are applied from the same state - it says nothing about the apply-vs-compensate choice.
 
-**Note**: The gsm implementation enforces CC2 implicitly. Since the `step` table stores NFᵣ(s →ₑ ·), and we always look up from this table, we're always computing normalized steps.
+**Note**: gsm does not check CC2, and CC2 does not hold for every machine gsm accepts. A guard
+that reads a variable a repair changes behaves differently on σ and on ρ(σ). For example, with
+the invariant "shipped implies paid" repaired by resetting the status to pending, and a payment
+event guarded on status = pending, the invalid state {shipped, unpaid} gives NFᵣ(pay(σ)) =
+{pending, unpaid} but NFᵣ(pay(NFᵣ(σ))) = {paid, paid}. gsm's runtime does not need CC2 because
+it fixes one strategy, eager compensation: every `step` entry is NFᵣ(s →ₑ ·), so after the first
+event every state is a normal form, and events are only ever applied to normal forms. The
+apply-versus-compensate critical pair never arises. What the runtime needs is CC1 on the states it
+applies events to, which is the domain `Build` checks (§9.3): the valid states, plus the zero
+state `NewState` returns. Runs started from any other invalid state are outside the guarantee.
 
 ### 6.6 Local Confluence
 
@@ -470,6 +479,15 @@ Each event e has a **write set** Wₑ ⊆ V, the variables it modifies.
 φₑ(s)(v) = s(v)
 ```
 
+### 8.2a Event Read Sets
+
+Each event e also has a **read set** Rₑ ⊆ V: the variables its guard gₑ and effect φₑ depend on.
+
+**Formally**: for all s, t ∈ S that agree on Rₑ, gₑ(s) = gₑ(t), and φₑ(s) and φₑ(t) agree on Wₑ.
+
+The write set says nothing about the read set. A shipment event guarded on payment writes only
+`status` but reads `paid`.
+
 ### 8.3 Triggered Invariants
 
 Event e **triggers** invariant invᵢ if Wₑ ∩ Fᵢ ≠ ∅.
@@ -478,42 +496,44 @@ Event e **triggers** invariant invᵢ if Wₑ ∩ Fᵢ ≠ ∅.
 
 ### 8.4 Event Footprints
 
-The **footprint** of an event e is the union of footprints of all invariants it can trigger:
+The **footprint** of an event e is everything it reads or writes, closed under the invariants
+that can fire as a consequence:
 
 ```
-Footprint(e) = ⋃{Fᵢ | Wₑ ∩ Fᵢ ≠ ∅}
+Footprint(e) = the least set F ⊇ Rₑ ∪ Wₑ such that Fᵢ ⊆ F for every invariant i with Fᵢ ∩ F ≠ ∅
 ```
 
-This is the transitive closure: if e writes v, and invᵢ watches v, then invᵢ's repair can modify other variables in Fᵢ.
+The closure is transitive: if e writes v, invᵢ watches v, and invᵢ's repair writes u, then any
+invariant watching u is reached too. gsm's footprint **components** (the union-find partition of
+variables over invariant footprints and event write sets) compute this closure; an event's
+footprint lies inside its component once its read set does.
 
 ### 8.5 Disjointness Theorem
 
-**Theorem**: If two events e₁ and e₂ have disjoint footprints, then they commute.
+**Theorem**: Suppose every invariant's check and repair read and write only its footprint Fᵢ,
+and every event's guard and effect read only Rₑ and write only Wₑ. If two events e₁ and e₂ have
+disjoint footprints, then from every valid state they commute.
 
-**Proof sketch**:
+**Proof sketch**: Applying e₁ changes only variables in Wₑ₁, computed from variables in Rₑ₁. The
+invariants that can fire afterwards watch variables in Footprint(e₁), and their repairs change only
+variables there. None of these is read or written by e₂ or by the repairs it triggers, so each
+event's normalized effect is the same whether or not the other ran first. ∎
 
-Assume Footprint(e₁) ∩ Footprint(e₂) = ∅.
+The read-set hypothesis is essential and is the precondition of the mechanized
+`disjoint_events_commute`, which models an event that reads only its own footprint. Without it
+the theorem is false: pay writes {paid}, a shipment guarded on paid writes {shipped}, no invariant
+links them, and the two orders end in different states.
 
-Let s be a valid state. Apply e₁:
-- φₑ₁ modifies only variables in Wₑ₁
-- This may trigger invariants with footprints overlapping Wₑ₁
-- Repairs modify only variables in Footprint(e₁)
+### 8.6 Where gsm uses it
 
-Similarly for e₂ with Footprint(e₂).
+`Build` does not use the theorem: it checks every pair exhaustively from the step tables (§9.3),
+which costs two lookups per state per pair and needs no hypothesis about read sets.
+`BuildCompositional` uses it to skip pairs whose events lie in different components, after
+checking the hypotheses (§9.6).
 
-Since the footprints are disjoint, repairs from e₁ don't affect variables relevant to e₂, and vice versa.
-
-Therefore, the normalized results are independent, so they commute. ∎
-
-### 8.6 Optimization
-
-The disjointness theorem allows the verifier to skip exhaustive checking for event pairs with disjoint footprints.
-
-For a system with n events:
-- Worst case: O(n²) pairs to check exhaustively
-- With disjointness: Only check pairs with overlapping footprints
-
-This is the "footprint optimization" mentioned in the verification report.
+(Before the fix recorded in the CHANGELOG, `Build` skipped pairs using Footprint(e) =
+⋃{Fᵢ | Wₑ ∩ Fᵢ ≠ ∅}, which leaves out Rₑ, leaves out Wₑ itself when no invariant watches it, and
+does not follow chains of invariants. Each omission let it certify machines that diverge.)
 
 ---
 
@@ -564,35 +584,38 @@ for each event e in E:
 ```
 pairs = compute_independent_pairs(E)
 
-for each (e1, e2) in pairs:
-    if disjoint_footprints(e1, e2):
-        disjoint_count += 1
-        continue
+D = { s ∈ S : V_R(s) } ∪ { zero state }      // the guarantee domain
 
-    brute_force_count += 1
-    for each valid state s in S:
+for each (e1, e2) in pairs:
+    for each s in D:
         s_12 = step[e2][step[e1][s]]
         s_21 = step[e1][step[e2][s]]
 
         if s_12 != s_21:
             return CC_FAILURE(e1, e2, s, s_12, s_21)
 
-return CC_SUCCESS(disjoint_count, brute_force_count)
+return CC_SUCCESS(len(pairs))
 ```
 
-**Correctness**: If the algorithm succeeds for all pairs, then CC1 holds for all independent events.
+**Correctness**: If the algorithm succeeds, then CC1 holds for every pair checked, on every valid
+state and on the zero state. Every step lands on a valid state, so by `run_perm_invariant`
+(normalization-confluence `Checker.v`) any two permutations of a list of checked events reach the
+same state from any start in D.
 
-**Complexity**: O(|E|² × |S|) worst case, but typically much better due to disjointness optimization.
+**Complexity**: O(|pairs| × |S|) table lookups, small next to the O(|E| × |S|) closure calls of
+Phase 2.
 
 ### 9.4 Soundness and Completeness
 
 **Soundness**: If the verification algorithm reports success, then WFC holds and CC1 holds for every declared-independent event pair.
 
-**Proof**: Phase 1 simulates each state's compensation sequence to a fixpoint, failing on a repeat or an over-length run, so success means (S, →ᵣ) terminates from every state: WFC. Phase 3 compares the two normalized orderings for every declared-independent pair over every valid state, so success means each such pair commutes: CC1. Both are exhaustive over the finite |S|, hence sound. CC2 is not tested here; it holds structurally because the step table stores NFᵣ(s →ₑ ·), so every lookup is already a normalized step (§6.5).
+**Proof**: Phase 1 simulates each state's compensation sequence to a fixpoint, failing on a repeat or an over-length run, so success means (S, →ᵣ) terminates from every state: WFC. Phase 3 compares the two normalized orderings for every declared-independent pair over every valid state (and the zero state), with no pair skipped, so success means each such pair commutes: CC1. Both are exhaustive over the finite |S|, hence sound. CC2 is not tested and not needed for the runtime, which only applies events to normal forms (§6.5).
 
 **Completeness**: If WFC and CC hold, then the verification algorithm reports success.
 
-**Proof**: Under WFC every compensation sequence reaches a valid state within |S| steps, so Phase 1 never trips its cycle-or-overflow guard and records a normal form for every state. Under CC1 every declared-independent pair commutes on every valid state, so no comparison in Phase 3 fails. Both phases therefore succeed.
+**Proof**: Under WFC every compensation sequence reaches a valid state within |S| steps, so Phase 1 never trips its cycle-or-overflow guard and records a normal form for every state. Under CC1 every declared-independent pair commutes on every valid state (and, when the zero state is invalid, on it too, which the zero-state clause of D adds to CC1), so no comparison in Phase 3 fails. Both phases therefore succeed.
+
+A property test (`soundness_property_test.go`) checks both directions on random small machines whose guards read other events' writes, against brute-force enumeration of event orderings: `Build` certifies exactly the machines with no divergent ordering of two events from D, and no certified machine has a divergent ordering of three.
 
 **Scope**: Both directions are relative to the declared independence relation: gsm checks the pairs the registry declares independent (via `Independent`, or all pairs by default). A pair wrongly declared independent when it is in fact causally dependent is a specification error the checker does not police, not an incompleteness of the algorithm.
 
@@ -617,15 +640,21 @@ beyond naive enumeration.
 ### 9.6 Footprint-local verification (beyond global enumeration)
 
 The Phase 1 and Phase 3 algorithms above enumerate the global state space S, which bounds them
-to small machines. But WFC and CC are local: a repair and an event effect touch only their
-declared footprint, and events with disjoint footprints commute (mechanized:
-`disjoint_events_commute`). So a registry partitions into footprint-connected **components** that
-do not interact, and it suffices to verify each component over the subspace of its own variables.
-`Registry.BuildCompositional` does this: certification cost is exponential in the largest
-component, not in the whole machine, so a registry of many independent small invariants certifies
-even when |S| is astronomically large. It relies on the declared footprints being accurate (as
-the disjointness path in `Build` already does) and on the zero state being valid, and it returns
-a machine that applies events by computing at runtime rather than by table lookup.
+to small machines. But WFC and CC are local when the hypotheses of §8.5 hold: events whose
+footprints are disjoint commute (mechanized: `disjoint_events_commute`). So a registry partitions
+into footprint-connected **components** that do not interact, and it suffices to verify each
+component over the subspace of its own variables. `Registry.BuildCompositional` does this:
+certification cost is exponential in the largest component, not in the whole machine, so a
+registry of many independent small invariants certifies even when |S| is astronomically large.
+
+It relies on the hypotheses of §8.5, with each event's read set inside its write set, and checks
+them first (`verifyFootprints`). For combinator rules the check is syntactic and exact. For
+closures it is a perturbation test, run from every state of the component with all other
+variables at zero: every value of each outside variable, and every pair of values of each pair of
+outside variables. That detects dependence on one or two outside variables, but not a joint
+dependence on three or more, so for closures the hypotheses are tested rather than proved. It
+also requires the zero state to be valid and the machine to fit in 64 bits, and it returns a
+machine that applies events by computing at runtime rather than by table lookup.
 
 ### 9.7 Machine-checked meta-theory
 
@@ -826,8 +855,9 @@ exhaustive enumeration is capped (currently 2²⁰ ≈ 1M states).
 independently over its own subspace, so certification cost is exponential in the largest
 component rather than the whole machine (see §9.6). The 10-variable example above certifies
 instantly when its invariants are footprint-local, even though the global space is 10¹⁰. This is
-the modular-verification mitigation, made sound by the mechanized footprint-disjointness result
-and by a build-time check that each closure respects its declared footprint.
+the modular-verification mitigation, resting on the mechanized footprint-disjointness result and
+on a build-time footprint check (exact for combinator rules; a perturbation test for closures,
+see §9.6).
 
 **Further mitigations (future work)**: symmetry reduction (exploit equivalent states); partial
 order reduction (ignore irrelevant interleavings); symbolic verification for unbounded domains.

@@ -112,29 +112,28 @@ For each independent event pair `(e1, e2)`:
 
 #### CC1: Event Commutativity
 
-For all valid states `s`:
+For all valid states `s` (and the zero state `NewState` returns, when it is not valid):
 
 ```
 Step[e1][Step[e2][s]] == Step[e2][Step[e1][s]]
 ```
 
-Check if different orderings converge to the same normal form.
-
-**Optimization:** If events have disjoint write sets AND their triggered invariants have disjoint footprints,
-skip exhaustive check (proven by structure).
+Check if different orderings converge to the same normal form. `Build` runs this check for every
+pair, with no shortcut: the step tables are already built, so a pair costs two lookups per state.
+(Before the fix recorded in the CHANGELOG, `Build` skipped pairs whose triggered invariant
+footprints were disjoint. That ignored what an event's guard or effect reads, and ignored write
+sets no invariant watches, so it certified machines like the guarded pay/ship pair that diverge.)
 
 #### CC2: Compensation Stability (Implicit)
 
-The normal form computation already ensures:
+CC2 (`NF(apply(e, NF(s))) == NF(apply(e, s))`) is not checked, and it does not hold in general:
+an event whose guard reads a variable that repair changes behaves differently before and after
+normalization. It is not needed for the runtime guarantee, because the runtime only ever applies
+events to normal forms: every `Step` entry is a normal form, so a run that starts from a valid state
+(or from `NewState`, which the CC1 domain includes) stays on valid states, where CC1 is checked.
+A run started from an arbitrary invalid state the caller builds by hand is outside the guarantee.
 
-```
-NF(apply(e, NF(s))) == NF(apply(e, s))
-```
-
-Because `NF(s)` is a valid state and applying `e` then normalizing produces the same result regardless of whether we
-start from valid or invalid states.
-
-**CC passes if:** All independent event pairs commute in all states.
+**CC passes if:** All independent event pairs commute on every valid state (and on `NewState`).
 
 ## Runtime Execution
 
@@ -326,33 +325,39 @@ Example:
 Worst case: O(E² × N) where E = number of events, N = state count
 
 **Optimizations:**
-1. **Disjoint footprints** - Skip exhaustive check if events don't overlap
-2. **Declared independence** - Only check explicitly declared pairs
-3. **Early termination** - Stop on first CC violation
+1. **Declared independence** - Only check explicitly declared pairs
+2. **Early termination** - Stop on first CC violation
 
-In practice:
-- Most event pairs are disjoint (different write sets)
-- Verification completes in milliseconds for typical systems
+Each pair costs two table lookups per state, far less than building the step tables (one event
+application and normalization per event per state), so CC is rarely the dominant cost.
 
 ## Compositional Verification (BuildCompositional)
 
 The Phase 1 and Phase 3 algorithms above enumerate the **global** state space, which caps
-`Build` at the 20-bit ceiling. But WFC and CC are local properties: a repair and an event effect
-touch only their declared footprint, and events with disjoint footprints commute by structure
-(the mechanized `disjoint_events_commute` result). So a registry partitions into
-footprint-connected **components** that never interact, and it suffices to verify each component
-over the subspace of its own variables.
+`Build` at the 20-bit ceiling. But WFC and CC are local properties when every rule reads and writes
+only its declared footprint: events that read and write disjoint variables commute by structure
+(the mechanized `disjoint_events_commute` result, whose precondition is exactly that an event reads
+only its own footprint). So a registry partitions into footprint-connected **components** that
+never interact, and it suffices to verify each component over the subspace of its own variables.
 
 `Registry.BuildCompositional` does exactly this:
 
 1. **Partition** variables into footprint-connected components using union-find: two variables
    join the same component when some invariant footprint or event write set mentions both.
-2. **Verify each component locally.** Enumerate only that component's subspace and run the WFC
-   and CC checks over it. A component of `k` variables costs the product of *those* domains, not
-   the whole machine's.
-3. **Skip cross-component pairs.** Events whose footprints land in different components commute by
-   disjointness, so no exhaustive check is needed across components; only same-component pairs are
-   brute-forced (within their small subspace).
+2. **Check footprint conformance** (`verifyFootprints`). Every event's guard and effect must read
+   and write only its write set; every invariant's check and repair only its footprint. Combinator
+   rules are checked syntactically (exact). Closures are checked by perturbation: from every state
+   of the component, every value of each outside variable and of each pair of outside variables.
+   That catches dependence on one or two outside variables but not a joint dependence on three or
+   more, so for closures the check is a test, not a proof. A violation rejects the machine and the
+   report names it (WFC and CC are shown as not evaluated).
+3. **Verify each component locally.** Enumerate only that component's subspace and run the WFC
+   and CC checks over its valid states. A component of `k` variables costs the product of *those*
+   domains, not the whole machine's.
+4. **Skip cross-component pairs.** Events in different components read and write disjoint
+   variables, and so do the repairs they trigger (a component is closed under shared writes and
+   chained invariant footprints), so they commute; only same-component pairs are brute-forced
+   (within their small subspace).
 
 **Complexity:** exponential in the *largest component*, not in the whole machine. A registry of
 many independent small invariants certifies even when its global state space is astronomically
@@ -365,7 +370,8 @@ longer a single array lookup; it evaluates the rules for the touched component.
 
 **Preconditions:** every invariant declares its footprint, every event declares its write set
 (both automatic when rules are written with the combinator vocabulary, see "Rule layers" below),
-and the zero state is valid. No single component may exceed the enumeration budget.
+every event reads only what it writes, the zero state is valid, and the machine fits in 64 bits of
+state (`State` is one `uint64`). No single component may exceed the enumeration budget.
 
 ## Differential Testing via Extracted Oracles
 
@@ -388,8 +394,19 @@ boundaries:
    scratch. It trusts neither gsm's enumeration nor its tables: it re-derives the verdict straight
    from the declarations.
 
-If either oracle ever disagrees with gsm's Go verdict, one of them has a bug, and the extracted,
-proof-derived one is the reference. See the extraction README in `normalization-confluence` for
+Neither oracle uses a footprint shortcut: both check every ordered pair of events exhaustively, so
+both reject the guarded pay/ship machine that `Build`'s former shortcut certified. They differ from
+`Build` in scope: they check all pairs whether or not they were declared `Independent`, and the
+table oracle checks every encodable state in the tables (including invalid states no run reaches),
+so either can reject a machine `Build` correctly accepts. Neither runs as part of `Build`: the
+guarantee they add holds for the machines they are actually run on. Only `Build` machines have
+tables, and only combinator rules serialize.
+
+If an oracle rejects a machine `Build` accepted, and the failing pair is one `Build` checks on a
+state in `Build`'s domain, one of them has a bug, and the extracted, proof-derived one is the
+reference. (The oracles' "FAIL" output does not name the pair or state; with every pair checked
+by default and a machine whose zero state is valid, a disagreement is always such a case for the
+rules oracle.) See the extraction README in `normalization-confluence` for
 the file formats and how to build the binaries.
 
 ### Rule layers
