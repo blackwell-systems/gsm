@@ -1,6 +1,7 @@
 package gsm_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,6 +79,18 @@ func TestConvergenceTables_FormatV2(t *testing.T) {
 	}
 }
 
+// TestWriteDeclaredPairs_Default: with no Independent declarations every pair is
+// checked.
+func TestWriteDeclaredPairs_Default(t *testing.T) {
+	var b bytes.Buffer
+	if err := invalidStateMachine().WriteDeclaredPairs(&b); err != nil {
+		t.Fatal(err)
+	}
+	if b.String() != "pairs all\n" {
+		t.Fatalf("WriteDeclaredPairs = %q, want %q", b.String(), "pairs all\n")
+	}
+}
+
 // TestConvergenceTables_DeclaredPairs: Build checks only the declared pairs, and
 // so must the table oracle.
 func TestConvergenceTables_DeclaredPairs(t *testing.T) {
@@ -148,7 +161,14 @@ func TestMachineAST_DeclaredPairs(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, rep)
 	}
 	machine := exportAST(t, r)
-	if code, out := runASTOracle(t, machine, []byte("pairs 2 0 2 1 2\n")); code != 0 {
+	var pairs bytes.Buffer
+	if err := r.WriteDeclaredPairs(&pairs); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := pairs.String(), "pairs 2 0 2 1 2\n"; got != want {
+		t.Fatalf("WriteDeclaredPairs = %q, want %q", got, want)
+	}
+	if code, out := runASTOracle(t, machine, pairs.Bytes()); code != 0 {
 		t.Fatalf("rules oracle must accept the declared pairs (exit 0), got %d:\n%s", code, out)
 	}
 	if code, out := runASTOracle(t, machine, nil); code != 1 {

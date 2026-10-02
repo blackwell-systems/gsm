@@ -18,7 +18,13 @@ type Machine struct {
 	step   [][]uint64     // step[event][stateID] → normal form stateID
 	nf     []uint64       // nf[stateID] → normal form stateID
 
-	valid []bool // valid[stateID]: encoding is in-domain and satisfies all invariants
+	valid []bool // valid[stateID]: encoding is in-domain (every variable within its domain)
+
+	// The event pairs CC was verified for (Registry.ccPairs, each with i < j), and
+	// whether that is every pair (no Independent declarations). Recorded so the
+	// tables can be re-checked against the same property.
+	ccPairs  [][2]int
+	allPairs bool
 
 	// Lazy path (BuildCompositional): for machines whose global state space is too
 	// large to tabulate, Apply/Normalize compute at runtime from the rules instead
@@ -257,43 +263,96 @@ func (m *Machine) Export(path string) error {
 	return nil
 }
 
-// WriteConvergenceTables writes the machine's step tables in the plain-text format
-// the external verified checker consumes (normalization-confluence coq/extraction):
+// WriteConvergenceTables writes the machine's tables in the plain-text format the
+// external verified table checker consumes (normalization-confluence
+// coq/extraction, format version 2):
 //
+//	gsm-tables 2
 //	V nE
+//	nf <V state ids>
+//	pairs all | pairs k a1 b1 ... ak bk
 //	<event 0: V next-state ids>
 //	...
 //
-// It emits only VALID states, remapped to a compact 0..V-1 index (a valid state's
-// event-step is always a valid state, so the remapped tables are self-contained;
-// the invalid bit-encodings carry no real dynamics and are excluded). The
-// machine-checked checker then re-certifies, independently of this Go code, that
-// these tables converge (the per-event step functions commute and stay in range).
-// This is the differential-testing oracle for gsm's verification. Only available
-// for Build machines (compositional machines have no global tables).
+// It emits only the in-domain encodings (every variable within its domain),
+// remapped to a compact 0..V-1 index in encoding order, so the zero state is id 0.
+// nf is the normal-form table; a state is valid when nf[s] = s, which is how
+// IsValid is defined. pairs names the event pairs CC was verified for ("all"
+// when no pairs were declared independent). The checker certifies, independently
+// of this Go code, the property Build verifies: every normal form and every step
+// lands on a valid state, and every declared pair commutes on every valid state
+// and on the zero state. Only available for table-driven machines (compositional
+// machines have no global tables).
 func (m *Machine) WriteConvergenceTables(path string) error {
 	if m.lazy {
 		return fmt.Errorf("gsm: WriteConvergenceTables needs global step tables (a Build machine), not a compositional one")
 	}
+	b, err := m.convergenceTables()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o644)
+}
+
+// inDomain reports whether every variable of a packed encoding is within its
+// domain (Registry.isValidEncoding, from the machine's own variables).
+func (m *Machine) inDomain(packed uint64) bool {
+	for _, v := range m.vars {
+		mask := uint64((1 << v.bits) - 1)
+		if int((packed>>v.offset)&mask) >= v.domain {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Machine) convergenceTables() ([]byte, error) {
 	newID := make(map[uint64]int)
 	var order []uint64
 	for s := 0; s < len(m.nf); s++ {
-		if m.valid[s] {
+		if m.inDomain(uint64(s)) {
 			newID[uint64(s)] = len(order)
 			order = append(order, uint64(s))
 		}
 	}
+	id := func(packed uint64) (int, error) {
+		i, ok := newID[packed]
+		if !ok {
+			return 0, fmt.Errorf("gsm: table entry %d is not an in-domain encoding", packed)
+		}
+		return i, nil
+	}
 	nE := len(m.step)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d %d\n", len(order), nE)
-	for e := 0; e < nE; e++ {
-		for i, old := range order {
-			if i > 0 {
-				b.WriteByte(' ')
-			}
-			fmt.Fprintf(&b, "%d", newID[m.step[e][old]])
+	fmt.Fprintf(&b, "gsm-tables 2\n%d %d\nnf", len(order), nE)
+	for _, old := range order {
+		i, err := id(m.nf[old])
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(&b, " %d", i)
+	}
+	if m.allPairs {
+		b.WriteString("\npairs all\n")
+	} else {
+		fmt.Fprintf(&b, "\npairs %d", len(m.ccPairs))
+		for _, p := range m.ccPairs {
+			fmt.Fprintf(&b, " %d %d", p[0], p[1])
 		}
 		b.WriteByte('\n')
 	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	for e := 0; e < nE; e++ {
+		for k, old := range order {
+			i, err := id(m.step[e][old])
+			if err != nil {
+				return nil, err
+			}
+			if k > 0 {
+				b.WriteByte(' ')
+			}
+			fmt.Fprintf(&b, "%d", i)
+		}
+		b.WriteByte('\n')
+	}
+	return []byte(b.String()), nil
 }

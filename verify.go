@@ -171,12 +171,14 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 
 	// Build immutable machine
 	m := &Machine{
-		name:   r.name,
-		vars:   r.vars,
-		events: make(map[string]int),
-		step:   step,
-		nf:     nf,
-		valid:  valid,
+		name:     r.name,
+		vars:     r.vars,
+		events:   make(map[string]int),
+		step:     step,
+		nf:       nf,
+		valid:    valid,
+		ccPairs:  r.ccPairs(),
+		allPairs: r.allIndependent,
 	}
 	for i, ev := range r.events {
 		m.events[ev.name] = i
