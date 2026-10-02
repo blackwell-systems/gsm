@@ -69,12 +69,15 @@ func TestVerify_ComponentKeyMustBeItsName(t *testing.T) {
 	if err := cert.Verify(map[string]*Registry{"s": s, "t": strict, "u": lax}); err == nil {
 		t.Fatal("premise: Verify must refuse the table against the real target")
 	}
-	err = cert.Verify(map[string]*Registry{"s": s, "t": lax, "u": strict})
-	if err == nil {
-		t.Fatal(`Verify accepted the table: with the keys swapped the digest still matches (it uses ` +
-			`registry names) and the table for "t" was re-checked against registry "u"`)
-	}
-	if want := `gsm: certificate "forged": component key "t" names registry "u"`; err.Error() != want {
-		t.Fatalf("got %q, want %q", err, want)
+	// Repeated, because map order is random: the error must name the same key every time.
+	for i := 0; i < 32; i++ {
+		err = cert.Verify(map[string]*Registry{"s": s, "t": lax, "u": strict})
+		if err == nil {
+			t.Fatal(`Verify accepted the table: with the keys swapped the digest still matches (it uses ` +
+				`registry names) and the table for "t" was re-checked against registry "u"`)
+		}
+		if want := `gsm: certificate "forged": component key "t" names registry "u"`; err.Error() != want {
+			t.Fatalf("got %q, want %q", err, want)
+		}
 	}
 }
