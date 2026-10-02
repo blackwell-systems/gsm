@@ -399,7 +399,11 @@ so either can reject a machine `Build` correctly accepts. Neither runs as part o
 other entry point: the guarantee they add holds for the machines they are actually run on. gsm's
 CI builds both from a pinned proof commit, checks them against pinned hashes
 (`.github/oracle/`), and runs the whole test suite with `GSM_REQUIRE_ORACLES=1`, so the oracle
-tests cannot skip. A runtime gate that runs an extracted checker on every success path is planned.
+tests cannot skip. The table oracle also runs in-process on every success path. `internal/oracle`
+holds it, generated as Go from the proof's extraction (`PROVENANCE`; CI regenerates it and
+requires the same bytes). `Build`, `SynthesizeWith` (and through them `BuildOrSynthesize` and
+`Synthesis.Machine`) and `BuildCompositional` (per component) return no machine unless it certifies
+the tables (`oracle_gate.go`, `Report.Assurance`).
 Only `Build` machines have tables, and only combinator rules serialize.
 
 **Differential cross-check** (`oracle_differential_test.go`). Every `Build` in the test run is

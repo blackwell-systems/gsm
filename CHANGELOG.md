@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`
+  (and so `BuildOrSynthesize` and `Synthesis.Machine`) and `BuildCompositional` (per footprint
+  component) now give the tables gsm's verification produced to the table oracle.
+  - **The oracle.** It is `check_fast` from the normalization-confluence proof, generated as Go
+    from the Rocq extraction and vendored in `internal/oracle` (no OCaml, no subprocess, no
+    dependencies). `internal/oracle/PROVENANCE` pins the proof commit, the prover image and the
+    hashes. CI regenerates the file from them and requires the same bytes.
+  - **Failing closed.** If the oracle does not certify the tables, the call returns an error and
+    no machine. Such a disagreement means a bug in gsm's Go verification, and
+    `Report.OracleDisagreement` names it.
+  - **`Report.Assurance`** (and `Synthesis.Assurance`) record what certified a machine:
+    `AssuranceOracleTables`, or `AssuranceOracleComponents` for `BuildCompositional`, where
+    cross-component independence still rests on gsm's footprint check.
+
 ### Changed
 - **The table oracle is faster with many events and declared pairs.** Pinned to
   normalization-confluence#12: `check_fast` computes the same boolean (`check_fast_eq` is

@@ -27,11 +27,11 @@ jobs:
 
     - name: Run tests
       shell: bash
-      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic .
+      run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
     - name: Run go vet
       shell: bash
-      run: go vet .
+      run: go vet ./...
 
     - name: Check doc snippets
       # Every Go block in the top-level docs type-checks, and every README example
@@ -117,6 +117,26 @@ jobs:
         if [ -f oracle-report.txt ]; then
           { echo '### Differential cross-check'; echo '```'; cat oracle-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
         fi
+
+  oracle-provenance:
+    # The in-process table oracle (internal/oracle/oracle_gen.go) is generated from
+    # the proof, never written by hand. Regenerate it from the commit, image and
+    # generator PROVENANCE pins, and require the same JSON and the same Go, byte
+    # for byte. See internal/oracle/PROVENANCE.
+    name: Go oracle provenance
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Regenerate the oracle from the pinned proof commit
+      run: bash internal/oracle/regenerate.sh
 
   lint:
     name: Lint

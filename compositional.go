@@ -285,8 +285,28 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 		}
 	}
 
+	// The oracle gate: the verified table oracle must certify every component's
+	// tables, or there is no machine.
+	var local [][2]int
+	for _, p := range localPairs {
+		local = append(local, [2]int{p.i, p.j})
+	}
+	for ci := range comps {
+		tb, terr := r.componentTables(&comps[ci], local)
+		if terr == nil {
+			terr = certifyTables(tb, fmt.Sprintf("the tables of component %v", comps[ci].vars))
+		} else {
+			terr = &oracleError{fmt.Sprintf("gsm: cannot give component %v to the verified table oracle: %v; not certified", comps[ci].vars, terr)}
+		}
+		if terr != nil {
+			report.failClosed(terr)
+			return nil, report, terr
+		}
+	}
+
 	report.WFC = true
 	report.CC = true
+	report.Assurance = AssuranceOracleComponents
 	report.FootprintChecked = true
 	report.MaxRepairLen = maxRepair
 	report.PairsDisjoint = pairsDisjoint
