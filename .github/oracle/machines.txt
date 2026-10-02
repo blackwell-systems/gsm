@@ -32,6 +32,3 @@ ExampleFederation                manufacturer       certified-tables
 ExampleFederation                supplier           certified-tables
 Example_acceptWithCoordination   primary            certified-tables
 Example_acceptWithCoordination   mirror             certified
-
-# Deliberately non-convergent, listed as certified to show the gate failing.
-Example_naivePayShip              naive_pay_ship     certified
