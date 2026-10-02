@@ -162,7 +162,7 @@ func TestReview_DeterministicMessages(t *testing.T) {
 		r := NewRegistry("rev_det")
 		for _, nm := range []string{"a", "b", "c", "d"} {
 			v := r.Int(nm, 0, 2)
-			r.Event("bad_"+nm).Writes(v).Apply(func(s State) State { return rawState(s, v, 3) }).Add()
+			r.Event("bad_" + nm).Writes(v).Apply(func(s State) State { return rawState(s, v, 3) }).Add()
 		}
 		return r
 	}
