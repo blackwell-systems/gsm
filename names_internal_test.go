@@ -11,10 +11,14 @@ func TestDuplicateVariableName_VerifyRechecksTheWrongVariable(t *testing.T) {
 	s := NewRegistry("s")
 	on := s.Bool("on")
 	s.DeclEvent("flip", Do(Set(on, Lit(1))))
-	tr := NewRegistry("t")
-	first := tr.Bool("x")
-	tr.Bool("x")
-	tr.DeclInvariant("first_x_clear", Eq(V(first), Lit(0)), Do(Set(first, Lit(0))))
+	target := func(second string) *Registry {
+		r := NewRegistry("t")
+		first := r.Bool("x")
+		r.Bool(second)
+		r.DeclInvariant("first_x_clear", Eq(V(first), Lit(0)), Do(Set(first, Lit(0))))
+		return r
+	}
+	tr := target("x")
 
 	// The table writes 1 into "x" for every source state: invalid for the first x
 	// (the one MergeProjection writes), harmless for the second.
@@ -22,7 +26,9 @@ func TestDuplicateVariableName_VerifyRechecksTheWrongVariable(t *testing.T) {
 		Target: "t", Sources: []string{"s"}, Shared: []string{"x"},
 		Rows: []TableRow{{SourceIDs: []uint64{0}, Values: []uint64{1}}, {SourceIDs: []uint64{1}, Values: []uint64{1}}},
 	}}
-	dig, err := digestComponentsAndTables([]*Registry{s, tr}, tables, false, nil)
+	// The rules serialization names variables by index, so a twin whose second
+	// variable is named "y" has the same policy bytes and so the same digest.
+	dig, err := digestComponentsAndTables([]*Registry{s, target("y")}, tables, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
