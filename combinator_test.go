@@ -1,6 +1,7 @@
 package gsm_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/blackwell-systems/gsm"
@@ -54,9 +55,9 @@ func TestCombinator_FootprintConformanceByConstruction(t *testing.T) {
 	r := gsm.NewRegistry("wide-combinators")
 	const N = 8
 	for k := 0; k < N; k++ {
-		v := r.Int("v", 0, 7)
-		r.DeclInvariant("cap", gsm.Le(gsm.V(v), gsm.Lit(5)), gsm.Do(gsm.Set(v, gsm.Lit(5))))
-		r.DeclEvent("inc", gsm.Do(gsm.Set(v, gsm.Add(gsm.V(v), gsm.Lit(1)))))
+		v := r.Int(fmt.Sprintf("v%d", k), 0, 7)
+		r.DeclInvariant(fmt.Sprintf("cap%d", k), gsm.Le(gsm.V(v), gsm.Lit(5)), gsm.Do(gsm.Set(v, gsm.Lit(5))))
+		r.DeclEvent(fmt.Sprintf("inc%d", k), gsm.Do(gsm.Set(v, gsm.Add(gsm.V(v), gsm.Lit(1)))))
 	}
 
 	_, rep, err := r.BuildCompositional()

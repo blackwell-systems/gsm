@@ -112,6 +112,9 @@ var buildObserver func(r *Registry, m *Machine, rep *Report, err error)
 // components embedded with EmbedCertified are rebuilt with Build, so a certificate's verdict is
 // re-checked, never trusted.
 func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
+	if err := r.checkNames(); err != nil {
+		return nil, nil, err
+	}
 	if r.totalBits > 20 {
 		return nil, nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
