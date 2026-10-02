@@ -146,3 +146,25 @@ func BenchmarkBuildCompositional_TightCounters32(b *testing.B) {
 		}
 	}
 }
+
+// Table Apply cost: a Build machine's Apply is one step-table lookup, so any per-call
+// work shows up here. Order is the README machine (3 vars); WideCounters8 has 8 vars
+// with power-of-two domains and TightCounters8 8 vars that each need a range check.
+func benchTableApply(b *testing.B, r *Registry) {
+	b.Helper()
+	m, rep, err := r.Build()
+	if err != nil {
+		b.Fatalf("Build: %v\n%s", err, rep)
+	}
+	events := m.Events()
+	s := m.NewState()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s = m.Apply(s, events[i%len(events)])
+	}
+}
+
+func BenchmarkApply_Order(b *testing.B)          { benchTableApply(b, benchOrder()) }
+func BenchmarkApply_WideCounters8(b *testing.B)  { benchTableApply(b, wideCounters(8)) }
+func BenchmarkApply_TightCounters8(b *testing.B) { benchTableApply(b, tightCounters(8)) }
