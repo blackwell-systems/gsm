@@ -90,6 +90,10 @@ type certifiedEmbed struct {
 // certificate can then be handed to EmbedCertified on a larger federation. Any input ports passed
 // here are the shared variables an outer morphism may later write into the subsystem; each must be
 // free (no internal morphism writes it), which Certify checks.
+//
+// The certificate describes the federation as it was when Certify was called: a morphism,
+// component, or resolver added to f while Certify runs (from inside a morphism closure, say) is
+// not in it, and a component registry changed while Certify runs is rejected.
 func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
 	// Build runs morphism closures after it verifies the components, and so does table
 	// extraction. Certify works on a copy of the federation's wiring, so a closure that adds a
