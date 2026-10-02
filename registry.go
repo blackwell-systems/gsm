@@ -91,7 +91,9 @@ func (r *Registry) OnlyDeclaredPairs() *Registry {
 // where a duplicate would let a re-check or a merge act on the wrong variable.
 // Every path that produces a machine, a certificate, or an export for the
 // checkers calls it, except Synthesis.Machine, which builds from the snapshot
-// SynthesizeWith took after calling it.
+// SynthesizeWith takes when it returns. Build, BuildCompositional and
+// SynthesizeWith also reject a registry that a rule closure changed after the
+// check (checkUnchanged), so the registry they build from is the one checked.
 func (r *Registry) checkNames() error {
 	seen := make(map[string]bool, len(r.events))
 	for _, ev := range r.events {

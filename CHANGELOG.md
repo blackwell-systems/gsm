@@ -65,8 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Federation.Build` (every component, before certificate validation), `Certify`,
   `BuildCoordinated`, `EmbedCertified` builds, `Certificate.Verify`, `WriteMachineAST`,
   `PolicyBytes`, `PolicyDigest`, and `WriteDeclaredPairs`. `Synthesis.Machine` is built from a
-  snapshot of the registry taken when `Synthesize` ran (after the check), so a duplicate declared
-  afterwards does not reach it. **Behaviour change:** a registry that reused an event name, which
+  snapshot of the registry taken when `Synthesize` returns, so a duplicate declared afterwards does
+  not reach it. `Build`, `BuildCompositional` and `Synthesize` also reject a registry that a rule
+  closure changed while it was being verified (`gsm: registry "r" was changed while it was being
+  verified ...`), so a declaration made from inside a rule cannot get past the check. **Behaviour change:** a registry that reused an event name, which
   used to build, is now rejected; rename one of the events.
 - **Duplicate variable names misrouted certificate re-checks and projections.** Certificate tables,
   input ports, and shared projections name variables, so with two variables of the same name
