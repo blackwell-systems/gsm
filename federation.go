@@ -254,19 +254,17 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	}
 
 	for i, r := range f.comps {
-		if sid, ok := subOf[r]; ok {
-			// Certified component: build the runtime Machine (Phases 1-2) but trust the
-			// certificate for CC rather than re-enumerating it.
-			cm, cr, err := r.build(false)
+		if _, ok := subOf[r]; ok {
+			// Certified component: re-check it rather than trust the certificate's verdict.
+			// Build re-runs WFC and CC; CC is cheap here because the step tables, which the
+			// runtime Machine needs anyway, are already built. A certificate issued by an
+			// earlier, weaker verifier for a non-convergent component is refused here.
+			cm, cr, err := r.Build()
 			if err != nil {
-				return nil, report, fmt.Errorf("gsm: certified component %q does not build: %w", r.name, err)
+				return nil, report, fmt.Errorf("gsm: certified component %q does not converge on re-check: %w", r.name, err)
 			}
 			m.comps[i] = cm
-			if certRep := f.certified[sid].reportFor(r.name); certRep != nil {
-				report.Components = append(report.Components, certRep)
-			} else {
-				report.Components = append(report.Components, cr)
-			}
+			report.Components = append(report.Components, cr)
 			continue
 		}
 		cm, cr, err := r.Build()

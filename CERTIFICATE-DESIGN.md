@@ -8,7 +8,8 @@ certificate path is an opt-in optimization that does not change what gsm can ver
 can safely skip.
 
 Implemented (`certificate.go`): `Certificate`, `Federation.Certify`, `Federation.EmbedCertified`
-(boundary-only build, skipping per-component CC re-enumeration and internal-edge re-verification),
+(re-checks internal edges from the tables instead of their closures, and rebuilds each component
+with `Build`, so component convergence is re-checked rather than trusted),
 morphism/resolver table extraction, a tamper-complete digest over component policies plus those
 tables, and `Certificate.Verify`, a standalone differential re-checker that re-derives the federated
 conditions from the tables rather than the producer's closures. Input ports are implemented
@@ -109,8 +110,9 @@ boundary:
   does not re-enumerate the subsystem's internal state space.
 - **(iv) Digest match.** The embedded subsystem's `PolicyDigest()` equals the certificate's identity.
 
-If all pass, `Build` trusts the certificate's convergence verdict and does not re-enumerate the
-subsystem's internals. If any fail, it falls back to full re-verification (current behavior), so the
+If all pass, `Build` uses the certificate's tables for the internal morphisms instead of re-verifying
+their closures. (As built, it still rebuilds each component and re-checks its convergence; see
+"Versioning and trust policy".) If any fail, it falls back to full re-verification (current behavior), so the
 certificate path is never less sound than today, only faster when it applies.
 
 ## Resolver tags
@@ -124,6 +126,29 @@ The capability tag on each internal resolver records how it composes:
   seam check already performs, so no additional machinery is needed; the tag is what tells a resolver
   library which primitives are safe to hand out as freely composable and which carry the per-seam
   obligation.
+
+## Versioning and trust policy
+
+There is a single development certificate version until 1.0 (the digest domain tag
+`gsm-fedcert-v3`). It is not bumped per change, including verifier fixes. A certificate is
+**validated by re-check, never trusted by digest**: the digest only binds the certificate to the
+subsystem it describes (component policies, morphism tables, input ports). Everything the
+certificate asserts is re-derived when it is used:
+
+- `EmbedCertified` re-checks the internal morphisms from the tables (M1/R2, port freeness,
+  acyclicity) and rebuilds every certified component with `Build`, which re-checks WFC and CC.
+- `Certificate.Verify` does the same from the consumer's own copies of the component registries.
+
+The recorded verdict (`Certificate.Report`) is informational. This is what makes a verifier fix
+safe without a version bump: a certificate issued by an older, weaker verifier is re-checked by the
+current one on load. For example, a v0.11.0 certificate for the naive pay/ship component (certified
+then through Build's unchecked disjointness shortcut) still matches its digest, and both
+`EmbedCertified` and `Verify` refuse it because the CC re-check finds the divergence
+(`certificate_recheck_test.go`, with the v0.11.0 certificate as test data).
+
+What re-checking costs: `EmbedCertified` builds each certified component's step tables anyway (the
+runtime needs them), so the CC re-check adds two table lookups per state per event pair. What it
+still saves is re-verifying the internal morphisms from their closures.
 
 ## Soundness condition
 

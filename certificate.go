@@ -9,8 +9,10 @@ import (
 )
 
 // Certificate is a serializable verdict for a verified (sub-)federation so it can be reused by
-// EmbedCertified as a black box: the embedding checks only the boundary and skips re-verifying
-// the subsystem's internals. See CERTIFICATE-DESIGN.md.
+// EmbedCertified: the embedding skips re-verifying the subsystem's internal morphisms from their
+// closures, re-checks them from the certificate's tables instead, and rebuilds each component
+// with Build (so component convergence is re-checked, not trusted). A certificate is validated by
+// re-check, never trusted for its recorded verdict; see CERTIFICATE-DESIGN.md.
 //
 // The digest covers each component's serializable policy, the extracted morphism tables (see
 // MorphismTable), and the declared input ports, so it is tamper-complete: it changes if a component
@@ -22,12 +24,13 @@ import (
 // input ports at Certify time (Certify(ports...)). An input port is a shared variable that no
 // internal morphism writes (it is free inside the sub); once embedded, an outer morphism may write
 // it, and Build verifies that boundary morphism at the seam (M1/R2) while still skipping the
-// subsystem's internals. The certificate is inherently parametric over the input port's whole
+// closure-level re-verification of the subsystem's internal morphisms. The certificate is inherently parametric over the input port's whole
 // domain because Build already verifies every component and source state exhaustively. A shared
 // variable not declared an input port stays sealed, and an inbound morphism to it is rejected.
 //
-// Verify re-derives validity preservation and acyclicity, matches the digest, and confirms declared
-// input ports are free (no table writes them), using the component invariants. The strongest form,
+// Verify re-derives validity preservation and acyclicity, matches the digest, confirms declared
+// input ports are free (no table writes them), and rebuilds every component with Build to re-check
+// its convergence. The strongest form,
 // an axiom-free-Coq-extracted oracle that re-checks the federated conditions the way astchecker
 // re-checks single-registry rules, is future work (it needs the federation conditions mechanized in
 // Coq first).
@@ -148,8 +151,11 @@ func sortPortRefs(refs []PortRef) {
 }
 
 // EmbedCertified composes a sub-federation into this one on the strength of its certificate: like
-// Embed, but Build does not re-verify the subsystem's internals. Only the seam (morphisms crossing
-// the boundary) plus the whole-graph acyclicity/monotonicity check run. The certificate's digest
+// Embed, but Build does not re-verify the subsystem's internal morphisms from their closures; it
+// re-checks them from the certificate's tables (M1/R2, ports, acyclicity), verifies the seam
+// (morphisms crossing the boundary) and the whole-graph acyclicity/monotonicity, and rebuilds each
+// certified component with Build, which re-checks its WFC and CC. The certificate's recorded
+// verdict is never trusted. The certificate's digest
 // must match the sub at Build. An outer morphism may read the subsystem (subsystem as source) or
 // write one of the subsystem's declared input ports; an inbound morphism to any other (sealed)
 // variable is rejected. Use Embed for the full-re-verification form.
@@ -211,6 +217,16 @@ func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
 			return fmt.Errorf("gsm: certificate for %q does not match the embedded sub-federation; "+
 				"rebuild the certificate from the current subsystem", ce.sub.name)
 		}
+		// Re-check the morphism conditions from the tables rather than trusting the
+		// certificate's verdict. Component convergence is re-checked when Build builds
+		// each certified component (with CC).
+		byName := make(map[string]*Registry, len(ce.sub.comps))
+		for _, r := range ce.sub.comps {
+			byName[r.name] = r
+		}
+		if err := ce.cert.recheckTables(byName); err != nil {
+			return err
+		}
 	}
 	// Seam rule: an inbound morphism (target inside a certified sub, source outside it) is allowed
 	// only if every variable it writes is a declared input port; a write to a sealed variable is
@@ -255,19 +271,6 @@ func hasSeamIncoming(subOf map[*Registry]int, tid int, edges []edgeDef) bool {
 		}
 	}
 	return false
-}
-
-// reportFor returns the certificate's per-component report for the named registry, or nil.
-func (ce *certifiedEmbed) reportFor(name string) *Report {
-	if ce.cert == nil || ce.cert.Report == nil {
-		return nil
-	}
-	for _, c := range ce.cert.Report.Components {
-		if c.Name == name {
-			return c
-		}
-	}
-	return nil
 }
 
 // digestComponentsAndTables computes the certificate digest from the component registries, the
@@ -414,7 +417,11 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 //     the recorded shared values into every valid target state must keep the target valid;
 //   - input-port freeness: no morphism table writes a declared input port (so the port is genuinely
 //     free for an outer morphism to drive);
-//   - acyclicity: unless the certificate is marked Monotone, the morphism graph must be acyclic.
+//   - acyclicity: unless the certificate is marked Monotone, the morphism graph must be acyclic;
+//   - component convergence: every provided component is rebuilt with Build, which re-checks WFC
+//     and CC exhaustively. The certificate's recorded verdict (Report) is never trusted: a
+//     certificate issued by an earlier, weaker verifier for a component that does not converge is
+//     refused here even though its digest still matches.
 //
 // The component invariants are evaluated from the provided registries (part of the shared, digest
 // covered definition); only the morphism closures are replaced by the tables. The monotonicity of a
@@ -431,7 +438,32 @@ func (c *Certificate) Verify(comps map[string]*Registry) error {
 	if dig != c.Digest {
 		return fmt.Errorf("gsm: certificate %q digest does not match the provided components, tables, and ports", c.Name)
 	}
+	if err := c.recheckTables(comps); err != nil {
+		return err
+	}
+	return c.recheckComponents(comps)
+}
 
+// recheckComponents rebuilds every component with Build (exhaustive WFC and CC), in name order.
+func (c *Certificate) recheckComponents(comps map[string]*Registry) error {
+	names := make([]string, 0, len(comps))
+	for n := range comps {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if _, _, err := comps[n].Build(); err != nil {
+			return fmt.Errorf("gsm: certificate %q: component %q does not converge on re-check: %w", c.Name, n, err)
+		}
+	}
+	return nil
+}
+
+// recheckTables re-derives the federated conditions from the certificate's tables: input-port
+// freeness, validity preservation (M1/R2) against the provided target registries, and acyclicity
+// unless Monotone. It trusts nothing the producer computed except the tables themselves, which the
+// digest binds to the live subsystem.
+func (c *Certificate) recheckTables(comps map[string]*Registry) error {
 	// Input ports must be free: no morphism table may write a declared input port.
 	for _, p := range c.InputPorts {
 		for _, t := range c.Tables {
