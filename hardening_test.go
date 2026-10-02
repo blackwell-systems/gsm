@@ -1,6 +1,9 @@
 package gsm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -406,5 +409,153 @@ func TestDiagnoseCycle_FrozenWiring(t *testing.T) {
 	}
 	if err != nil || diag == nil || !diag.Converges || len(diag.Cycle) != 2 {
 		t.Fatalf("want the converging A-B diagnostic of the federation as called, got %v, %v", diag, err)
+	}
+}
+
+// Review of #11, round 2.
+
+// H3: identity digest canonicalizes pair order, direction and repeats, and still
+// separates different pair sets, "all" from an explicit list, and no pairs.
+func TestReview11v2_IdentityPairs(t *testing.T) {
+	mk := func(decl func(r *Registry)) string {
+		r := NewRegistry("pairs")
+		v := r.Int("v", 0, 2)
+		for _, e := range []string{"a", "b", "c"} {
+			r.DeclEvent(e, Do(Set(v, Lit(1))))
+		}
+		decl(r)
+		d, err := r.PolicyIdentityDigest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	base := mk(func(r *Registry) { r.Independent("a", "b").Independent("b", "c") })
+	for name, d := range map[string]string{
+		"order":     mk(func(r *Registry) { r.Independent("b", "c").Independent("a", "b") }),
+		"direction": mk(func(r *Registry) { r.Independent("b", "a").Independent("c", "b") }),
+		"repeat":    mk(func(r *Registry) { r.Independent("a", "b").Independent("b", "c").Independent("a", "b") }),
+	} {
+		if d != base {
+			t.Errorf("%s changes the identity digest", name)
+		}
+	}
+	for name, d := range map[string]string{
+		"other set": mk(func(r *Registry) { r.Independent("a", "c").Independent("b", "c") }),
+		"subset":    mk(func(r *Registry) { r.Independent("a", "b") }),
+		"all":       mk(func(r *Registry) {}),
+		"none":      mk(func(r *Registry) { r.OnlyDeclaredPairs() }),
+		"self":      mk(func(r *Registry) { r.Independent("a", "b").Independent("b", "c").Independent("a", "a") }),
+	} {
+		if d == base {
+			t.Errorf("%s does not change the identity digest", name)
+		}
+	}
+}
+
+// TestPolicyIdentityDigest_Recomputable: an independent verifier recomputes the
+// identity digest as SHA-256(PolicyIdentityVersion "\n" PolicyBytes PolicyNames).
+func TestPolicyIdentityDigest_Recomputable(t *testing.T) {
+	r := NewRegistry("ident")
+	v := r.Int("v", 0, 2)
+	r.Enum("e", "x", "y")
+	r.DeclEvent("a", Do(Set(v, Lit(1))))
+	r.DeclEvent("b", Do(Set(v, Lit(2))))
+	r.Independent("a", "b")
+	b, err := r.PolicyBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := r.PolicyNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.New()
+	h.Write([]byte("gsm-policy-identity-v1\n"))
+	h.Write(b)
+	h.Write(names)
+	d, err := r.PolicyIdentityDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != d {
+		t.Errorf("recomputed %s, PolicyIdentityDigest is %s", got, d)
+	}
+}
+
+// coordinationFeds are the federations of the coordination tests and example, plus
+// parallel morphisms into one target (each its own coordination point) and a
+// three-registry ring.
+func coordinationFeds() map[string]*Federation {
+	feds := map[string]*Federation{}
+	{
+		a := NewRegistry("A")
+		fa := a.Int("fa", 0, 1)
+		b := NewRegistry("B")
+		fb := b.Int("fb", 0, 1)
+		feds["negation loop"] = NewFederation("loop").
+			Morphism(a, b).Shared(fb).Map(func(s, d State) State { return d.SetInt(fb, s.GetInt(fa)) }).Add().
+			Morphism(b, a).Shared(fa).Map(func(s, d State) State { return d.SetInt(fa, 1-s.GetInt(fb)) }).Add()
+	}
+	{
+		a := NewRegistry("A")
+		fa := a.Int("fa", 0, 1)
+		b := NewRegistry("B")
+		fb := b.Int("fb", 0, 1)
+		feds["chain"] = NewFederation("chain").
+			Morphism(a, b).Shared(fb).Map(func(s, d State) State { return d.SetInt(fb, s.GetInt(fa)) }).Add()
+	}
+	{
+		p := NewRegistry("primary")
+		pv := p.Int("v", 0, 1)
+		m := NewRegistry("mirror")
+		mv := m.Int("v", 0, 1)
+		feds["mirrors"] = NewFederation("mirrors").
+			Morphism(p, m).Shared(mv).Map(func(s, d State) State { return d.SetInt(mv, s.GetInt(pv)) }).Add().
+			Morphism(m, p).Shared(pv).Map(func(s, d State) State { return d.SetInt(pv, 1-s.GetInt(mv)) }).Add()
+	}
+	{
+		a := NewRegistry("A")
+		a1 := a.Bool("a1")
+		a2 := a.Bool("a2")
+		b := NewRegistry("B")
+		bx := b.Bool("bx")
+		c := NewRegistry("C")
+		c.Bool("c")
+		keep := func(s, d State) State { return d }
+		feds["parallel morphisms"] = NewFederation("par").
+			Morphism(c, a).Shared(a1, a2).Map(keep).Add().
+			Morphism(a, b).Shared(bx).Map(func(s, d State) State { return d.SetBool(bx, !s.GetBool(a1)) }).Add().
+			Morphism(b, a).Shared(a1).Map(keep).Add().
+			Morphism(b, a).Shared(a2).Map(keep).Add().
+			Resolve(a, func(d State, src map[string]State) State { return d.SetBool(a1, false).SetBool(a2, false) })
+	}
+	{
+		regs := make([]*Registry, 3)
+		vs := make([]Var, 3)
+		for i := range regs {
+			regs[i] = NewRegistry(fmt.Sprintf("R%d", i))
+			vs[i] = regs[i].Int("v", 0, 1)
+		}
+		f := NewFederation("ring")
+		for i := range regs {
+			src, dst := regs[i], regs[(i+1)%3]
+			sv, dv := vs[i], vs[(i+1)%3]
+			f.Morphism(src, dst).Shared(dv).Map(func(s, d State) State { return d.SetInt(dv, 1-s.GetInt(sv)) }).Add()
+		}
+		feds["negation ring"] = f
+	}
+	return feds
+}
+
+// TestBuildCoordinated_AcceptsOwnPlan: BuildCoordinated accepts the plan
+// CoordinationPlan returns, for every federation above (a regression: with parallel
+// morphisms between two registries, a point was matched against the wrong one).
+func TestBuildCoordinated_AcceptsOwnPlan(t *testing.T) {
+	for name, f := range coordinationFeds() {
+		plan := f.CoordinationPlan()
+		if _, _, err := f.BuildCoordinated(plan); err != nil {
+			t.Errorf("%s: BuildCoordinated(%v): %v", name, plan, err)
+		}
 	}
 }
