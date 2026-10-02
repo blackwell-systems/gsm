@@ -187,7 +187,9 @@ func Set(v Var, e Expr) Assign { return Assign{v, e} }
 // Transform is a sequence of assignments applied left to right.
 type Transform []Assign
 
-// Do groups assignments into a transform.
+// Do groups assignments into a transform. A Transform is a slice, so DeclEvent,
+// DeclEventGuarded and DeclInvariant keep their own copy: changing a Transform (or
+// the slice passed to Do) after declaring a rule with it does not change the rule.
 func Do(as ...Assign) Transform {
 	if as == nil {
 		// Non-nil, so an empty effect is still a combinator rule (exportable).

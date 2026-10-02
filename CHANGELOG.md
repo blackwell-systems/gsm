@@ -36,6 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PolicyBytes`, `PolicyDigest` and certificate digests are unchanged.
 
 ### Fixed
+- **A declared combinator rule could be rewritten through the caller's slice.** `Do(as...)`
+  returned the caller's slice and `DeclEvent`, `DeclEventGuarded` and `DeclInvariant` kept it, and
+  `And(ps...)`/`Or(ps...)` kept theirs, while write sets and footprints were computed once. Changing
+  an element afterwards changed the rule without changing anything the build checks, so a
+  `BuildCompositional` machine's `Apply` could run a rewritten, unverified rule (an event writing
+  outside its declared write set, order-dependent), and the policy digest changed after the build.
+  The declarations and `And`/`Or` now copy what they are given. `Enum` also copies its labels.
+- **`Certify` could digest declarations no check saw.** It builds the federation, then runs
+  morphism closures (verification and table extraction) before digesting. A closure that declared
+  on a component there, or added a morphism to the federation, got that into the certificate.
+  `Certify` now works on a copy of the federation's wiring taken when it is called, and rejects a
+  component registry changed while it runs (`gsm: registry "r" was changed while it was being
+  verified ...`).
 - **The rules oracle used the wrong arithmetic.** `astchecker` (normalization-confluence) evaluated
   rules over the natural numbers, so `Sub` truncated at 0 and a guard such as
   `Lt(Sub(V(a), V(b)), Lit(0))` was never true. It certified machines that `Build` correctly
