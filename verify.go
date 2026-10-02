@@ -184,7 +184,7 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 // the example-machine gate (gate.go, built only with the gsmgate tag).
 var buildObserver func(r *Registry, m *Machine, rep *Report, err error)
 
-// machineObserver, when non-nil, sees every machine made without Build: kind
+// machineObserver, when non-nil, sees every machine handed out without Build: kind
 // "synthesized" (Synthesis.Machine) or "compositional" (BuildCompositional). Only
 // the example-machine gate sets it (gate.go, built with the gsmgate tag).
 var machineObserver func(kind string, r *Registry, m *Machine)
