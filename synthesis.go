@@ -18,7 +18,11 @@ type Synthesis struct {
 	Cost       int  // total cost of the representative repair (min-cost when Optimal + Exhaustive)
 
 	r        *Registry
-	nf       []uint64 // representative convergent normal-form table (nil if none)
+	vars     []Var          // the registry's variables when it was synthesized
+	events   map[string]int // event name -> index, when it was synthesized
+	ccPairs  [][2]int       // the pairs the search checked
+	allPairs bool           // whether those are every pair
+	nf       []uint64       // representative convergent normal-form table (nil if none)
 	step     [][]uint64
 	invalids []uint64 // packed invalid states (for Repairs())
 	witness  string   // when impossible: why (a critical pair no repair can reconcile)
@@ -255,11 +259,21 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 	bt(0, 0)
 	found := solution != nil
 
+	// Machine and Repairs are built from this snapshot, not the live registry, so
+	// a later declaration (an event, an Independent pair) cannot reach a machine
+	// whose synthesis never saw it.
 	out := &Synthesis{
 		Convergent: found,
 		Exhaustive: !budgetHit,
 		Nodes:      nodes,
 		r:          r,
+		vars:       r.vars, // later declarations append past this length
+		events:     make(map[string]int, len(r.events)),
+		ccPairs:    pairs,
+		allPairs:   r.allIndependent,
+	}
+	for i, ev := range r.events {
+		out.events[ev.name] = i
 	}
 	if found {
 		out.Cost = bestCost
@@ -410,15 +424,17 @@ func (r *Registry) impossibilityWitness(rawStep [][]uint64, isValidState []bool,
 }
 
 // Machine returns a ready-to-use Machine built from the synthesized compensation, or nil if
-// no convergent compensation was found.
+// no convergent compensation was found. It is the machine as synthesized: events, variables, or
+// Independent pairs declared on the registry afterwards do not reach it (the registry itself is
+// then re-checked by Build or Synthesize).
 func (s *Synthesis) Machine() *Machine {
 	if !s.Convergent {
 		return nil
 	}
-	m := &Machine{name: s.r.name, vars: s.r.vars, events: make(map[string]int), step: s.step, nf: s.nf,
-		ccPairs: s.r.ccPairs(), allPairs: s.r.allIndependent}
-	for i, ev := range s.r.events {
-		m.events[ev.name] = i
+	m := &Machine{name: s.r.name, vars: s.vars, events: make(map[string]int, len(s.events)), step: s.step, nf: s.nf,
+		ccPairs: s.ccPairs, allPairs: s.allPairs}
+	for name, i := range s.events {
+		m.events[name] = i
 	}
 	return m
 }
@@ -434,7 +450,7 @@ func (s *Synthesis) Repairs() [][2]State {
 	invs := append([]uint64(nil), s.invalids...)
 	sort.Slice(invs, func(i, j int) bool { return invs[i] < invs[j] })
 	for _, inv := range invs {
-		out = append(out, [2]State{{packed: inv, vars: s.r.vars}, {packed: s.nf[inv], vars: s.r.vars}})
+		out = append(out, [2]State{{packed: inv, vars: s.vars}, {packed: s.nf[inv], vars: s.vars}})
 	}
 	return out
 }

@@ -107,6 +107,7 @@ func TestSynthesisMachine_UnaffectedByLaterDuplicate(t *testing.T) {
 		t.Fatalf("premise: synthesis converges: %v %v", err, s)
 	}
 	r.Event("a").Writes(x).Apply(func(s State) State { return s.SetInt(x, 0) }).Add()
+	r.Bool("late")
 	defer func() {
 		if p := recover(); p != nil {
 			t.Fatalf("the synthesized machine panics after a duplicate was declared on its registry: %v", p)
@@ -119,6 +120,12 @@ func TestSynthesisMachine_UnaffectedByLaterDuplicate(t *testing.T) {
 	}
 	if got := m.Apply(m.NewState(), "a"); got.GetInt(x) != 1 {
 		t.Fatalf("Apply(\"a\") ran the event declared after synthesis: %s", got)
+	}
+	if got := m.NewState().String(); strings.Contains(got, "late") {
+		t.Fatalf("the synthesized machine's state carries a variable declared afterwards: %s", got)
+	}
+	if got := s.Repairs()[0][0].String(); strings.Contains(got, "late") {
+		t.Fatalf("a synthesized repair carries a variable declared afterwards: %s", got)
 	}
 	if _, _, err := r.Build(); err == nil {
 		t.Fatal("Build accepted the registry with the duplicate")
@@ -151,5 +158,24 @@ func TestSynthesisMachine_UnaffectedByLaterIndependent(t *testing.T) {
 	}
 	if got := strings.Split(string(b), "\n")[3]; got != "pairs 1 0 2" {
 		t.Fatalf("tables claim %q, want only the pair synthesis checked: %q", got, "pairs 1 0 2")
+	}
+
+	// Synthesized in all-pairs mode; a later Independent switches the registry to
+	// declared-only mode, but the machine was checked for every pair.
+	r3 := NewRegistry("syn3")
+	y := r3.Bool("y")
+	r3.Event("up").Writes(y).Apply(func(s State) State { return s.SetBool(y, true) }).Add()
+	r3.Event("noop").Writes(y).Apply(func(s State) State { return s }).Add()
+	s3, err := r3.Synthesize()
+	if err != nil || !s3.Convergent {
+		t.Fatalf("premise: synthesis converges: %v %v", err, s3)
+	}
+	r3.Independent("up", "noop")
+	b, err = s3.Machine().convergenceTables()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(string(b), "\n")[3]; got != "pairs all" {
+		t.Fatalf("tables claim %q, want %q", got, "pairs all")
 	}
 }
