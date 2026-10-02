@@ -276,7 +276,12 @@ func (ce *certifiedEmbed) reportFor(name string) *Report {
 // certificate (Certify) and to re-check one against a consumer's own components (Certificate.Verify).
 func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowCycles bool, inputPorts []PortRef) (string, error) {
 	h := sha256.New()
-	h.Write([]byte("gsm-fedcert-v3\n"))
+	// v4: certificates issued before the CC soundness fix (v0.11.0 and earlier) may
+	// carry a convergence verdict from Build's unchecked disjointness shortcut, and
+	// EmbedCertified trusts a certificate's verdict instead of re-running CC. Bumping
+	// the domain tag makes every such certificate fail the digest match, so it must
+	// be re-issued by Certify under the fixed verifier.
+	h.Write([]byte("gsm-fedcert-v4\n"))
 
 	cs := append([]*Registry(nil), comps...)
 	sort.Slice(cs, func(i, j int) bool { return cs[i].name < cs[j].name })
