@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The rules oracle now checks gsm's largest machines.** The pinned `astchecker` died with
+  `Stack_overflow` under OCaml 4.14 on 2^20-state machines: it multiplied domain sizes and
+  converted every variable read to Z through unary arithmetic, and enumerated the valuations
+  with non-tail recursion. normalization-confluence#11 replaces each with a proven-equal form
+  (or, for the enumeration, one proven to have the same members), with no new extraction
+  directives; verdicts are unchanged. Pinned to its merge commit.
 - **Behaviour change: certificate digests bind names and declared pairs.** Certificate digests
   covered each component's rules in the oracle's positional format only, so two subsystems whose
   components differed only in an event name, a variable name or kind, an enum label, or the
