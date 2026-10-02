@@ -44,6 +44,13 @@ type Report struct {
 	DomainViolation string
 }
 
+// compensationError is Build's error when the compensation as written is missing or does
+// not converge (a Repair is missing, WFC fails, or CC fails): the failures a synthesized
+// compensation can repair, so BuildOrSynthesize falls back to synthesis on these alone.
+type compensationError struct{ msg string }
+
+func (e *compensationError) Error() string { return e.msg }
+
 // noteDomainViolation records err in the report when it is a rule result outside the
 // machine (resultError), replacing any footprint violation the same error was filed as.
 func (r *Report) noteDomainViolation(err error) {
@@ -168,8 +175,8 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 	}
 	for _, inv := range r.invariants {
 		if inv.repair == nil {
-			return nil, nil, fmt.Errorf("gsm: invariant %q has no Repair; provide one, or call "+
-				"Synthesize to generate a convergent compensation", inv.name)
+			return nil, nil, &compensationError{fmt.Sprintf("gsm: invariant %q has no Repair; provide one, or call "+
+				"Synthesize to generate a convergent compensation", inv.name)}
 		}
 	}
 
@@ -274,7 +281,7 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 			// Also fail if depth exceeds state count (impossible in a terminating machine).
 			if seen[s.packed] || depth > stateCount {
 				report.WFC = false
-				return nil, fmt.Errorf("gsm: WFC check failed — compensation does not terminate")
+				return nil, &compensationError{"gsm: WFC check failed — compensation does not terminate"}
 			}
 			seen[s.packed] = true
 		}
@@ -293,7 +300,7 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 		if valid[i] {
 			s := mkState(uint64(i))
 			if r.allInvariantsHold(s) && nf[i] != uint64(i) {
-				return nil, fmt.Errorf("gsm: compensation moves valid state %s — repair must be identity on valid states", s)
+				return nil, &compensationError{fmt.Sprintf("gsm: compensation moves valid state %s — repair must be identity on valid states", s)}
 			}
 		}
 	}
@@ -372,7 +379,7 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][
 					Result1: mkState(after_ij),
 					Result2: mkState(after_ji),
 				}
-				return fmt.Errorf("gsm: Compensation Commutativity (CC) check failed")
+				return &compensationError{"gsm: Compensation Commutativity (CC) check failed"}
 			}
 		}
 	}

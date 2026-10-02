@@ -37,7 +37,7 @@ func buildNoPanic(t *testing.T, r *Registry) (m *Machine, rep *Report, err error
 }
 
 // rawState returns s with v's raw field set to raw, bypassing the domain checks of
-// Set/SetInt (the same write MergeProjection performs for a raw projection value).
+// Set/SetInt.
 func rawState(s State, v Var, raw uint64) State { return s.setRaw(v, raw) }
 
 // capped: n ranges over 0..2 and may not be 1. The repair and the set_one effect
@@ -89,19 +89,6 @@ func oodCases() []oodCase {
 			name: "repair/value-out-of-range", rule: `invariant "not_one"`, bad: "n=3", reason: `"n" holds 3, outside 0..2`,
 			mkReg: func(t *testing.T) *Registry {
 				return capped("ood_repair_range", func(s State, n Var) State { return rawState(s, n, 3) }, effectSetOne)
-			},
-		},
-		{
-			name: "repair/merge-projection", rule: `invariant "not_one"`, bad: "n=3", reason: `"n" holds 3, outside 0..2`,
-			mkReg: func(t *testing.T) *Registry {
-				twin := foreignMachine(t, "twin", func(r *Registry) { r.Int("n", 0, 2) })
-				return capped("ood_repair_merge", func(s State, n Var) State {
-					out, err := twin.MergeProjection(s, Projection{Shared: map[string]uint64{"n": 3}})
-					if err != nil {
-						panic(err)
-					}
-					return out
-				}, effectSetOne)
 			},
 		},
 		{
@@ -708,23 +695,6 @@ func TestMonotoneCheckImagesChecked(t *testing.T) {
 	}
 }
 
-// TestForeignInputLabeled: when a lazy machine is given a state of another machine,
-// the error does not present that input as one of this machine's states.
-func TestForeignInputLabeled(t *testing.T) {
-	r := NewRegistry("label")
-	n := r.Int("n", 0, 2)
-	r.Event("set2").Writes(n).Apply(func(s State) State { return s.SetInt(n, 2) }).Add()
-	m, _, err := r.BuildCompositional()
-	if err != nil {
-		t.Fatal(err)
-	}
-	w := foreignMachine(t, "wider", func(r *Registry) { r.Int("n", 0, 3) })
-	msg := catchPanic(func() { m.Apply(w.NewState(), "set2") })
-	if !strings.Contains(msg, "on input {n=0}, which is itself not a state of this machine") {
-		t.Fatalf("the foreign input is not labeled as such: %q", msg)
-	}
-}
-
 // TestDomainViolation_ReportNotCertified: a domain rejection leaves the report
 // uncertified even when WFC had passed before the bad effect was reached.
 func TestDomainViolation_ReportNotCertified(t *testing.T) {
@@ -802,5 +772,29 @@ func TestResolverDeclaresMidRun(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), `registry "B" was changed while it was being verified`) {
 		t.Fatalf("want the mid-run change reported, got: %v", err)
+	}
+}
+
+// TestBuildOrSynthesize_FallsBackOnCompensationFailures: the fallback still runs for
+// every failure of the compensation itself: a non-terminating repair (WFC), a pair
+// that does not commute (CC), and a missing Repair.
+func TestBuildOrSynthesize_FallsBackOnCompensationFailures(t *testing.T) {
+	// WFC: the repair of n=1 leaves n=1, so compensation never terminates.
+	wfc := capped("bos_wfc", func(s State, n Var) State { return s }, effectSetOne)
+	if m, syn, err := wfc.BuildOrSynthesize(); err != nil || m == nil || syn == nil {
+		t.Errorf("WFC failure: want a synthesized machine, got machine=%v synthesis=%v err=%v", m != nil, syn != nil, err)
+	}
+	// CC: pay/ship does not commute and has no invalid state to repair, so synthesis
+	// runs and reports that no compensation exists.
+	if _, _, err := payShip().BuildOrSynthesize(); err == nil || !strings.Contains(err.Error(), "build failed and") {
+		t.Errorf("CC failure: want the synthesis verdict after falling back, got: %v", err)
+	}
+	// Missing Repair.
+	r := NewRegistry("bos_norepair")
+	n := r.Int("n", 0, 2)
+	r.Invariant("not_one").Watches(n).Holds(func(s State) bool { return s.GetInt(n) != 1 }).Add()
+	r.Event("set_one").Writes(n).Apply(func(s State) State { return s.SetInt(n, 1) }).Add()
+	if m, syn, err := r.BuildOrSynthesize(); err != nil || m == nil || syn == nil {
+		t.Errorf("missing Repair: want a synthesized machine, got machine=%v synthesis=%v err=%v", m != nil, syn != nil, err)
 	}
 }

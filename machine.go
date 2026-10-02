@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -48,6 +49,12 @@ func (m *Machine) NewState() State {
 // This is a single table lookup — O(1).
 // Panics if the event name is unknown.
 //
+// The input must be a state of this machine (see EffectFunc): one from NewState, Apply,
+// Normalize or MergeProjection, or a state of a structurally identical machine. A table
+// machine does not check this, since the check would cost more than the lookup itself; an
+// input outside the machine selects an arbitrary table entry or panics with an index out
+// of range. A lazy machine checks the input and panics, naming it.
+//
 // A lazy machine (BuildCompositional) has no tables: Apply runs the event's effect and
 // the repairs at call time, and panics if one returns something that is not a state of
 // this machine (see EffectFunc), naming the rule, the input state and the result.
@@ -63,6 +70,7 @@ func (m *Machine) Apply(s State, event string) State {
 		panic(fmt.Sprintf("gsm: unknown event %q", event))
 	}
 	if m.lazy {
+		m.mustBeInput("Apply", s)
 		return m.lazyApply(m.eventDefs[ei], s)
 	}
 	return State{
@@ -72,10 +80,12 @@ func (m *Machine) Apply(s State, event string) State {
 }
 
 // Normalize returns the normal form of a state.
-// If the state is already valid, returns it unchanged. On a lazy machine it runs the
-// repairs and panics on a result outside the machine, as Apply does.
+// If the state is already valid, returns it unchanged. The input must be a state of this
+// machine, as for Apply. On a lazy machine it checks the input, runs the repairs, and
+// panics on an input or a result outside the machine, as Apply does.
 func (m *Machine) Normalize(s State) State {
 	if m.lazy {
+		m.mustBeInput("Normalize", s)
 		return m.lazyNormalize(s)
 	}
 	return State{
@@ -84,7 +94,8 @@ func (m *Machine) Normalize(s State) State {
 	}
 }
 
-// IsValid returns true if all invariants hold for the state.
+// IsValid returns true if all invariants hold for the state. The input must be a state of
+// this machine, as for Apply (IsValid does not check it on either kind of machine).
 func (m *Machine) IsValid(s State) bool {
 	if m.lazy {
 		return m.allHold(s)
@@ -101,6 +112,15 @@ func (m *Machine) allHold(s State) bool {
 		}
 	}
 	return true
+}
+
+// mustBeInput panics unless s, the input to op on a lazy machine, is a state of this
+// machine. The rules run on the input, so a foreign or out-of-domain input would be blamed
+// on the first rule result it produces, or (when no rule fires) returned unchanged.
+func (m *Machine) mustBeInput(op string, s State) {
+	if err := m.dom.notStateOf(s); err != nil {
+		panic(fmt.Sprintf("gsm: %s: input %s is not a state of machine %q: %v", op, s, m.name, err))
+	}
 }
 
 // mustBeState panics unless out, which a rule returned for input in, is a state of this
@@ -138,18 +158,34 @@ func (m *Machine) lazyApply(ev eventDef, s State) State {
 // MergeProjection overwrites, on state s, the target variables named in a shared projection
 // received from a parent registry, returning the merged state. A distributed target node
 // uses it to incorporate its parent's shared component without holding the parent's state or
-// the federated machine. Returns an error if the projection names a variable this machine
-// does not have. (Merging shared variables preserves local validity by the M1 guarantee, so
-// no re-normalization is required.)
+// the federated machine. (Merging shared variables preserves local validity by the M1
+// guarantee, so no re-normalization is required.)
+//
+// It returns s unchanged and an error if s is not a state of this machine (see EffectFunc),
+// if the projection names a variable this machine does not have, or if a value is outside
+// its variable's domain (out of range, or wider than the variable's bit field). A projection
+// arrives from another node, so its values are checked rather than written or truncated.
 func (m *Machine) MergeProjection(s State, p Projection) (State, error) {
-	for name, raw := range p.Shared {
+	if err := m.dom.notStateOf(s); err != nil {
+		return s, fmt.Errorf("gsm: MergeProjection: state %s is not a state of machine %q: %v", s, m.name, err)
+	}
+	names := make([]string, 0, len(p.Shared))
+	for name := range p.Shared {
+		names = append(names, name)
+	}
+	sort.Strings(names) // report the same variable first on every call
+	out := s
+	for _, name := range names {
 		v, ok := m.varByName(name)
 		if !ok {
 			return s, fmt.Errorf("gsm: projection variable %q is not in machine %q", name, m.name)
 		}
-		s = s.setRaw(v, raw)
+		if raw := p.Shared[name]; raw >= uint64(v.domain) {
+			return s, fmt.Errorf("gsm: projection value %s for %q is outside %s", v.rawLabel(raw), name, v.describeDomain())
+		}
+		out = out.setRaw(v, p.Shared[name])
 	}
-	return s, nil
+	return out, nil
 }
 
 func (m *Machine) varByName(name string) (Var, bool) {

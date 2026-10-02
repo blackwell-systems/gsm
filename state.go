@@ -206,8 +206,8 @@ func (d *domainCheck) ruleError(machine, kind, name, part string, in, out State)
 	if err == nil {
 		return nil
 	}
-	return &resultError{fmt.Sprintf("gsm: %s %q %s on %s returned %s, which is not a state of machine %q: %v",
-		kind, name, part, d.describeInput("state", in), out, machine, err)}
+	return &resultError{fmt.Sprintf("gsm: %s %q %s on state %s returned %s, which is not a state of machine %q: %v",
+		kind, name, part, in, out, machine, err)}
 }
 
 // resultError is the error for a rule result that is not a state of the machine, so a
@@ -215,16 +215,6 @@ func (d *domainCheck) ruleError(machine, kind, name, part string, in, out State)
 type resultError struct{ msg string }
 
 func (e *resultError) Error() string { return e.msg }
-
-// describeInput renders a rule's input for an error message. An input that is itself not
-// a state of the machine (a foreign state passed to a lazy Apply, say) is labeled as such,
-// so the message does not present it as one of this machine's states.
-func (d *domainCheck) describeInput(what string, in State) string {
-	if err := d.notStateOf(in); err != nil {
-		return fmt.Sprintf("input %s, which is itself not a state of this machine (%v),", in, err)
-	}
-	return what + " " + in.String()
-}
 
 // imageError reports a morphism Map or Resolver (what) that returned, for target state dst,
 // something that is not a state of the target registry, or returns nil. what is called only
@@ -234,8 +224,8 @@ func (d *domainCheck) imageError(what func() string, target string, dst, out Sta
 	if err == nil {
 		return nil
 	}
-	return &resultError{fmt.Sprintf("gsm: %s on %s returned %s, which is not a state of %q: %v",
-		what(), d.describeInput("target state", dst), out, target, err)}
+	return &resultError{fmt.Sprintf("gsm: %s on target state %s returned %s, which is not a state of %q: %v",
+		what(), dst, out, target, err)}
 }
 
 // ID returns the packed integer, usable as a table index.
