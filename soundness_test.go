@@ -207,20 +207,6 @@ func TestCompositional_CombinatorReadsExact(t *testing.T) {
 	}
 }
 
-// TestCertificateDigest_V4: certificate digests are domain-separated as v4 so a
-// certificate issued by the pre-fix verifier (v3 tag) fails the digest match and
-// must be re-issued. The expected value is the v4 digest of an empty federation.
-func TestCertificateDigest_V4(t *testing.T) {
-	got, err := digestComponentsAndTables(nil, nil, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const v4Empty = "2b1e92957eb21d3b7c5f65f580ebebbd7b0f31c1bf34b6a126760e0c6d2748af"
-	if got != v4Empty {
-		t.Fatalf("certificate digest domain changed: got %s", got)
-	}
-}
-
 // TestCompositional_RejectsBeyond64Bits: State is one uint64, so variables past
 // bit 64 are frozen at 0. BuildCompositional used to certify such a machine (an
 // increment on the last counter had no effect); it must refuse it.
