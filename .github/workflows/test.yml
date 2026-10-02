@@ -48,6 +48,56 @@ jobs:
         files: ./coverage.txt
         fail_ci_if_error: false
 
+  oracles:
+    # The extracted Coq checkers, built from a pinned proof commit in a
+    # digest-pinned image and hash-checked. GSM_REQUIRE_ORACLES=1 makes every
+    # oracle test and the differential cross-check required: a missing checker
+    # fails the run instead of skipping. See .github/oracle/README.md.
+    name: Oracle cross-check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Read pins
+      run: cat .github/oracle/pins.env >> "$GITHUB_ENV"
+
+    - name: Checkout the proof at the pinned commit
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.NC_REPO }}
+        ref: ${{ env.NC_COMMIT }}
+        path: nc
+
+    - name: Build the extracted checkers
+      run: bash nc/coq/extraction/ci-build.sh "$ROCQ_IMAGE"
+
+    - name: Verify pinned hashes
+      run: |
+        cd nc/coq/extraction
+        sha256sum -c "$GITHUB_WORKSPACE/.github/oracle/SHA256SUMS"
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+
+    - name: Oracle tests and differential cross-check
+      env:
+        GSM_REQUIRE_ORACLES: '1'
+        GSM_CONVERGENCE_CHECKER: ${{ github.workspace }}/nc/coq/extraction/checker
+        GSM_AST_CHECKER: ${{ github.workspace }}/nc/coq/extraction/astchecker
+        GSM_ORACLE_REPORT: ${{ github.workspace }}/oracle-report.txt
+      run: go test -count=1 .
+
+    - name: Differential summary
+      if: always()
+      run: |
+        if [ -f oracle-report.txt ]; then
+          { echo '### Differential cross-check'; echo '```'; cat oracle-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
