@@ -144,10 +144,10 @@ certificate asserts is re-derived when it is used:
 
 The tables and ports address variables, and replay addresses events, by name. Every path that
 builds, certifies, or exports therefore rejects a registry that declares two events, or two
-variables, with the same name. A registry that a rule closure changes while it is being verified
-is rejected too, so a declaration cannot slip in after the check. (`Synthesis.Machine` is the
-machine as synthesized: it is built from a snapshot taken when `Synthesize` returns, so a later
-declaration does not reach it.)
+variables, with the same name. `Build`, `BuildCompositional` and `Synthesize` also reject a
+registry that a rule closure changes while they verify it, so a declaration cannot slip in after
+their check. (`Synthesis.Machine` is the machine as synthesized: it is built from a snapshot taken
+when `Synthesize` returns, so a later declaration does not reach it.)
 
 The recorded verdict (`Certificate.Report`) is informational. These re-checks are gsm's Go code:
 they remove trust in stored results, not in the Go verifier. An extracted federation oracle and a
