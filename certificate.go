@@ -352,35 +352,49 @@ func (f *Federation) extractTables() ([]MorphismTable, error) {
 		if len(edges) == 0 {
 			continue
 		}
+		var t MorphismTable
+		var err error
 		if resolver, ok := f.resolvers[target]; ok {
-			tables = append(tables, extractResolverTable(target, resolver, edges))
+			t, err = extractResolverTable(target, resolver, edges)
 		} else {
-			tables = append(tables, extractEdgeTable(edges[0]))
+			t, err = extractEdgeTable(edges[0])
 		}
+		if err != nil {
+			return nil, err
+		}
+		tables = append(tables, t)
 	}
 	return tables, nil
 }
 
-// extractEdgeTable reifies a single-source morphism.
-func extractEdgeTable(e edgeDef) MorphismTable {
+// extractEdgeTable reifies a single-source morphism. It returns an error if an image is not
+// a state of the target (domainCheck): the closure may be an embedded sub's, which
+// Federation.Build does not otherwise run, and the table must not record a value outside a
+// variable's range (or read one from a state of another layout).
+func extractEdgeTable(e edgeDef) (MorphismTable, error) {
 	dstRep := representativeTarget(e.dst)
+	dom := newDomainCheck(e.dst.vars)
 	t := MorphismTable{Target: e.dst.name, Sources: []string{e.src.name}}
 	for _, v := range e.shared {
 		t.Shared = append(t.Shared, v.name)
 	}
 	for _, sa := range e.src.validStates() {
 		img := e.mapFn(sa, dstRep)
+		if err := dom.imageError(e.describe, e.dst.name, dstRep, img); err != nil {
+			return MorphismTable{}, err
+		}
 		row := TableRow{SourceIDs: []uint64{sa.packed}}
 		for _, v := range e.shared {
 			row.Values = append(row.Values, img.getRaw(v))
 		}
 		t.Rows = append(t.Rows, row)
 	}
-	return t
+	return t, nil
 }
 
-// extractResolverTable reifies a multi-source resolver over every valid source combination.
-func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) MorphismTable {
+// extractResolverTable reifies a multi-source resolver over every valid source combination,
+// checking each merge as extractEdgeTable checks each image.
+func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) (MorphismTable, error) {
 	sources, sharedVars := resolverInputs(edges)
 	t := MorphismTable{Target: target.name}
 	for _, s := range sources {
@@ -393,12 +407,11 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 	for i, s := range sources {
 		srcValids[i] = s.validStates()
 		if len(srcValids[i]) == 0 {
-			return t // a source with no valid states leaves the table empty
+			return t, nil // a source with no valid states leaves the table empty
 		}
 	}
 	dstRep := representativeTarget(target)
-	// The callback never returns an error (it only records rows), so forEachCombo returns nil here;
-	// check it anyway to keep the error explicitly handled.
+	dom := newDomainCheck(target.vars)
 	if err := forEachCombo(srcValids, func(cs []State) error {
 		combo := make(map[string]State, len(sources))
 		ids := make([]uint64, len(sources))
@@ -407,6 +420,9 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 			ids[k] = cs[k].packed
 		}
 		merged := resolver(dstRep, combo)
+		if err := dom.imageError(resolverName(target.name), target.name, dstRep, merged); err != nil {
+			return err
+		}
 		row := TableRow{SourceIDs: ids}
 		for _, v := range sharedVars {
 			row.Values = append(row.Values, merged.getRaw(v))
@@ -414,9 +430,9 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 		t.Rows = append(t.Rows, row)
 		return nil
 	}); err != nil {
-		return t
+		return MorphismTable{}, err
 	}
-	return t
+	return t, nil
 }
 
 // Verify is the independent, differential re-checker a consumer runs on a certificate it received,

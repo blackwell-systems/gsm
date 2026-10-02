@@ -120,7 +120,7 @@ func (f *Federation) verifyEdge(e edgeDef) error {
 				return err
 			}
 			// Well-formedness: Map must overwrite only Shared() variables.
-			for _, v := range e.dst.vars {
+			for _, v := range dom.vars {
 				if !sharedIdx[v.index] && sb2.getRaw(v) != sb.getRaw(v) {
 					return fmt.Errorf("gsm: morphism %s→%s Map modifies non-shared variable %q; "+
 						"Map may only overwrite variables declared in Shared()", e.src.name, e.dst.name, v.name)
@@ -208,7 +208,7 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 				return err
 			}
 			// Well-formedness: the resolver may write only shared variables.
-			for _, v := range target.vars {
+			for _, v := range dom.vars {
 				if !sharedIdx[v.index] && merged.getRaw(v) != dst.getRaw(v) {
 					return fmt.Errorf("gsm: resolver for %q writes non-shared variable %q; "+
 						"a resolver may only set variables declared Shared() on the incoming morphisms", target.name, v.name)
@@ -218,7 +218,7 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 			// the target's (local) state.
 			cur := make(map[int]uint64, len(sharedIdx))
 			for vi := range sharedIdx {
-				cur[vi] = merged.getRaw(target.vars[vi])
+				cur[vi] = merged.getRaw(dom.vars[vi])
 			}
 			if di == 0 {
 				refShared = cur
@@ -283,28 +283,38 @@ func (f *Federation) verifyMonotone() error {
 		points := cartesianStates(srcValids)
 		resolver := f.resolvers[target]
 		dst0 := representativeTarget(target) // fixed valid target; shared image is source-determined
-		// shared image (raw values of shared vars) for a source combination.
-		image := func(combo []State) []uint64 {
+		dom := newDomainCheck(target.vars)
+		// shared image (raw values of shared vars) for a source combination. The images are
+		// computed once per combination and checked to be states of the target: an embedded
+		// sub's closures are not run by verify, so this may be the first time they are.
+		images := make([][]uint64, len(points))
+		for k, combo := range points {
 			var out State
+			var err error
 			if resolver != nil {
 				m := make(map[string]State, len(sources))
 				for i, s := range sources {
 					m[s.name] = combo[i]
 				}
 				out = resolver(dst0, m)
+				err = dom.imageError(resolverName(target.name), target.name, dst0, out)
 			} else {
 				out = edges[0].mapFn(combo[0], dst0)
+				err = dom.imageError(edges[0].describe, target.name, dst0, out)
+			}
+			if err != nil {
+				return err
 			}
 			raw := make([]uint64, len(sharedVars))
 			for i, v := range sharedVars {
 				raw[i] = out.getRaw(v)
 			}
-			return raw
+			images[k] = raw
 		}
 
 		for a := range points {
 			for b := range points {
-				if pointsLE(points[a], points[b]) && !rawLE(image(points[a]), image(points[b])) {
+				if pointsLE(points[a], points[b]) && !rawLE(images[a], images[b]) {
 					return fmt.Errorf("gsm: repair for %q is not monotone — cyclic federations require "+
 						"monotone morphisms/resolvers (a non-monotone repair, e.g. negation, cannot converge "+
 						"on cycles; see the Monotone Convergence theorem). Use an acyclic network instead", target.name)

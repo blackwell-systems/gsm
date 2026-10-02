@@ -1,6 +1,9 @@
 package gsm
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // maxStateSpace is the default ceiling on enumerable states.
 const maxStateSpace = 1 << 20 // ~1M states
@@ -33,6 +36,24 @@ type Report struct {
 	// happens before WFC and CC run, so neither was evaluated and WFC/CC are false
 	// for that reason, not because either check failed.
 	FootprintViolation string
+
+	// DomainViolation is non-empty when the build stopped because a rule (an event's
+	// effect or an invariant's repair) returned something that is not a state of the
+	// machine; it holds the error. Verification stopped at that rule, so WFC and CC are
+	// false: the machine was not certified, whatever had been checked before.
+	DomainViolation string
+}
+
+// noteDomainViolation records err in the report when it is a rule result outside the
+// machine (resultError), replacing any footprint violation the same error was filed as.
+func (r *Report) noteDomainViolation(err error) {
+	var re *resultError
+	if r == nil || !errors.As(err, &re) {
+		return
+	}
+	r.DomainViolation = err.Error()
+	r.FootprintViolation = ""
+	r.WFC, r.CC = false, false
 }
 
 // CCFailure describes a specific CC violation.
@@ -56,6 +77,14 @@ func (r *Report) String() string {
 	s += fmt.Sprintf("  Events: %d\n", r.EventCount)
 	s += "\n"
 
+	if r.DomainViolation != "" {
+		// The build stopped at a rule whose result is outside the machine.
+		s += "  Rule results: FAIL\n"
+		s += fmt.Sprintf("    %s\n", r.DomainViolation)
+		s += "  WFC: not certified (a rule result is not a state of the machine)\n"
+		s += "  CC (Compensation Commutativity): not certified (a rule result is not a state of the machine)\n"
+		return s
+	}
 	if r.FootprintViolation != "" {
 		// The build stopped before WFC and CC ran; report the cause, not a WFC failure.
 		s += "  Footprint conformance: FAIL\n"
@@ -118,7 +147,7 @@ var buildObserver func(r *Registry, m *Machine, rep *Report, err error)
 // convergence claim about the component. Nothing that certifies convergence skips CC: certified
 // components embedded with EmbedCertified are rebuilt with Build, so a certificate's verdict is
 // re-checked, never trusted.
-func (r *Registry) build(runCC bool) (_ *Machine, _ *Report, err error) {
+func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 	if err = r.checkNames(); err != nil {
 		return nil, nil, err
 	}
@@ -131,6 +160,7 @@ func (r *Registry) build(runCC bool) (_ *Machine, _ *Report, err error) {
 			if gerr := r.checkUnchanged(before); gerr != nil {
 				err = gerr
 			}
+			rep.noteDomainViolation(err)
 		}
 	}()
 	if r.totalBits > 20 {

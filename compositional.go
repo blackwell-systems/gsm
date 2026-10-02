@@ -1,6 +1,9 @@
 package gsm
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // Compositional (footprint-local) verification.
 //
@@ -109,6 +112,10 @@ func (r *Registry) buildComponents() []component {
 	for _, c := range byRoot {
 		out = append(out, *c)
 	}
+	// Map order is random; order components by their lowest variable index (every
+	// component has a variable, appended in index order) so verification, and so the
+	// first failure it reports, is the same on every run.
+	sort.Slice(out, func(i, j int) bool { return out[i].vars[0] < out[j].vars[0] })
 	return out
 }
 
@@ -138,7 +145,7 @@ func overlaps(a, b []int) bool {
 // invariant declares a footprint (Watches) and every event declares its writes
 // (Writes); the zero state is valid; and no single component exceeds
 // maxComponentBits.
-func (r *Registry) BuildCompositional() (_ *Machine, _ *Report, err error) {
+func (r *Registry) BuildCompositional() (_ *Machine, rep *Report, err error) {
 	if err = r.checkNames(); err != nil {
 		return nil, nil, err
 	}
@@ -151,6 +158,7 @@ func (r *Registry) BuildCompositional() (_ *Machine, _ *Report, err error) {
 			if gerr := r.checkUnchanged(before); gerr != nil {
 				err = gerr
 			}
+			rep.noteDomainViolation(err)
 		}
 	}()
 	// State packs every variable into one uint64. A variable placed past bit 64

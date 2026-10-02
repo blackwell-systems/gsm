@@ -51,9 +51,12 @@ func (m *Machine) NewState() State {
 // A lazy machine (BuildCompositional) has no tables: Apply runs the event's effect and
 // the repairs at call time, and panics if one returns something that is not a state of
 // this machine (see EffectFunc), naming the rule, the input state and the result.
-// BuildCompositional checked every result on each component's states, so this fires only
-// for a closure whose behavior differs at runtime (for example, one that reads mutable
-// outside data). The check costs one comparison per variable per closure call.
+// BuildCompositional checked the results only on the states it enumerates (each
+// component's states with the other variables at zero, and the footprint check's one- and
+// two-variable perturbations of them), so a closure that goes wrong elsewhere, for
+// example one that depends on three outside variables jointly or on mutable outside data,
+// is caught here. The check costs one mask test plus one comparison per variable whose
+// domain does not fill its bit field, per closure call.
 func (m *Machine) Apply(s State, event string) State {
 	ei, ok := m.events[event]
 	if !ok {

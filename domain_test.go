@@ -637,3 +637,170 @@ func TestDeclareDuringVerification_ReportedOverDomainError(t *testing.T) {
 		})
 	}
 }
+
+// TestEmbeddedResolverCheckedAtExtraction: an embedded sub's Resolver is not run by
+// verify (its target is trusted on the certificate) but its merges are extracted to
+// match the certificate; a merge that is not a state of the target is an error.
+func TestEmbeddedResolverCheckedAtExtraction(t *testing.T) {
+	a := NewRegistry("ra")
+	a.Bool("x")
+	b := NewRegistry("rb")
+	b.Bool("y")
+	dst := NewRegistry("rdst")
+	n := dst.Int("n", 0, 2)
+	keep := func(s, d State) State { return d }
+	bad := false
+	sub := NewFederation("rsub").
+		Morphism(a, dst).Shared(n).Map(keep).Add().
+		Morphism(b, dst).Shared(n).Map(keep).Add().
+		Resolve(dst, func(d State, _ map[string]State) State {
+			if bad {
+				return State{}
+			}
+			return d.SetInt(n, 2)
+		})
+	cert, err := sub.Certify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad = true
+	if msg := catchPanic(func() { _, _, err = NewFederation("outer").EmbedCertified(sub, cert).Build() }); msg != "" {
+		t.Fatalf("Federation.Build panicked: %s", msg)
+	}
+	if err == nil || !strings.Contains(err.Error(), `resolver for "rdst"`) || !strings.Contains(err.Error(), "not a state of") {
+		t.Fatalf("want an out-of-domain error naming the resolver, got: %v", err)
+	}
+}
+
+// TestMonotoneCheckImagesChecked: the monotonicity check computes images itself,
+// after verify (and, for a cycle inside an embedded sub, verify does not run the
+// Map at all), so it checks them. Here the Map goes wrong only on its last calls,
+// which the monotonicity check makes.
+func TestMonotoneCheckImagesChecked(t *testing.T) {
+	mk := func(leakFrom *int, calls *int) *Federation {
+		a := NewRegistry("A")
+		av := a.Int("v", 0, 2)
+		b := NewRegistry("B")
+		bv := b.Int("v", 0, 2)
+		return NewFederation("ring").AllowMonotoneCycles().
+			Morphism(a, b).Shared(bv).Map(func(src, d State) State {
+			*calls++
+			if *leakFrom >= 0 && *calls > *leakFrom {
+				return rawState(d, bv, 3)
+			}
+			return d.SetInt(bv, src.GetInt(av))
+		}).Add().
+			Morphism(b, a).Shared(av).Map(func(src, d State) State { return d.SetInt(av, src.GetInt(bv)) }).Add()
+	}
+	leakFrom, calls := -1, 0
+	if _, _, err := mk(&leakFrom, &calls).Build(); err != nil {
+		t.Fatal(err)
+	}
+	// The monotonicity check is the last phase and computes one image per valid source
+	// state of A (3); leak on exactly those calls.
+	leakFrom, calls = calls-3, 0
+	var err error
+	if msg := catchPanic(func() { _, _, err = mk(&leakFrom, &calls).Build() }); msg != "" {
+		t.Fatalf("Federation.Build panicked: %s", msg)
+	}
+	if err == nil || !strings.Contains(err.Error(), "A→B") || !strings.Contains(err.Error(), "not a state of") {
+		t.Fatalf("want an out-of-domain error from the monotonicity check naming A→B, got: %v", err)
+	}
+}
+
+// TestForeignInputLabeled: when a lazy machine is given a state of another machine,
+// the error does not present that input as one of this machine's states.
+func TestForeignInputLabeled(t *testing.T) {
+	r := NewRegistry("label")
+	n := r.Int("n", 0, 2)
+	r.Event("set2").Writes(n).Apply(func(s State) State { return s.SetInt(n, 2) }).Add()
+	m, _, err := r.BuildCompositional()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := foreignMachine(t, "wider", func(r *Registry) { r.Int("n", 0, 3) })
+	msg := catchPanic(func() { m.Apply(w.NewState(), "set2") })
+	if !strings.Contains(msg, "on input {n=0}, which is itself not a state of this machine") {
+		t.Fatalf("the foreign input is not labeled as such: %q", msg)
+	}
+}
+
+// TestDomainViolation_ReportNotCertified: a domain rejection leaves the report
+// uncertified even when WFC had passed before the bad effect was reached.
+func TestDomainViolation_ReportNotCertified(t *testing.T) {
+	r := capped("dv_report", repairToZero, func(s State, n Var) State { return rawState(s, n, 3) })
+	_, rep, err := r.Build()
+	if err == nil {
+		t.Fatal("Build accepted")
+	}
+	if rep.DomainViolation != err.Error() || rep.WFC || rep.CC {
+		t.Fatalf("want DomainViolation = the error and WFC, CC false; got %q, WFC=%v, CC=%v",
+			rep.DomainViolation, rep.WFC, rep.CC)
+	}
+}
+
+// resolverRing: A and C feed B through a Resolver (max of the two), and B feeds A,
+// so the network is a monotone cycle. leakFrom/calls make the Resolver go wrong
+// only on calls past leakFrom.
+func resolverRing(leakFrom, calls *int, declare bool) (*Federation, *Registry) {
+	a := NewRegistry("A")
+	av := a.Int("v", 0, 2)
+	b := NewRegistry("B")
+	bv := b.Int("v", 0, 2)
+	c := NewRegistry("C")
+	cv := c.Int("v", 0, 2)
+	keep := func(s, d State) State { return d }
+	f := NewFederation("rring").AllowMonotoneCycles().
+		Morphism(a, b).Shared(bv).Map(keep).Add().
+		Morphism(c, b).Shared(bv).Map(keep).Add().
+		Morphism(b, a).Shared(av).Map(func(src, d State) State { return d.SetInt(av, src.GetInt(bv)) }).Add().
+		Resolve(b, func(d State, src map[string]State) State {
+			*calls++
+			if declare && *calls == 1 {
+				b.Bool("late")
+			}
+			if *leakFrom >= 0 && *calls > *leakFrom {
+				return rawState(d, bv, 3)
+			}
+			mx := src["A"].GetInt(av)
+			if v := src["C"].GetInt(cv); v > mx {
+				mx = v
+			}
+			return d.SetInt(bv, mx)
+		})
+	return f, b
+}
+
+// TestMonotoneCheckResolverImagesChecked: as TestMonotoneCheckImagesChecked, for a
+// Resolver (one merge per source combination: 3 x 3).
+func TestMonotoneCheckResolverImagesChecked(t *testing.T) {
+	leakFrom, calls := -1, 0
+	f, _ := resolverRing(&leakFrom, &calls, false)
+	if _, _, err := f.Build(); err != nil {
+		t.Fatal(err)
+	}
+	leakFrom, calls = calls-9, 0
+	f, _ = resolverRing(&leakFrom, &calls, false)
+	var err error
+	if msg := catchPanic(func() { _, _, err = f.Build() }); msg != "" {
+		t.Fatalf("Federation.Build panicked: %s", msg)
+	}
+	if err == nil || !strings.Contains(err.Error(), `resolver for "B"`) || !strings.Contains(err.Error(), "not a state of") {
+		t.Fatalf("want an out-of-domain error from the monotonicity check naming B's resolver, got: %v", err)
+	}
+}
+
+// TestResolverDeclaresMidRun: a Resolver that declares a variable on its target while
+// it is verified makes Federation.Build report the change, without panicking on the
+// variable the target did not have when verification began.
+func TestResolverDeclaresMidRun(t *testing.T) {
+	leakFrom, calls := -1, 0
+	f, _ := resolverRing(&leakFrom, &calls, true)
+	var err error
+	if msg := catchPanic(func() { _, _, err = f.Build() }); msg != "" {
+		t.Fatalf("Federation.Build panicked: %s", msg)
+	}
+	if err == nil || !strings.Contains(err.Error(), `registry "B" was changed while it was being verified`) {
+		t.Fatalf("want the mid-run change reported, got: %v", err)
+	}
+}
