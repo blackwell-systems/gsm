@@ -138,11 +138,21 @@ func overlaps(a, b []int) bool {
 // invariant declares a footprint (Watches) and every event declares its writes
 // (Writes); the zero state is valid; and no single component exceeds
 // maxComponentBits.
-func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
-	if err := r.checkNames(); err != nil {
+func (r *Registry) BuildCompositional() (_ *Machine, _ *Report, err error) {
+	if err = r.checkNames(); err != nil {
 		return nil, nil, err
 	}
 	before := r.shape()
+	// A rule that declares on the registry mid-run can also make a later check fail (a
+	// result built after a declaration has the new variable list, so it is not a state of
+	// the machine being verified). The change is the cause, so report it instead.
+	defer func() {
+		if err != nil {
+			if gerr := r.checkUnchanged(before); gerr != nil {
+				err = gerr
+			}
+		}
+	}()
 	// State packs every variable into one uint64. A variable placed past bit 64
 	// reads as 0 and ignores writes, so a machine that wide cannot be represented,
 	// let alone certified (it used to be certified with those variables frozen).

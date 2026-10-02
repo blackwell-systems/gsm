@@ -603,3 +603,37 @@ func TestFedMachine_EveryRuntimeImageChecked(t *testing.T) {
 		t.Errorf("FedMachine did not reject the resolver's out-of-domain merge: %q", msg)
 	}
 }
+
+// TestDeclareDuringVerification_ReportedOverDomainError: an effect that declares a
+// variable on its own registry mid-run makes the states built afterwards carry the
+// new variable list, so a later result fails the domain check. The declaration is
+// the cause, so every verification path reports it, not the domain error.
+func TestDeclareDuringVerification_ReportedOverDomainError(t *testing.T) {
+	mk := func() *Registry {
+		r := NewRegistry("mid")
+		x := r.Int("x", 0, 2)
+		declared := false
+		r.Event("a").Writes(x).Apply(func(s State) State {
+			if !declared {
+				declared = true
+				r.Bool("late")
+			}
+			return s
+		}).Add()
+		r.Event("b").Writes(x).Apply(func(s State) State { return s.SetInt(x, 1) }).Add()
+		return r
+	}
+	for path, run := range map[string]func(r *Registry) error{
+		"Build":              func(r *Registry) error { _, _, err := r.Build(); return err },
+		"BuildCompositional": func(r *Registry) error { _, _, err := r.BuildCompositional(); return err },
+		"Synthesize":         func(r *Registry) error { _, err := r.Synthesize(); return err },
+	} {
+		t.Run(path, func(t *testing.T) {
+			var err error
+			if msg := catchPanic(func() { err = run(mk()) }); msg != "" {
+				t.Fatalf("panicked: %s", msg)
+			}
+			wantModified(t, err)
+		})
+	}
+}
