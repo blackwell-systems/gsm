@@ -91,23 +91,38 @@ type certifiedEmbed struct {
 // here are the shared variables an outer morphism may later write into the subsystem; each must be
 // free (no internal morphism writes it), which Certify checks.
 func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
-	_, rep, err := f.Build()
+	// Build runs morphism closures after it verifies the components, and so does table
+	// extraction. Certify works on a copy of the federation's wiring, so a closure that adds a
+	// morphism, component, or resolver to f there cannot get it into the certificate, and it
+	// compares each component's declarations before Build with those it digests, so a closure
+	// that declares on a component cannot either.
+	g := f.clone()
+	before := make([]registryShape, len(g.comps))
+	for i, r := range g.comps {
+		before[i] = r.shape()
+	}
+	_, rep, err := g.Build()
 	if err != nil {
 		return nil, err
 	}
-	refs, err := f.validateInputPorts(inputPorts)
+	refs, err := g.validateInputPorts(inputPorts)
 	if err != nil {
 		return nil, err
 	}
-	tables, err := f.extractTables()
+	tables, err := g.extractTables()
 	if err != nil {
 		return nil, err
 	}
-	dig, err := digestComponentsAndTables(f.comps, tables, f.allowCycles, refs)
+	for i, r := range g.comps {
+		if err := r.checkUnchanged(before[i]); err != nil {
+			return nil, err
+		}
+	}
+	dig, err := digestComponentsAndTables(g.comps, tables, g.allowCycles, refs)
 	if err != nil {
 		return nil, err
 	}
-	return &Certificate{Name: f.name, Digest: dig, Report: rep, Tables: tables, Monotone: f.allowCycles, InputPorts: refs}, nil
+	return &Certificate{Name: g.name, Digest: dig, Report: rep, Tables: tables, Monotone: g.allowCycles, InputPorts: refs}, nil
 }
 
 // validateInputPorts checks each declared input port names a component of this federation and is
