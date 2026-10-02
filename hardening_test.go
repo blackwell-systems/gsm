@@ -124,15 +124,18 @@ func TestPolicyDigest_BindsNames(t *testing.T) {
 		"enum label":        mk("go", "n", "z", false),
 		"independent pairs": mk("go", "n", "y", true),
 	} {
-		d, err := r.PolicyDigest()
-		if err != nil {
-			t.Fatal(err)
+		d, derr := r.PolicyDigest()
+		if derr != nil {
+			t.Fatal(derr)
 		}
 		if d == base {
 			t.Errorf("registries differing only in %s have the same policy digest", name)
 		}
 	}
-	again, _ := mk("go", "n", "y", false).PolicyDigest()
+	again, err := mk("go", "n", "y", false).PolicyDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if again != base {
 		t.Error("the same registry digests differently")
 	}

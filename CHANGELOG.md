@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Behaviour change: policy and certificate digests bind names and declared pairs.**
+  `PolicyDigest` and certificate digests covered the rules in the oracle's positional format only,
+  so two registries that differed only in an event name, a variable name or kind, an enum label,
+  or the declared `Independent` pairs had the same digest, although replay, projections,
+  certificate tables, input ports, `Set` and the CC check address those. The new
+  `Registry.PolicyNames` serializes them, and both digests now cover it. `PolicyBytes` (the
+  oracle's input) is unchanged. Every policy digest and certificate digest changes: certificates
+  issued earlier no longer match and must be re-issued with `Certify`. Per the development
+  versioning policy the version tags (`gsm-policy-v1`, `gsm-fedcert-v3`) are unchanged. The
+  test certificate `testdata/payship-cert-v0.11.0.json` has its `Digest` recomputed (its other
+  fields are as v0.11.0 issued them). `CERTIFICATE-DESIGN.md` states what the digest covers: a
+  morphism or resolver closure is bound only through its table, at one representative target.
 - **The extracted checkers decide exactly what `Build` checks.** Both oracles previously checked a
   different property, so the differential test had to excuse whole classes of disagreement. Now
   they check `Build`'s: repair terminates from every state (the rules oracle used to require it
@@ -36,6 +48,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PolicyBytes`, `PolicyDigest` and certificate digests are unchanged.
 
 ### Fixed
+- **Behaviour change: `FedMachine.Of` and `FedMachine.Apply` panic for a registry outside the
+  federation.** They used the lookup's zero value and acted on component 0. They now panic naming
+  the registry, as `Apply` does for an unknown event (`ApplyNamed` already returned an error).
+- **Behaviour change: `BuildCoordinated` rejects a coordination point that names no morphism.** It
+  ignored such a point and built the federation without the coordination the caller asked for.
+- **Behaviour change: an enum may not repeat a label.** `Set`, `TrySet` and the label sugar resolve
+  a label to its first index, so a repeated label was unreachable. `Build` and every other path
+  that checks names return `gsm: registry "r": enum "e" has duplicate label "l"`.
+- **Behaviour change: `Certify` checks an input port's variable by value.** It used the variable's
+  index only, so a `Var` of another registry declared the variable at that index of this one as a
+  port (or an index past the end passed). A port's variable must now be this registry's variable
+  (same name, kind, layout, range and labels).
+- **`DiagnoseCycle` analyzes the federation as called.** Like `Federation.Build`, it works on a
+  frozen copy and rejects a component that a morphism closure changed while it ran (it returned
+  a diagnostic about a different registry, with no error).
 - **A declared combinator rule could be rewritten through the caller's slice.** `Do(as...)`
   returned the caller's slice and `DeclEvent`, `DeclEventGuarded` and `DeclInvariant` kept it, and
   `And(ps...)`/`Or(ps...)` kept theirs, while write sets and footprints were computed once. Changing

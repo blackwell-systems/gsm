@@ -86,10 +86,18 @@ func (f *Federation) CoordinationPlan() []CoordinationPoint {
 func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *FedReport, error) {
 	remove := map[int]bool{}
 	for _, cp := range plan {
+		found := false
 		for ei, e := range f.edges {
 			if e.src.name == cp.Src && e.dst.name == cp.Dst {
 				remove[ei] = true
+				found = true
 			}
+		}
+		if !found {
+			// A point that matches nothing would leave the federation it was meant to
+			// coordinate unchanged, silently.
+			return nil, &FedReport{Name: f.name, Edges: len(f.edges)},
+				fmt.Errorf("gsm: coordination point %s names no morphism of federation %q", cp, f.name)
 		}
 	}
 	if len(remove) == 0 {

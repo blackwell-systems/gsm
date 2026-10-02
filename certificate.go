@@ -14,11 +14,15 @@ import (
 // with Build (so component convergence is re-checked, not trusted). A certificate is validated by
 // re-check, never trusted for its recorded verdict; see CERTIFICATE-DESIGN.md.
 //
-// The digest covers each component's serializable policy, the extracted morphism tables (see
-// MorphismTable), and the declared input ports, so it is tamper-complete: it changes if a component
-// rule, the wiring, a morphism's behavior, or the port declaration changes. A consumer can re-check
-// the federated conditions from the tables, independently of the producer's morphism closures, via
-// Verify.
+// The digest covers each component's name, serializable policy (PolicyBytes) and the names and
+// declared pairs its rules are addressed by (PolicyNames), the extracted morphism tables (see
+// MorphismTable), the declared input ports, and the cycle opt-in. It is tamper-complete over those
+// declarations: it changes if a component rule, a variable, event or enum-label name, a declared
+// Independent pair, the wiring, a recorded morphism image, or the port declaration changes. A
+// morphism or resolver closure is bound only through its table, which records its images at one
+// representative target, so a closure that differs only at other targets digests the same (it is
+// caught at runtime by the FedMachine's image check). A consumer can re-check the federated
+// conditions from the tables, independently of the producer's morphism closures, via Verify.
 //
 // Ports (assume-guarantee, Theorem 2' of the categorical note): a certified subsystem may declare
 // input ports at Certify time (Certify(ports...)). An input port is a shared variable that no
@@ -36,7 +40,7 @@ import (
 // Coq first).
 type Certificate struct {
 	Name       string          // the certified sub-federation's name
-	Digest     string          // covers component policies, morphism tables, and input ports (tamper-complete)
+	Digest     string          // covers component rules, names and pairs, morphism tables, and input ports
 	Report     *FedReport      // the verdict from the sub's own Build
 	Tables     []MorphismTable // the morphisms and resolvers in extensional form (see MorphismTable)
 	Monotone   bool            // whether the sub used AllowMonotoneCycles
@@ -147,6 +151,12 @@ func (f *Federation) validateInputPorts(ports []Port) ([]PortRef, error) {
 	for _, p := range ports {
 		if _, ok := f.idx[p.Registry]; !ok {
 			return nil, fmt.Errorf("gsm: input port %s.%s names a registry not in federation %q", p.Registry.name, p.Var.name, f.name)
+		}
+		// The variable must be this registry's, by value (sameVar), not merely an index into
+		// it: a Var of another registry would otherwise free, or seal, whichever variable
+		// sits at its index here.
+		if p.Var.index < 0 || p.Var.index >= len(p.Registry.vars) || !sameVar(p.Registry.vars[p.Var.index], p.Var) {
+			return nil, fmt.Errorf("gsm: input port %s.%s is not a variable of registry %q", p.Registry.name, p.Var.name, p.Registry.name)
 		}
 		if written[p.Registry][p.Var.index] {
 			return nil, fmt.Errorf("gsm: input port %s.%s is written by an internal morphism; an input port must "+
@@ -306,8 +316,13 @@ func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowC
 		if err != nil {
 			return "", fmt.Errorf("gsm: component %q: %w", r.name, err)
 		}
+		names, err := r.PolicyNames()
+		if err != nil {
+			return "", fmt.Errorf("gsm: component %q: %w", r.name, err)
+		}
 		h.Write([]byte(fmt.Sprintf("comp %s\n", r.name)))
 		h.Write(b)
+		h.Write(names)
 		h.Write([]byte{'\n'})
 	}
 
