@@ -564,7 +564,7 @@ This library implements both the **single-registry governance model** (Section 3
 - **WFC** (§3) = well-founded measure on compensation depth
 - **CC** (§3) = compensation commutativity (CC1 + CC2)
 - **Convergence theorem** (§5) = WFC + CC ⟹ unique normal forms (via Newman's Lemma)
-- **Verification calculus** (§10) = footprint optimization + decomposable repair (in `verify.go`)
+- **Verification calculus** (§10) = footprint components + decomposable repair (`BuildCompositional`, in `compositional.go` and `footprint.go`)
 - **Federation** (§8) = registry morphisms + the authority argument + the constructive normalizer ρ_Fed (`federation.go`: `Federation` / `FedMachine`)
 - **Multi-source resolution** (§8) = resolution operators (`Resolve`)
 - **Monotone cycles** (§8) = convergence on cyclic networks under monotone repair (`AllowMonotoneCycles`)
