@@ -291,3 +291,53 @@ func TestFederationBuild_VerifiesTheWiringAsCalled(t *testing.T) {
 		}
 	})
 }
+
+// TestFederationBuild_RejectsLaterComponentChanged: the changed component is not
+// the first one, so every component is compared, not only comps[0].
+func TestFederationBuild_RejectsLaterComponentChanged(t *testing.T) {
+	src := NewRegistry("src")
+	flag := src.Bool("flag")
+	src.DeclEvent("raise", Do(Set(flag, Lit(1))))
+	dst := NewRegistry("dst")
+	mir := dst.Bool("mirror")
+	dst.DeclEvent("noop", Do())
+	declared := false
+	f := NewFederation("fed").Morphism(src, dst).Shared(mir).
+		Map(func(s, d State) State {
+			if !declared {
+				declared = true
+				dst.DeclEvent("late", Do()) // dst is component 1
+			}
+			return d.setRaw(mir, s.getRaw(flag))
+		}).Add()
+	_, _, err := f.Build()
+	wantChanged(t, err, "dst")
+	declared = false
+	_, err = f.Certify()
+	wantChanged(t, err, "dst")
+}
+
+// TestCertificateVerify_RunsNoUserClosure pins why Certificate.Verify needs no
+// mid-run guard: a registry with any closure rule fails the digest before any of
+// its closures run, so Verify executes no user rule code.
+func TestCertificateVerify_RunsNoUserClosure(t *testing.T) {
+	r := NewRegistry("r")
+	x := r.Bool("x")
+	called := false
+	r.Invariant("i").Watches(x).Holds(func(s State) bool { called = true; return true }).
+		Repair(func(s State) State { called = true; return s }).Add()
+	r.Event("e").Writes(x).Apply(func(s State) State { called = true; return s }).Add()
+	c := &Certificate{Name: "c"}
+	if err := c.Verify(map[string]*Registry{"r": r}); err == nil || called {
+		t.Fatalf("closure rules: err=%v, closure called=%v", err, called)
+	}
+	// Combinator rules plus one closure-guarded event: also refused before running it.
+	r2 := NewRegistry("r2")
+	y := r2.Bool("y")
+	r2.DeclInvariant("i", Le(V(y), Lit(1)), Do(Set(y, Lit(1))))
+	r2.Event("g").Writes(y).Guard(func(s State) bool { called = true; return true }).
+		Apply(func(s State) State { called = true; return s }).Add()
+	if err := c.Verify(map[string]*Registry{"r2": r2}); err == nil || called {
+		t.Fatalf("mixed rules: err=%v, closure called=%v", err, called)
+	}
+}
