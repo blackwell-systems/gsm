@@ -90,21 +90,23 @@ func (m *Machine) allHold(s State) bool {
 	return true
 }
 
-func (m *Machine) clamp(s State) State {
-	for _, v := range m.vars {
-		raw := s.getRaw(v)
-		if max := uint64(v.domain - 1); raw > max {
-			s = s.setRaw(v, max)
-		}
+// mustBeState panics unless out, which a rule returned for input in, is a state of this
+// machine (notStateOf). BuildCompositional checked the rules on every state of each
+// component, but a lazy machine runs them again at Apply time on states it never saw, so
+// the result is checked here, where it is computed. Returns out with this machine's
+// variable list.
+func (m *Machine) mustBeState(kind, name, part string, in, out State) State {
+	if err := ruleResultError(m.name, m.vars, kind, name, part, in, out); err != nil {
+		panic(err.Error())
 	}
-	return s
+	return State{packed: out.packed, vars: m.vars}
 }
 
 func (m *Machine) lazyNormalize(s State) State {
 	for !m.allHold(s) {
 		for _, inv := range m.invariants {
 			if !inv.check(s) {
-				s = inv.repair(s)
+				s = m.mustBeState("invariant", inv.name, "repair", s, inv.repair(s))
 				break
 			}
 		}
@@ -115,9 +117,9 @@ func (m *Machine) lazyNormalize(s State) State {
 func (m *Machine) lazyApply(ev eventDef, s State) State {
 	after := s
 	if ev.guard == nil || ev.guard(s) {
-		after = ev.effect(s)
+		after = m.mustBeState("event", ev.name, "effect", s, ev.effect(s))
 	}
-	return m.lazyNormalize(m.clamp(after))
+	return m.lazyNormalize(after)
 }
 
 // MergeProjection overwrites, on state s, the target variables named in a shared projection

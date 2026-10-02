@@ -163,7 +163,10 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 	}
 
 	// Phase 2: Compute step tables
-	step := r.computeStepTables(packedCount, valid, nf, mkState)
+	step, err := r.computeStepTables(packedCount, valid, nf, mkState)
+	if err != nil {
+		return nil, report, err
+	}
 
 	// Phase 3: Verify CC (skipped when a certificate already attests convergence).
 	if runCC {
@@ -199,6 +202,7 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool, mkState func(uint64) State, report *Report) ([]uint64, error) {
 	nf := make([]uint64, packedCount)
 	maxRepair := 0
+	var err error
 
 	for i := 0; i < packedCount; i++ {
 		if !valid[i] {
@@ -212,7 +216,9 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 		seen[s.packed] = true
 
 		for !r.allInvariantsHold(s) {
-			s = r.applyFirstRepair(s)
+			if s, err = r.applyFirstRepair(s); err != nil {
+				return nil, err
+			}
 			depth++
 
 			// Detect non-termination: if we've seen this state before, we have a repair cycle.
@@ -247,20 +253,21 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 }
 
 // computeStepTables builds the Step[e][s] = NF(apply(e, s)) tables.
-func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) [][]uint64 {
+func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) ([][]uint64, error) {
 	step := make([][]uint64, len(r.events))
 	for ei, ev := range r.events {
 		step[ei] = make([]uint64, packedCount)
 		for i := 0; i < packedCount; i++ {
 			if valid[i] {
-				s := mkState(uint64(i))
-				after := r.applyEvent(ev, s)
-				after = r.clampState(after)
+				after, err := r.applyEvent(ev, mkState(uint64(i)))
+				if err != nil {
+					return nil, err
+				}
 				step[ei][i] = nf[after.packed]
 			}
 		}
 	}
-	return step
+	return step, nil
 }
 
 // verifyCC checks compensation commutativity for every event pair ccPairs selects,
@@ -327,6 +334,18 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][
 	return nil
 }
 
+// ruleResultError reports a rule (an event's effect or an invariant's repair) that returned,
+// for input state in, something that is not a state of machine (notStateOf), or returns nil.
+// kind is "event" or "invariant"; part names the closure ("effect", "repair").
+func ruleResultError(machine string, vars []Var, kind, name, part string, in, out State) error {
+	err := notStateOf(vars, out)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("gsm: %s %q %s on state %s returned %s, which is not a state of machine %q: %v",
+		kind, name, part, in, out, machine, err)
+}
+
 // allInvariantsHold checks V_R(s).
 func (r *Registry) allInvariantsHold(s State) bool {
 	for _, inv := range r.invariants {
@@ -337,36 +356,31 @@ func (r *Registry) allInvariantsHold(s State) bool {
 	return true
 }
 
-// applyFirstRepair fires the first violated invariant's repair (priority order).
-func (r *Registry) applyFirstRepair(s State) State {
+// applyFirstRepair fires the first violated invariant's repair (priority order). It
+// returns an error if the repair's result is not a state of this machine (notStateOf).
+func (r *Registry) applyFirstRepair(s State) (State, error) {
 	for _, inv := range r.invariants {
 		if !inv.check(s) {
-			return inv.repair(s)
+			return r.repairResult(inv, s)
 		}
 	}
-	return s
+	return s, nil
 }
 
-// applyEvent applies an event's effect (or no-op if guard fails).
-func (r *Registry) applyEvent(ev eventDef, s State) State {
+// repairResult runs inv's repair on s and checks the result is a state of this machine.
+func (r *Registry) repairResult(inv invariantDef, s State) (State, error) {
+	out := inv.repair(s)
+	return out, ruleResultError(r.name, r.vars, "invariant", inv.name, "repair", s, out)
+}
+
+// applyEvent applies an event's effect (or no-op if guard fails). It returns an error if
+// the effect's result is not a state of this machine (notStateOf).
+func (r *Registry) applyEvent(ev eventDef, s State) (State, error) {
 	if ev.guard != nil && !ev.guard(s) {
-		return s
+		return s, nil
 	}
-	return ev.effect(s)
-}
-
-// clampState ensures all variable values are within their domains.
-// This handles cases where arithmetic produces out-of-range values
-// before the bitpacking truncates them.
-func (r *Registry) clampState(s State) State {
-	for _, v := range r.vars {
-		raw := s.getRaw(v)
-		max := uint64(v.domain - 1)
-		if raw > max {
-			s = s.setRaw(v, max)
-		}
-	}
-	return s
+	out := ev.effect(s)
+	return out, ruleResultError(r.name, r.vars, "event", ev.name, "effect", s, out)
 }
 
 // isValidEncoding checks that all variable values in a packed ID

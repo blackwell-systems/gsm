@@ -124,6 +124,61 @@ func (s State) checkVar(v Var) {
 	}
 }
 
+// sameVar reports whether a and b declare the same variable: name, kind, position and
+// width in the packed encoding, domain, minimum and enum labels.
+func sameVar(a, b Var) bool {
+	if a.name != b.name || a.kind != b.kind || a.index != b.index || a.offset != b.offset ||
+		a.bits != b.bits || a.domain != b.domain || a.min != b.min || len(a.labels) != len(b.labels) {
+		return false
+	}
+	for i := range a.labels {
+		if a.labels[i] != b.labels[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// notStateOf returns why s is not a state of the machine whose variables are vars, or nil
+// when it is. Membership is by value, so it does not matter which Registry or Machine
+// produced s:
+//
+//   - s has the machine's variable schema: as many variables, each the same as the
+//     machine's at that position (sameVar). A State from another machine instance with an
+//     identical declaration list qualifies; one with a different list does not, because its
+//     packed value means something else under this machine's layout.
+//   - every variable's field holds a value inside its domain (an enum index below the label
+//     count, an Int within min..max, a Bool 0 or 1);
+//   - no bit is set outside the variables' fields.
+//
+// These are exactly the encodings Build enumerates, so a state passes iff Build's tables
+// have an entry for it.
+func notStateOf(vars []Var, s State) error {
+	if len(s.vars) != len(vars) {
+		return fmt.Errorf("it has %d variables, the machine has %d", len(s.vars), len(vars))
+	}
+	// Fast path: a state that shares the machine's variable slice has its schema.
+	if len(vars) > 0 && &s.vars[0] != &vars[0] {
+		for i := range vars {
+			if !sameVar(s.vars[i], vars[i]) {
+				return fmt.Errorf("its variable %d is %s, the machine's is %s", i, s.vars[i].describe(), vars[i].describe())
+			}
+		}
+	}
+	var used uint64
+	for _, v := range vars {
+		mask := uint64((1 << v.bits) - 1)
+		used |= mask << v.offset
+		if raw := (s.packed >> v.offset) & mask; raw >= uint64(v.domain) {
+			return fmt.Errorf("variable %q holds %s, outside %s", v.name, v.rawLabel(raw), v.describeDomain())
+		}
+	}
+	if extra := s.packed &^ used; extra != 0 {
+		return fmt.Errorf("it sets bits outside the machine's encoding (%#x)", extra)
+	}
+	return nil
+}
+
 // ID returns the packed integer, usable as a table index.
 func (s State) ID() uint64 { return s.packed }
 

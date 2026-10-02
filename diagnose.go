@@ -199,7 +199,11 @@ func (f *Federation) DiagnoseCycle() (*CycleDiagnostic, error) {
 		changed := false
 		for i := 0; i < k; i++ {
 			dst := cyc[(i+1)%k]
-			next := mach[dst].Normalize(edges[i].mapFn(state[cyc[i]], state[dst]))
+			img := edges[i].mapFn(state[cyc[i]], state[dst])
+			if err := imageResultError(edges[i].describe, f.comps[dst].name, f.comps[dst].vars, state[dst], img); err != nil {
+				return nil, err
+			}
+			next := mach[dst].Normalize(img)
 			if next.ID() != state[dst].ID() {
 				changed = true
 			}

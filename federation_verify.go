@@ -76,6 +76,24 @@ func (f *Federation) verify(subOf map[*Registry]int) error {
 
 // verifyEdge checks a single morphism: M1 validity-preservation, shared-only well-formedness,
 // and source-determinacy, by enumeration over valid source×target states.
+// imageResultError reports a morphism Map or Resolver (what) that returned, for target state
+// dst, something that is not a state of the target registry (notStateOf), or returns nil.
+// what is called only on failure, so callers on a hot path pay nothing to name the closure.
+func imageResultError(what func() string, target string, vars []Var, dst, out State) error {
+	err := notStateOf(vars, out)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("gsm: %s on target state %s returned %s, which is not a state of %q: %v",
+		what(), dst, out, target, err)
+}
+
+func (e edgeDef) describe() string { return fmt.Sprintf("morphism %s→%s Map", e.src.name, e.dst.name) }
+
+func resolverName(target string) func() string {
+	return func() string { return fmt.Sprintf("resolver for %q", target) }
+}
+
 func (f *Federation) verifyEdge(e edgeDef) error {
 	srcValid := e.src.validStates()
 	dstValid := e.dst.validStates()
@@ -105,6 +123,9 @@ func (f *Federation) verifyEdge(e edgeDef) error {
 		var refShared map[int]uint64 // shared values from the first target, for this source
 		for di, sb := range dstValid {
 			sb2 := e.mapFn(sa, sb)
+			if err := imageResultError(e.describe, e.dst.name, e.dst.vars, sb, sb2); err != nil {
+				return err
+			}
 			// Well-formedness: Map must overwrite only Shared() variables.
 			for _, v := range e.dst.vars {
 				if !sharedIdx[v.index] && sb2.getRaw(v) != sb.getRaw(v) {
@@ -189,6 +210,9 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 		var refShared map[int]uint64
 		for di, dst := range dstValid {
 			merged := resolver(dst, combo)
+			if err := imageResultError(resolverName(target.name), target.name, target.vars, dst, merged); err != nil {
+				return err
+			}
 			// Well-formedness: the resolver may write only shared variables.
 			for _, v := range target.vars {
 				if !sharedIdx[v.index] && merged.getRaw(v) != dst.getRaw(v) {

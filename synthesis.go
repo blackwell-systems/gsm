@@ -144,13 +144,17 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 	}
 
 	// Precompute the raw post-event state for every (event, encodable state) — independent of
-	// the candidate compensation. clampState keeps results within valid encodings.
+	// the candidate compensation. applyEvent rejects a result outside the valid encodings.
 	rawStep := make([][]uint64, len(r.events))
 	for ei, ev := range r.events {
 		rawStep[ei] = make([]uint64, packedCount)
 		for s := 0; s < packedCount; s++ {
 			if validEnc[s] {
-				rawStep[ei][s] = r.clampState(r.applyEvent(ev, mk(s))).packed
+				after, err := r.applyEvent(ev, mk(s))
+				if err != nil {
+					return nil, err
+				}
+				rawStep[ei][s] = after.packed
 			}
 		}
 	}

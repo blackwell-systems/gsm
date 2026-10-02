@@ -335,7 +335,11 @@ func (r *Registry) verifyComponentWFC(c *component, count int) (int, error) {
 		seen := map[uint64]bool{s.packed: true}
 		depth := 0
 		for !r.allInvariantsHold(s) {
-			s = r.applyFirstRepair(s)
+			var err error
+			if s, err = r.applyFirstRepair(s); err != nil {
+				outerErr = err
+				return
+			}
 			depth++
 			if seen[s.packed] || depth > count {
 				outerErr = fmt.Errorf("gsm: WFC failed in component %v; compensation does not terminate", c.vars)
@@ -356,24 +360,35 @@ func (r *Registry) verifyComponentWFC(c *component, count int) (int, error) {
 // localApply stays within the subspace (writes and repairs are footprint-local,
 // verified by verifyFootprints), so this is sound.
 func (r *Registry) verifyComponentCC(c *component, i, j int, report *Report) error {
-	localApply := func(ev eventDef, s State) State {
-		after := s
-		if ev.guard == nil || ev.guard(s) {
-			after = ev.effect(s)
+	localApply := func(ev eventDef, s State) (State, error) {
+		after, err := r.applyEvent(ev, s)
+		for err == nil && !r.allInvariantsHold(after) {
+			after, err = r.applyFirstRepair(after)
 		}
-		after = r.clampState(after)
-		for !r.allInvariantsHold(after) {
-			after = r.applyFirstRepair(after)
+		return after, err
+	}
+	twice := func(first, second eventDef, s State) (State, error) {
+		mid, err := localApply(first, s)
+		if err != nil {
+			return mid, err
 		}
-		return after
+		return localApply(second, mid)
 	}
 	var ccErr error
 	r.enumComponent(c, func(s State) {
 		if ccErr != nil || !r.allInvariantsHold(s) {
 			return
 		}
-		ij := localApply(r.events[j], localApply(r.events[i], s))
-		ji := localApply(r.events[i], localApply(r.events[j], s))
+		ij, err := twice(r.events[i], r.events[j], s)
+		if err != nil {
+			ccErr = err
+			return
+		}
+		ji, err := twice(r.events[j], r.events[i], s)
+		if err != nil {
+			ccErr = err
+			return
+		}
 		if ij.packed != ji.packed {
 			report.CC = false
 			report.CCFailure = &CCFailure{
