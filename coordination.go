@@ -87,37 +87,44 @@ func (f *Federation) CoordinationPlan() []CoordinationPoint {
 // converges, so this turns a rejected cyclic federation into an accepted one that converges given the
 // named coordination. An empty plan is exactly Build.
 //
-// Each point must name a morphism of the federation (by Src and Dst), and its Shared must be
-// exactly that morphism's shared variable names (in any order), as CoordinationPlan returns
-// them; otherwise BuildCoordinated returns an error rather than coordinate something other
-// than what the caller named.
+// A point names the morphisms it coordinates by Src, Dst and shared variable set (Shared, in
+// any order), as CoordinationPlan returns them, and removes every morphism matching all three
+// (parallel morphisms between two registries are separate points). A point that matches none
+// is an error, which says so when a Src->Dst morphism exists but shares other variables,
+// rather than coordinate something other than what the caller named.
 func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *FedReport, error) {
 	remove := map[int]bool{}
 	for _, cp := range plan {
+		// A point removes every morphism it names by Src, Dst and shared variable set (there
+		// may be parallel morphisms between two registries, each its own point). The set is
+		// what is coordinated, so a point that matches no morphism on all three is an error,
+		// rather than a silent no-op or the removal of something else.
 		found := false
+		var sameEnds [][]string // the shared sets of the Src->Dst morphisms, for the error
 		for ei, e := range f.edges {
-			if e.src.name == cp.Src && e.dst.name == cp.Dst {
-				// The point names what is coordinated: it must be exactly the variables this
-				// morphism controls, or the caller is coordinating something else.
-				names := make([]string, len(e.shared))
-				for k, v := range e.shared {
-					names[k] = v.name
-				}
-				if !sameNameSet(names, cp.Shared) {
-					return nil, &FedReport{Name: f.name, Edges: len(f.edges)},
-						fmt.Errorf("gsm: coordination point %s: morphism %s→%s shares %v, not %v",
-							cp, cp.Src, cp.Dst, sortedNames(names), sortedNames(cp.Shared))
-				}
-				remove[ei] = true
-				found = true
+			if e.src.name != cp.Src || e.dst.name != cp.Dst {
+				continue
 			}
+			names := make([]string, len(e.shared))
+			for k, v := range e.shared {
+				names[k] = v.name
+			}
+			if !sameNameSet(names, cp.Shared) {
+				sameEnds = append(sameEnds, sortedNames(names))
+				continue
+			}
+			remove[ei] = true
+			found = true
 		}
-		if !found {
-			// A point that matches nothing would leave the federation it was meant to
-			// coordinate unchanged, silently.
-			return nil, &FedReport{Name: f.name, Edges: len(f.edges)},
-				fmt.Errorf("gsm: coordination point %s names no morphism of federation %q", cp, f.name)
+		if found {
+			continue
 		}
+		rep := &FedReport{Name: f.name, Edges: len(f.edges)}
+		if len(sameEnds) > 0 {
+			return nil, rep, fmt.Errorf("gsm: coordination point %s: no morphism %s→%s shares %v (the %s→%s morphisms share %v)",
+				cp, cp.Src, cp.Dst, sortedNames(cp.Shared), cp.Src, cp.Dst, sameEnds)
+		}
+		return nil, rep, fmt.Errorf("gsm: coordination point %s names no morphism of federation %q", cp, f.name)
 	}
 	if len(remove) == 0 {
 		return f.Build()

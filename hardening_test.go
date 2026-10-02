@@ -292,7 +292,7 @@ func TestBuildCoordinated_PointSharedChecked(t *testing.T) {
 	f, _, _ := hardPair()
 	for _, shared := range [][]string{{"f"}, nil, {"n", "f"}} {
 		_, _, err := f.BuildCoordinated([]CoordinationPoint{{Src: "src", Dst: "dst", Shared: shared}})
-		if err == nil || !strings.Contains(err.Error(), "shares [n]") {
+		if err == nil || !strings.Contains(err.Error(), "morphisms share [[n]]") {
 			t.Errorf("Shared %v: want a mismatch error naming the morphism's [n], got %v", shared, err)
 		}
 	}

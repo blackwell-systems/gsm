@@ -40,7 +40,7 @@ import (
 // re-checks single-registry rules, is future work (it needs the federation conditions mechanized in
 // Coq first).
 type Certificate struct {
-	Name       string          // the certified sub-federation's name
+	Name       string          // the certified sub-federation's name; used in messages only, not covered by the digest
 	Digest     string          // covers component rules, names and pairs, morphism tables, and input ports
 	Report     *FedReport      // the verdict from the sub's own Build
 	Tables     []MorphismTable // the morphisms and resolvers in extensional form (see MorphismTable)
