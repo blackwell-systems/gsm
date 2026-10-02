@@ -473,6 +473,9 @@ func (s *Synthesis) Machine() *Machine {
 	for name, i := range s.events {
 		m.events[name] = i
 	}
+	if machineObserver != nil {
+		machineObserver("synthesized", s.r, m)
+	}
 	return m
 }
 

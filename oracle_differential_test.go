@@ -71,7 +71,17 @@ var (
 	diffSeen  = map[[32]byte]bool{}
 )
 
-func init() { buildObserver = recordBuild }
+// init chains recordBuild after any observer already installed (the gsmgate
+// build's gate.go), since the order of package init functions is not specified.
+func init() {
+	prev := buildObserver
+	buildObserver = func(r *Registry, m *Machine, rep *Report, err error) {
+		if prev != nil {
+			prev(r, m, rep, err)
+		}
+		recordBuild(r, m, rep, err)
+	}
+}
 
 func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 	c := newDiffCase(r, m, rep, err)

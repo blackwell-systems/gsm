@@ -74,9 +74,15 @@ jobs:
       run: bash nc/coq/extraction/ci-build.sh "$ROCQ_IMAGE"
 
     - name: Verify pinned hashes
+      # Every file in SHA256SUMS must match, and the two checkers the pins name
+      # must be among them, so a checker swapped by pin is never run unhashed.
       run: |
         cd nc/coq/extraction
         sha256sum -c "$GITHUB_WORKSPACE/.github/oracle/SHA256SUMS"
+        for c in "$TABLE_CHECKER" "$RULES_CHECKER"; do
+          awk -v f="$c" '$2 == f { found = 1 } END { exit !found }' "$GITHUB_WORKSPACE/.github/oracle/SHA256SUMS" ||
+            { echo "::error::$c is not in .github/oracle/SHA256SUMS"; exit 1; }
+        done
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -86,10 +92,23 @@ jobs:
     - name: Oracle tests and differential cross-check
       env:
         GSM_REQUIRE_ORACLES: '1'
-        GSM_CONVERGENCE_CHECKER: ${{ github.workspace }}/nc/coq/extraction/checker
-        GSM_AST_CHECKER: ${{ github.workspace }}/nc/coq/extraction/astchecker
+        GSM_CONVERGENCE_CHECKER: ${{ github.workspace }}/nc/coq/extraction/${{ env.TABLE_CHECKER }}
+        GSM_AST_CHECKER: ${{ github.workspace }}/nc/coq/extraction/${{ env.RULES_CHECKER }}
         GSM_ORACLE_REPORT: ${{ github.workspace }}/oracle-report.txt
       run: go test -count=1 .
+
+    - name: Example-machine gate
+      # Every machine gsm's examples make (each Example function and README run
+      # block, listed in .github/oracle/machines.txt) is checked by both
+      # checkers; the step fails if a checker rejects one, disagrees with Build,
+      # or a machine is not listed. See .github/oracle/README.md.
+      env:
+        GSM_REQUIRE_ORACLES: '1'
+        GSM_CONVERGENCE_CHECKER: ${{ github.workspace }}/nc/coq/extraction/${{ env.TABLE_CHECKER }}
+        GSM_AST_CHECKER: ${{ github.workspace }}/nc/coq/extraction/${{ env.RULES_CHECKER }}
+      run: |
+        go test -count=1 ./internal/...
+        GSM_GATE_SUMMARY="$GITHUB_STEP_SUMMARY" go test -tags gsmgate -run TestExampleMachinesGate -count=1 -v .
 
     - name: Differential summary
       if: always()
