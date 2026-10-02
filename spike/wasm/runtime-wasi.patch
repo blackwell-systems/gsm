@@ -1,0 +1,132 @@
+diff -ru a/runtime/caml/config.h b/runtime/caml/config.h
+--- a/runtime/caml/config.h
++++ b/runtime/caml/config.h
+@@ -175,7 +175,9 @@
+    as first-class values (GCC 2.x). */
+ 
+ #if defined(__GNUC__) && __GNUC__ >= 2 && !defined(DEBUG) \
+-    && !defined (SHRINKED_GNUC)
++    && !defined (SHRINKED_GNUC) && !defined(__wasi__)
++/* Not on WASI: wasm has no code addresses, so label arithmetic is meaningless;
++   the interpreter uses its switch dispatch there. */
+ #define THREADED_CODE
+ #endif
+ 
+diff -ru a/runtime/caml/fail.h b/runtime/caml/fail.h
+--- a/runtime/caml/fail.h
++++ b/runtime/caml/fail.h
+@@ -16,7 +16,7 @@
+ #ifndef CAML_FAIL_H
+ #define CAML_FAIL_H
+ 
+-#ifdef CAML_INTERNALS
++#if defined(CAML_INTERNALS) && !defined(__wasi__)
+ #include <setjmp.h>
+ #endif /* CAML_INTERNALS */
+ 
+@@ -45,7 +45,18 @@
+ #define ASSERT_FAILURE_EXN 10   /* "Assert_failure" */
+ #define UNDEFINED_RECURSIVE_MODULE_EXN 11 /* "Undefined_recursive_module" */
+ 
+-#ifdef POSIX_SIGNALS
++#if defined(__wasi__)
++/* WASI preview 1 has no setjmp/longjmp without the exception-handling
++   proposal. An exception raised from C (a runtime primitive) cannot unwind to
++   an OCaml handler; it is reported as uncaught (exit 2), so the process fails
++   closed. Exceptions raised from OCaml code are unaffected (the interpreter
++   handles them without longjmp). */
++struct longjmp_buffer {
++  int unused;
++};
++#define sigsetjmp(buf,save) 0
++#define siglongjmp(buf,val) caml_fatal_uncaught_exception(Caml_state->exn_bucket)
++#elif defined(POSIX_SIGNALS)
+ struct longjmp_buffer {
+   sigjmp_buf buf;
+ };
+diff -ru a/runtime/caml/mlvalues.h b/runtime/caml/mlvalues.h
+--- a/runtime/caml/mlvalues.h
++++ b/runtime/caml/mlvalues.h
+@@ -188,7 +188,13 @@
+ #define Tag_hp(hp) (((unsigned char *) (hp)) [sizeof(value)-1])
+                                                  /* Also an l-value. */
+ #else
++#ifdef __wasi__
++/* On wasm32, -sizeof(value) is a large unsigned 32-bit offset, which clang
++   folds into a load offset that does not wrap: use a signed offset. */
++#define Tag_val(val) (((unsigned char *) (val)) [-(int)sizeof(value)])
++#else
+ #define Tag_val(val) (((unsigned char *) (val)) [-sizeof(value)])
++#endif
+                                                  /* Also an l-value. */
+ #define Tag_hp(hp) (((unsigned char *) (hp)) [0])
+                                                  /* Also an l-value. */
+diff -ru a/runtime/freelist.c b/runtime/freelist.c
+--- a/runtime/freelist.c
++++ b/runtime/freelist.c
+@@ -84,7 +84,9 @@
+ 
+ #define Nf_head (Val_bp (&(nf_sentinel.first_field)))
+ 
+-static value nf_prev = Nf_head;  /* Current allocation pointer. */
++/* Current allocation pointer. On wasm32 with 64-bit values an address cast
++   to value is not a link-time constant; nf_init sets it before any use. */
++static value nf_prev = Val_NULL;
+ static value nf_last = Val_NULL; /* Last block in the list.  Only valid
+                                     just after [nf_allocate] returns NULL. */
+ 
+diff -ru a/runtime/sys.c b/runtime/sys.c
+--- a/runtime/sys.c
++++ b/runtime/sys.c
+@@ -28,7 +28,7 @@
+ #include <sys/stat.h>
+ #ifdef _WIN32
+ #include <direct.h> /* for _wchdir and _wgetcwd */
+-#else
++#elif !defined(__wasi__)
+ #include <sys/wait.h>
+ #endif
+ #include "caml/config.h"
+@@ -592,7 +592,9 @@
+ #endif
+ #ifdef HAS_UNISTD
+     if (n < 16) data[n++] = getpid();
++#ifndef __wasi__
+     if (n < 16) data[n++] = getppid();
++#endif
+ #endif
+     return n;
+   }
+diff -ru a/runtime/unix.c b/runtime/unix.c
+--- a/runtime/unix.c
++++ b/runtime/unix.c
+@@ -408,6 +408,8 @@
+   return secure_getenv (var);
+ #elif defined (HAS___SECURE_GETENV)
+   return __secure_getenv (var);
++#elif defined(__wasi__)
++  return getenv(var);
+ #elif defined(HAS_ISSETUGID)
+   if (!issetugid ())
+     return getenv(var);
+diff -ru a/runtime/weak.c b/runtime/weak.c
+--- a/runtime/weak.c
++++ b/runtime/weak.c
+@@ -32,7 +32,17 @@
+ value caml_ephe_list_head = 0;
+ 
+ static value ephe_dummy = 0;
++#ifdef __wasi__
++/* On wasm32 with 64-bit values an address cast to value is not a link-time
++   constant: set it before main runs. */
++value caml_ephe_none = 0;
++__attribute__((constructor)) static void caml_wasi_init_ephe_none(void)
++{
++  caml_ephe_none = (value) &ephe_dummy;
++}
++#else
+ value caml_ephe_none = (value) &ephe_dummy;
++#endif
+ 
+ #define CAMLassert_valid_ephemeron(eph) do{                             \
+     CAMLassert (Is_in_heap (eph));                                      \

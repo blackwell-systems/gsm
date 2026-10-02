@@ -1,0 +1,186 @@
+# SPIKE (stage 2 of the proof-gate plan): the extracted checkers as wasm on
+# wazero. Not a required check. See spike/wasm/ and internal/wasmoracle/.
+name: wasm spike
+
+on:
+  push:
+    branches: [ spike/wasm-oracle ]
+  workflow_dispatch:
+
+env:
+  NC_SPIKE_REF: spike/checker-perf
+  OCAML_SRC_SHA256: c2d706432f93ba85bd3383fa451d74543c32a4e84a1afaf3e8ace18f7f097b43
+  WASI_SDK_SHA256: b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
+
+jobs:
+  build:
+    name: Build (pinned image, twice)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Read pins
+      run: cat .github/oracle/pins.env >> "$GITHUB_ENV"
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ env.NC_REPO }}
+        ref: ${{ env.NC_COMMIT }}
+        path: nc
+    - uses: actions/checkout@v4
+      with:
+        repository: ${{ env.NC_REPO }}
+        ref: ${{ env.NC_SPIKE_REF }}
+        path: ncs
+    - name: Toolchains (hash-pinned)
+      run: |
+        mkdir -p tc && cd tc
+        curl -sSfL -o ocaml.tar.gz https://github.com/ocaml/ocaml/archive/refs/tags/4.14.2.tar.gz
+        curl -sSfL -o wasi-sdk.tar.gz https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz
+        echo "$OCAML_SRC_SHA256  ocaml.tar.gz" | sha256sum -c
+        echo "$WASI_SDK_SHA256  wasi-sdk.tar.gz" | sha256sum -c
+        tar xzf ocaml.tar.gz
+        mkdir wasi-sdk && tar xzf wasi-sdk.tar.gz -C wasi-sdk --strip-components=1
+        rm ocaml.tar.gz wasi-sdk.tar.gz
+    - name: Build natively and to wasm, twice
+      run: bash spike/wasm/ci-build.sh "$ROCQ_IMAGE" "$PWD/nc" "$PWD/ncs" "$PWD/tc" "$PWD/out"
+    - name: Reproducible (criterion 5)
+      run: |
+        (cd out/a && sha256sum *.wasm) | tee a.sums
+        (cd out/b && sha256sum *.wasm) > b.sums
+        diff a.sums b.sums
+        { echo '### wasm module hashes (two clean builds, identical)'; echo '```'; cat a.sums; echo '```'; ls -l out/a; } >> "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: checkers
+        path: |
+          out/a/*.wasm
+          out/native/*
+
+  verdicts:
+    # Criteria 1, 2, 4: every OS/arch runs the gsm test suite with the wasm
+    # checkers in-process; ubuntu-latest also compares every run with the native
+    # checkers byte for byte. Each job uploads its per-run results.
+    name: Verdicts (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: checkers
+        path: art
+    - name: Place modules
+      shell: bash
+      run: |
+        cp art/a/*.wasm internal/wasmoracle/ 2>/dev/null || cp art/*.wasm internal/wasmoracle/ 2>/dev/null || find art -name '*.wasm' -exec cp {} internal/wasmoracle/ \;
+        ls -l internal/wasmoracle
+        chmod +x art/native/* 2>/dev/null || true
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    - name: gsm tests with the wasm checkers
+      shell: bash
+      env:
+        GSM_WASM_SPIKE: '1'
+        GSM_WASM_REPORT: ${{ github.workspace }}/wasm-report.txt
+        GSM_WASM_CASES: ${{ github.workspace }}/wasm-cases.tsv
+      run: |
+        if [ "${{ matrix.os }}" = ubuntu-latest ]; then
+          export GSM_REQUIRE_ORACLES=1
+          export GSM_CONVERGENCE_CHECKER="$PWD/art/native/checker"
+          export GSM_AST_CHECKER="$PWD/art/native/astchecker"
+          export GSM_FAST_CHECKER="$PWD/art/native/checker_fast"
+        fi
+        go test -tags wasmspike -count=1 .
+    - name: Summary
+      if: always()
+      shell: bash
+      run: |
+        if [ -f wasm-report.txt ]; then
+          { echo '### wasm spike (${{ matrix.os }})'; echo '```'; cat wasm-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        fi
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: verdicts-${{ matrix.os }}
+        path: |
+          wasm-report.txt
+          wasm-cases.tsv
+
+  compare:
+    name: Same output on every host (criterion 4)
+    needs: verdicts
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: verdicts-*
+        path: v
+    - name: Compare
+      run: |
+        ls -R v
+        # ubuntu-latest also runs the native oracle tests, so it sees more
+        # cases; every other host's lines must all appear in its file (a case
+        # with a different exit code or output would be a line it lacks).
+        sort -u v/verdicts-ubuntu-latest/wasm-cases.tsv > ref.s
+        wc -l ref.s
+        rc=0
+        for f in v/*/wasm-cases.tsv; do
+          sort -u "$f" > h.s
+          extra=$(comm -13 ref.s h.s | wc -l)
+          echo "$f: $(wc -l < h.s) runs, $extra not in ubuntu-latest"
+          if [ "$extra" -ne 0 ]; then comm -13 ref.s h.s | head -20; rc=1; fi
+        done
+        exit $rc
+
+  worst-case:
+    name: Worst case 2^20 states, 10 pairs (criterion 3, ${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    timeout-minutes: 120
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: checkers
+        path: art
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+    - name: Place modules, build the runner
+      shell: bash
+      run: |
+        find art -name '*.wasm' -exec cp {} internal/wasmoracle/ \;
+        chmod +x art/native/* || true
+        go build -tags wasmspike -o runner ./spike/wasm/runner
+        python3 spike/wasm/gen_tables.py 20 10 big.tables
+        python3 spike/wasm/gen_tables.py 20 10 big-scrambled.tables scrambled
+        ls -l *.tables
+        nproc 2>/dev/null || sysctl -n hw.ncpu; uname -a
+    - name: Time
+      shell: bash
+      run: |
+        now() { python3 -c 'import time; print(time.time())'; }
+        t() { local s; s=$(now); local rc=0; "$@" > out.txt 2>&1 || rc=$?; local e; e=$(now); echo "$(python3 -c "print(round($e-$s,1))")s exit=$rc :: $* :: $(head -c 200 out.txt | tr '\n' ' ')"; }
+        {
+          for f in big.tables big-scrambled.tables; do
+            if [ "${{ matrix.os }}" = ubuntu-latest ]; then
+              t art/native/checker_fast $f
+              t art/native/checker $f
+            fi
+            RUNNER_TIMEOUT=50m t ./runner checker_fast $f
+          done
+          if [ "${{ matrix.os }}" = ubuntu-latest ]; then
+            RUNNER_TIMEOUT=25m t ./runner checker big.tables
+            # The cost of in-module cancellation (wazero WithCloseOnContextDone).
+            GSM_WASM_CANCEL=1 RUNNER_TIMEOUT=20m t ./runner checker_fast big.tables
+          fi
+        } | tee timings.txt
+        { echo '### worst case (${{ matrix.os }})'; echo '```'; cat timings.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
