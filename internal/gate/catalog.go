@@ -40,21 +40,24 @@ type Entry struct {
 	Line    int
 }
 
-// Catalog lists every machine the gate checks, plus, for Scan, the documents
-// that show gsm machines and the directories exempt from it. Its text format, one
-// item per line, with a word starting with # starting a comment:
+// Catalog lists every machine the gate checks, the documents that show gsm
+// machines (for gsmgate's -scan) and the programs that make none. Its text
+// format, one item per line, with a word starting with # starting a comment:
 //
 //	<program> <machine> <verdict>
 //	@doc <path> <note>
-//	@exempt <dir> <reason>
+//	@none <program> <reason>
 //
 // A program is the directory its records are written to under the gate's dump
-// directory (a Go package directory, an Example function name, or a document's
-// run block such as README.md#1). A machine is the registry's name.
+// directory: in gsm, an Example function name or a document's run block such as
+// README.md#1; in a project gsmgate -scan checks, a main package's directory. A
+// machine is the registry's name. @none lists a program that makes no machine
+// (gsm uses it for an Example that builds nothing); there is no way to exempt
+// a package that does make machines.
 type Catalog struct {
 	Entries []Entry
 	Docs    map[string]string // path -> note
-	Exempt  map[string]string // dir -> reason
+	None    map[string]string // program -> reason it makes no machine
 }
 
 // ParseCatalogFile reads a catalog file.
@@ -72,7 +75,7 @@ func ParseCatalogFile(path string) (*Catalog, error) {
 
 // ParseCatalog reads a catalog.
 func ParseCatalog(r io.Reader) (*Catalog, error) {
-	c := &Catalog{Docs: map[string]string{}, Exempt: map[string]string{}}
+	c := &Catalog{Docs: map[string]string{}, None: map[string]string{}}
 	seen := map[string]int{}
 	sc := bufio.NewScanner(r)
 	n := 0
@@ -90,13 +93,13 @@ func ParseCatalog(r io.Reader) (*Catalog, error) {
 			continue
 		}
 		switch f[0] {
-		case "@doc", "@exempt":
+		case "@doc", "@none":
 			if len(f) < 3 {
 				return nil, fmt.Errorf("line %d: %s needs a path and a note", n, f[0])
 			}
 			m := c.Docs
-			if f[0] == "@exempt" {
-				m = c.Exempt
+			if f[0] == "@none" {
+				m = c.None
 			}
 			if _, dup := m[f[1]]; dup {
 				return nil, fmt.Errorf("line %d: %s %s listed twice", n, f[0], f[1])

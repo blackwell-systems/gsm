@@ -108,6 +108,7 @@ jobs:
         GSM_AST_CHECKER: ${{ github.workspace }}/nc/coq/extraction/${{ env.RULES_CHECKER }}
       run: |
         go test -count=1 ./internal/...
+        (cd internal/cmd/gsmgate && go test -count=1 .)
         GSM_GATE_SUMMARY="$GITHUB_STEP_SUMMARY" go test -tags gsmgate -run TestExampleMachinesGate -count=1 -v .
 
     - name: Differential summary
