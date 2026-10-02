@@ -366,6 +366,9 @@ func (r *Registry) verifyComponentWFC(c *component, count int) (int, error) {
 // localApply stays within the subspace (writes and repairs are footprint-local,
 // verified by verifyFootprints), so this is sound.
 func (r *Registry) verifyComponentCC(c *component, i, j int, report *Report) error {
+	// The result checks here never fire first: the footprint pass ran every effect, and the
+	// footprint pass or WFC every repair, on every state of the component. They keep CC from
+	// ever comparing an unchecked state if that coverage changes.
 	run := r.checked()
 	localApply := func(ev eventDef, s State) (State, error) {
 		after, err := run.applyEvent(ev, s)
