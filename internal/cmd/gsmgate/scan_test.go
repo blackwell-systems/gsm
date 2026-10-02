@@ -55,7 +55,7 @@ func TestScanFindsEveryMaker(t *testing.T) {
 		"method/main.go":   "package main\n" + imp + "func main() { var r *gsm.Registry; b := r.Build; _ = b }\n",
 		"synth/main.go":    "package main\n" + imp + "func main() { var s *gsm.Synthesis; _ = s.Machine() }\n",
 		"lib/lib.go":       "package lib\n" + imp + "func Make() *gsm.Registry { return gsm.NewRegistry(\"l\") }\n",
-		"uses/main.go":     "package main\n" + imp + "func main() { var m *gsm.Machine; _ = m }\n", // uses gsm, makes no machine
+		"uses/main.go":     "package main\n" + imp + "func main() { var m *gsm.Machine; _ = m }\n", // depends on gsm, so it must be listed too
 		"tested/x.go":      "package tested\n",
 		"tested/x_test.go": "package tested\n" + imp + "func f() { gsm.NewRegistry(\"t\") }\n", // test code is not shipped
 		"tagged/main.go":   "//go:build never\n\npackage main\n" + imp + "func main() { gsm.NewRegistry(\"h\") }\n",
@@ -68,13 +68,15 @@ func TestScanFindsEveryMaker(t *testing.T) {
 		"method makes gsm machines",
 		"synth makes gsm machines",
 		"lib makes gsm machines",
-		"tagged/main.go imports gsm but is in no type-checked package",
+		"tagged/main.go imports gsm but is in no loaded package",
+		".hidden is a main package that depends on gsm",
+		"uses is a main package that depends on gsm",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
 	}
-	for _, not := range []string{"listed ", "uses", "tested", "hidden"} {
+	for _, not := range []string{"listed ", "tested"} {
 		if strings.Contains(got, not) {
 			t.Errorf("unexpected %q in:\n%s", not, got)
 		}

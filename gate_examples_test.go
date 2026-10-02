@@ -35,7 +35,12 @@ func TestExampleMachinesGate(t *testing.T) {
 	}
 	blocks := runBlocks(t)
 	dumps := t.TempDir()
-	for _, prog := range cat.Programs() {
+	// The @none programs run too: the gate fails if one makes a machine.
+	progs := cat.Programs()
+	for prog := range cat.None {
+		progs = append(progs, prog)
+	}
+	for _, prog := range progs {
 		dir := filepath.Join(dumps, filepath.FromSlash(prog))
 		var cmd *exec.Cmd
 		if b, ok := blocks[prog]; ok {

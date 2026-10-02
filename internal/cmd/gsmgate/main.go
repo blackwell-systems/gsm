@@ -9,7 +9,11 @@
 // dependencies). From this directory:
 //
 //	go run . -dumps DIR -catalog FILE \
-//	    -table-checker checker -rules-checker astchecker [-scan ROOT] [-summary FILE]
+//	    -table-checker checker -rules-checker astchecker \
+//	    [-rerun DIR2] [-scan ROOT] [-summary FILE]
+//
+// -rerun names the records of a second run of the same programs; the gate fails
+// if a program made different machines on the two runs.
 package main
 
 import (
@@ -28,18 +32,19 @@ func main() {
 	rules := flag.String("rules-checker", "", "the extracted rules checker (astchecker)")
 	scanRoot := flag.String("scan", "", "repository root to scan for gsm machines outside the catalog")
 	summary := flag.String("summary", "", "append the Markdown report to this file (GITHUB_STEP_SUMMARY)")
+	rerun := flag.String("rerun", "", "records of a second run of the same programs, which must make the same machines")
 	flag.Parse()
 	if *dumps == "" || *catalog == "" || *table == "" || *rules == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(*dumps, *catalog, *table, *rules, *scanRoot, *summary); err != nil {
+	if err := run(*dumps, *catalog, *table, *rules, *scanRoot, *summary, *rerun); err != nil {
 		fmt.Fprintln(os.Stderr, "gsmgate:", err)
 		os.Exit(1)
 	}
 }
 
-func run(dumps, catalog, table, rules, scanRoot, summary string) error {
+func run(dumps, catalog, table, rules, scanRoot, summary, rerun string) error {
 	cat, err := gate.ParseCatalogFile(catalog)
 	if err != nil {
 		return err
@@ -53,6 +58,13 @@ func run(dumps, catalog, table, rules, scanRoot, summary string) error {
 		if scanProblems, err = scan(scanRoot, cat); err != nil {
 			return err
 		}
+	}
+	if rerun != "" {
+		diffs, derr := gate.CompareRuns(dumps, rerun)
+		if derr != nil {
+			return derr
+		}
+		scanProblems = append(scanProblems, diffs...)
 	}
 	var b strings.Builder
 	b.WriteString("### gsm machine gate\n\n")

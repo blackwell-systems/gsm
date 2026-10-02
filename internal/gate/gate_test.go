@@ -232,3 +232,28 @@ func TestRunCheckerCrash(t *testing.T) {
 		})
 	}
 }
+
+func TestCompareRuns(t *testing.T) {
+	ok := Record{Name: "m", Kind: KindBuild, BuildOK: true}
+	write := func(dir, prog string, tables []byte) {
+		t.Helper()
+		if err := WriteRecord(filepath.Join(dir, prog), ok, nil, nil, tables); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := t.TempDir(), t.TempDir()
+	write(a, "same", in(0, "x"))
+	write(b, "same", in(0, "x"))
+	write(a, "differs", in(0, "x"))
+	write(b, "differs", in(0, "y"))
+	write(a, "extra", in(0, "x"))
+	write(b, "extra", in(0, "x"))
+	write(b, "extra", in(0, "z"))
+	got, err := CompareRuns(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !strings.Contains(got[0], "program differs ") || !strings.Contains(got[1], "program extra ") {
+		t.Fatalf("got %q", got)
+	}
+}

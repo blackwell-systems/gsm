@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -29,56 +30,89 @@ var makers = map[string]map[string]bool{
 	"Synthesis":  {"Machine": true},
 }
 
-// inputs are what lets a run of a program choose other machines than the gate's
-// one run with no arguments: flags, the arguments and the environment.
+// inputs are what lets one run of a program differ from the gate's single run
+// with no arguments: flags, arguments, the environment, standard input, files
+// and the platform. Every object of a package mapped to nil counts. The clock
+// and randomness, and the host name, are not here (bide's core reads them for
+// its own purposes: timestamps, keys, lease owners); the gate catches a machine
+// that depends on them by running each program twice and comparing the
+// machines (gate.CompareRuns).
 var inputs = map[string]map[string]bool{
-	"flag": nil, // every object of package flag
-	"os":   {"Args": true, "Getenv": true, "LookupEnv": true, "Environ": true, "ExpandEnv": true},
+	"flag":    nil,
+	"os":      {"Args": true, "Getenv": true, "LookupEnv": true, "Environ": true, "ExpandEnv": true, "Stdin": true, "ReadFile": true, "Open": true, "OpenFile": true, "ReadDir": true, "DirFS": true, "Getwd": true},
+	"syscall": {"Getenv": true, "Environ": true},
+	"runtime": {"GOOS": true, "GOARCH": true},
 }
 
 // docExts are the files read as documentation.
 var docExts = map[string]bool{".md": true, ".mdx": true, ".markdown": true, ".rst": true, ".adoc": true, ".txt": true, ".html": true, ".htm": true}
 
-// scan type-checks every Go module under root that has a file importing gsm
-// (each module on its own, test code excluded) and returns why the catalog does not cover the repository:
+// pkgInfo is what the scan knows about one package of the repository.
+type pkgInfo struct {
+	path, dir, name string // import path, directory relative to root, package name
+	imports         []string
+	ignored         []string // .go files a build constraint excludes, relative to root
+	module          string   // module directory, absolute
+}
+
+// scan returns why the catalog does not cover the repository at root. It loads
+// every Go module under root (hidden, testdata, vendor and node_modules
+// directories included; test code excluded) with its full import graph, and
+// type-checks the modules whose packages the rules below need. It fails if:
+//   - a main package depends on gsm, directly or through any module (one in a
+//     hidden directory or outside the repository included), and is not a catalog
+//     program;
 //   - a package refers to a gsm function or method that makes a machine and is
-//     not a catalog program (a main package the gate runs);
-//   - a non-test Go file imports gsm but is in no type-checked package (a build
-//     tag or GOOS excludes it), so it could make machines unseen;
-//   - a catalog program reads flags, its arguments or the environment, so a run
-//     other than the gate's could make other machines;
-//   - a document shows a gsm machine and is not listed with @doc, or an @doc
-//     entry shows none.
-//
-// Hidden directories, testdata, vendor and node_modules are skipped.
+//     not a catalog program, or a catalog program is not a main package;
+//   - a catalog program, or a package of the repository it imports, reads an
+//     input (see inputs), or has a .go file a build constraint excludes;
+//   - a non-test Go file imports gsm but is in no loaded package;
+//   - a directory is a symbolic link (the scan does not follow it);
+//   - a document shows a gsm machine without an @doc line, or an @doc entry
+//     shows none.
 func scan(root string, cat *gate.Catalog) ([]string, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
 	programs := map[string]bool{}
 	for _, p := range cat.Programs() {
 		programs[p] = true
 	}
+	var p []string
 	var modules []string
-	importers := map[string]bool{} // non-test .go files importing gsm, by absolute path
+	importers := map[string]bool{} // non-test .go files importing gsm, absolute
+	goDirs := map[string]bool{}    // directories holding non-test .go files, absolute
 	docs := map[string]bool{}
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	rel := func(path string) string {
+		r, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return path
+		}
+		return filepath.ToSlash(r)
+	}
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
 		}
 		name := d.Name()
+		if d.Type()&fs.ModeSymlink != 0 {
+			if st, serr := os.Stat(path); serr == nil && st.IsDir() {
+				p = append(p, fmt.Sprintf("%s is a symlinked directory, which the scan does not follow", rel(path)))
+			}
+			return nil
+		}
 		if d.IsDir() {
-			if path != root && (strings.HasPrefix(name, ".") || name == "testdata" || name == "vendor" || name == "node_modules") {
+			if name == ".git" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		rel, rerr := filepath.Rel(root, path)
-		if rerr != nil {
-			return rerr
-		}
-		rel = filepath.ToSlash(rel)
 		switch {
 		case name == "go.mod":
 			modules = append(modules, filepath.Dir(path))
 		case strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go"):
+			goDirs[filepath.Dir(path)] = true
 			imp, ierr := importsGSM(path)
 			if ierr != nil {
 				return ierr
@@ -92,7 +126,7 @@ func scan(root string, cat *gate.Catalog) ([]string, error) {
 				return rerr
 			}
 			if docShowsMachine(string(b)) {
-				docs[rel] = true
+				docs[rel(path)] = true
 			}
 		}
 		return nil
@@ -101,75 +135,207 @@ func scan(root string, cat *gate.Catalog) ([]string, error) {
 		return nil, err
 	}
 
-	var p []string
-	makerDirs := map[string][]string{} // dir -> positions of the references
-	mainPkg := map[string]bool{}
-	checked := map[string]bool{}
-	// Only a package that imports gsm can refer to its functions, so only the
-	// modules holding such a file are type-checked.
-	need := map[string]bool{}
-	for f := range importers {
-		if m := moduleOf(f, modules); m != "" {
-			need[m] = true
+	// Each module's packages are named by directory, since "./..." leaves out
+	// directories starting with "." or "_" and testdata.
+	patterns := map[string][]string{}
+	for dir := range goDirs {
+		if m := moduleOf(filepath.Join(dir, "x.go"), modules); m != "" {
+			r, rerr := filepath.Rel(m, dir)
+			if rerr != nil {
+				return nil, rerr
+			}
+			patterns[m] = append(patterns[m], "./"+filepath.ToSlash(r))
 		}
 	}
+
+	// The import graph of every module, untyped (go list -deps): cheap.
+	pkgs := map[string]*pkgInfo{} // repository packages by import path
+	touches := map[string]bool{}  // import path -> depends on gsm (any package, any module)
+	listed := map[string]bool{}   // files of loaded packages
+	var graph []*packages.Package
 	for _, mod := range modules {
-		if !need[mod] {
+		if len(patterns[mod]) == 0 {
 			continue
 		}
-		cfg := &packages.Config{
+		ps, lerr := packages.Load(&packages.Config{
+			Mode: packages.NeedName | packages.NeedFiles | packages.NeedImports | packages.NeedDeps | packages.NeedModule,
+			Dir:  mod, Env: append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"),
+		}, patterns[mod]...)
+		if lerr != nil {
+			return nil, fmt.Errorf("load %s: %w", rel(mod), lerr)
+		}
+		for _, pkg := range ps {
+			for _, e := range pkg.Errors {
+				// A directory whose files a build constraint all excludes has no
+				// package here; a gsm import in one of them is reported below.
+				if strings.Contains(e.Msg, "build constraints exclude all Go files") {
+					continue
+				}
+				p = append(p, fmt.Sprintf("%s (module %s) does not load, so it cannot be scanned: %s", pkg.PkgPath, rel(mod), e))
+			}
+			graph = append(graph, pkg)
+			for _, f := range pkg.GoFiles {
+				listed[f] = true
+			}
+			if len(pkg.GoFiles) == 0 {
+				continue
+			}
+			info := &pkgInfo{path: pkg.PkgPath, dir: rel(filepath.Dir(pkg.GoFiles[0])), name: pkg.Name, module: mod}
+			for ip := range pkg.Imports {
+				info.imports = append(info.imports, ip)
+			}
+			for _, f := range pkg.IgnoredFiles {
+				if strings.HasSuffix(f, ".go") && !strings.HasSuffix(f, "_test.go") {
+					info.ignored = append(info.ignored, rel(f))
+				}
+			}
+			pkgs[pkg.PkgPath] = info
+		}
+	}
+	var touch func(pkg *packages.Package, seen map[string]bool) bool
+	touch = func(pkg *packages.Package, seen map[string]bool) bool {
+		if v, ok := touches[pkg.PkgPath]; ok {
+			return v
+		}
+		if seen[pkg.PkgPath] {
+			return false
+		}
+		seen[pkg.PkgPath] = true
+		v := pkg.PkgPath == gsmPath
+		for _, dep := range pkg.Imports {
+			if touch(dep, seen) {
+				v = true
+			}
+		}
+		touches[pkg.PkgPath] = v
+		return v
+	}
+	for _, pkg := range graph {
+		touch(pkg, map[string]bool{})
+	}
+
+	// Rule: every main package that depends on gsm is a catalog program.
+	for _, info := range pkgs {
+		if info.name == "main" && touches[info.path] && !programs[info.dir] {
+			p = append(p, fmt.Sprintf("%s is a main package that depends on gsm but is not a catalog program", info.dir))
+		}
+	}
+
+	// The repository packages each program reaches.
+	reach := map[string][]string{} // program dir -> repository import paths, itself included
+	byDir := map[string]*pkgInfo{}
+	for _, info := range pkgs {
+		byDir[info.dir] = info
+	}
+	for prog := range programs {
+		start, ok := byDir[prog]
+		if !ok {
+			continue // a program that is not a loaded package: the gate itself fails on it
+		}
+		seen := map[string]bool{}
+		var walk func(path string)
+		walk = func(path string) {
+			info, inRepo := pkgs[path]
+			if !inRepo || seen[path] {
+				return
+			}
+			seen[path] = true
+			reach[prog] = append(reach[prog], path)
+			for _, ip := range info.imports {
+				walk(ip)
+			}
+		}
+		walk(start.path)
+		for _, path := range reach[prog] {
+			if ign := pkgs[path].ignored; len(ign) > 0 {
+				p = append(p, fmt.Sprintf("%s has files a build constraint excludes (%s), which can change program %s on another platform", pkgs[path].dir, strings.Join(ign, ", "), prog))
+			}
+		}
+	}
+
+	// Typed load of the packages that import gsm directly or that a program
+	// reaches, each module on its own.
+	typed := map[string]map[string]bool{} // module -> patterns
+	addTyped := func(mod, dir string) {
+		r, rerr := filepath.Rel(mod, dir)
+		if rerr != nil {
+			return
+		}
+		if typed[mod] == nil {
+			typed[mod] = map[string]bool{}
+		}
+		typed[mod]["./"+filepath.ToSlash(r)] = true
+	}
+	for f := range importers {
+		if m := moduleOf(f, modules); m != "" {
+			addTyped(m, filepath.Dir(f))
+		}
+	}
+	for _, paths := range reach {
+		for _, path := range paths {
+			addTyped(pkgs[path].module, filepath.Join(root, filepath.FromSlash(pkgs[path].dir)))
+		}
+	}
+	reads := map[string][]string{} // import path -> inputs it reads
+	makerDirs := map[string][]string{}
+	for _, mod := range modules {
+		if len(typed[mod]) == 0 {
+			continue
+		}
+		var pats []string
+		for pat := range typed[mod] {
+			pats = append(pats, pat)
+		}
+		sort.Strings(pats)
+		ps, lerr := packages.Load(&packages.Config{
 			Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports |
 				packages.NeedTypes | packages.NeedTypesInfo | packages.NeedSyntax,
-			Dir:   mod,
-			Env:   append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"),
-			Tests: false,
-		}
-		pkgs, lerr := packages.Load(cfg, "./...")
+			Dir: mod, Env: append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod"),
+		}, pats...)
 		if lerr != nil {
-			return nil, fmt.Errorf("load %s: %w", mod, lerr)
+			return nil, fmt.Errorf("load %s: %w", rel(mod), lerr)
 		}
-		for _, pkg := range pkgs {
+		for _, pkg := range ps {
 			for _, e := range pkg.Errors {
 				p = append(p, fmt.Sprintf("%s does not type-check, so it cannot be scanned: %s", pkg.PkgPath, e))
-			}
-			for _, f := range pkg.GoFiles {
-				checked[f] = true
 			}
 			if pkg.TypesInfo == nil || len(pkg.GoFiles) == 0 {
 				continue
 			}
-			rel, rerr := filepath.Rel(root, filepath.Dir(pkg.GoFiles[0]))
-			if rerr != nil {
-				return nil, rerr
-			}
-			dir := filepath.ToSlash(rel)
-			if pkg.Name == "main" {
-				mainPkg[dir] = true
-			}
-			var reads []string
+			dir := rel(filepath.Dir(pkg.GoFiles[0]))
 			for id, obj := range pkg.TypesInfo.Uses {
 				switch {
 				case isMaker(obj):
-					makerDirs[dir] = append(makerDirs[dir], pkg.Fset.Position(id.Pos()).String())
-				case programs[dir] && isInput(obj):
-					reads = append(reads, obj.Pkg().Name()+"."+obj.Name())
+					makerDirs[dir] = append(makerDirs[dir], rel(pkg.Fset.Position(id.Pos()).Filename)+":"+strconv.Itoa(pkg.Fset.Position(id.Pos()).Line))
+				case isInput(obj):
+					reads[pkg.PkgPath] = append(reads[pkg.PkgPath], obj.Pkg().Name()+"."+obj.Name())
 				}
-			}
-			if len(reads) > 0 {
-				p = append(p, fmt.Sprintf("program %s reads %s: the gate runs it once with no arguments, so a run that sets them could make other machines", dir, strings.Join(uniq(reads), ", ")))
 			}
 		}
 	}
+	for prog, paths := range reach {
+		for _, path := range paths {
+			r := reads[path]
+			if len(r) == 0 {
+				continue
+			}
+			what := "program " + prog + " reads "
+			if pkgs[path].dir != prog {
+				what = "program " + prog + " depends on " + path + ", which reads "
+			}
+			p = append(p, what+strings.Join(uniq(r), ", ")+": the gate runs it once with no arguments, so another run could make other machines")
+		}
+	}
 	for f := range importers {
-		if !checked[f] {
-			p = append(p, fmt.Sprintf("%s imports gsm but is in no type-checked package (a build constraint excludes it), so its machines would go unchecked", f))
+		if !listed[f] {
+			p = append(p, fmt.Sprintf("%s imports gsm but is in no loaded package (a build constraint excludes it), so its machines would go unchecked", rel(f)))
 		}
 	}
 	for dir, at := range makerDirs {
 		switch {
 		case !programs[dir]:
 			p = append(p, fmt.Sprintf("%s makes gsm machines (%s) but is not a catalog program", dir, strings.Join(first(uniq(at), 3), ", ")))
-		case !mainPkg[dir]:
+		case byDir[dir] == nil || byDir[dir].name != "main":
 			p = append(p, fmt.Sprintf("%s is a catalog program but not a main package, so the gate cannot run it", dir))
 		}
 	}
@@ -184,7 +350,7 @@ func scan(root string, cat *gate.Catalog) ([]string, error) {
 		}
 	}
 	sort.Strings(p)
-	return p, nil
+	return uniq(p), nil
 }
 
 // moduleOf returns the innermost module directory holding file, or "".
