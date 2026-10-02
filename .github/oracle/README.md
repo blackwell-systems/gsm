@@ -88,7 +88,8 @@ detected, and randomness is detected only when the two runs happen to differ.
   macOS, the BSDs, Solaris, AIX, Plan 9, Android, iOS, js/wasm and wasip1), plus
   any package one of whose excluded files (another platform's or a build tag's)
   imports gsm itself, through any module, one in a hidden directory or outside
-  the repository included;
+  the repository included. A file that only a custom build tag selects and that
+  imports gsm through another package is not followed;
 - a package refers to a gsm function or method that makes a machine
   (`NewRegistry`, `NewFederation`, a `Build`, `BuildOrSynthesize`,
   `BuildCoordinated`, `BuildCompositional`, `Synthesize`, `Certify` or
