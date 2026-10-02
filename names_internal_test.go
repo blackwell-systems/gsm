@@ -179,3 +179,79 @@ func TestSynthesisMachine_UnaffectedByLaterIndependent(t *testing.T) {
 		t.Fatalf("tables claim %q, want %q", got, "pairs all")
 	}
 }
+
+// midRunRegistry returns a registry whose invariant check declares one more event
+// named `extra` the first time it runs, so the declaration lands after the name
+// check and before the result is built.
+func midRunRegistry(name, extra string, withRepair bool) *Registry {
+	r := NewRegistry(name)
+	x := r.Int("x", 0, 2)
+	declared := false
+	ib := r.Invariant("cap").Watches(x).Holds(func(s State) bool {
+		if !declared {
+			declared = true
+			r.Event(extra).Writes(x).Apply(func(s State) State { return s }).Add()
+		}
+		return s.GetInt(x) <= 1
+	})
+	if withRepair {
+		ib.Repair(func(s State) State { return s.SetInt(x, 1) })
+	}
+	ib.Add()
+	r.Event("a").Writes(x).Apply(func(s State) State { return s.SetInt(x, 1) }).Add()
+	r.Event("b").Writes(x).Apply(func(s State) State { return s }).Add()
+	return r
+}
+
+// wantModified fails unless err is the rejection of a registry changed while it
+// was being verified.
+func wantModified(t *testing.T, err error, reg string) {
+	t.Helper()
+	want := `gsm: registry "` + reg + `" was changed while it was being verified (a rule declared ` +
+		`a variable, invariant, event, or Independent pair)`
+	if err == nil {
+		t.Fatalf("accepted a registry that gained an event during verification; want %q", want)
+	}
+	if err.Error() != want {
+		t.Fatalf("got %q, want %q", err, want)
+	}
+}
+
+// TestDeclareDuringVerification: a rule closure that declares an event while the
+// registry is being verified (here a duplicate "a", and a new unique name) must
+// not yield a result built from a registry other than the one checked.
+func TestDeclareDuringVerification(t *testing.T) {
+	for _, extra := range []string{"a", "c"} {
+		t.Run("Synthesize/"+extra, func(t *testing.T) {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Fatalf("panicked: %v", p)
+				}
+			}()
+			s, err := midRunRegistry("mid", extra, false).Synthesize()
+			if err == nil && s.Convergent {
+				m := s.Machine()
+				t.Logf("events %v, Apply(%q) = %s", m.Events(), extra, m.Apply(m.NewState(), extra))
+			}
+			wantModified(t, err, "mid")
+		})
+		t.Run("Build/"+extra, func(t *testing.T) {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Fatalf("panicked: %v", p)
+				}
+			}()
+			_, _, err := midRunRegistry("mid", extra, true).Build()
+			wantModified(t, err, "mid")
+		})
+		t.Run("BuildCompositional/"+extra, func(t *testing.T) {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Fatalf("panicked: %v", p)
+				}
+			}()
+			_, _, err := midRunRegistry("mid", extra, true).BuildCompositional()
+			wantModified(t, err, "mid")
+		})
+	}
+}
