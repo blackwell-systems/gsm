@@ -42,3 +42,39 @@ func TestDuplicateVariableName_VerifyRechecksTheWrongVariable(t *testing.T) {
 		t.Fatalf("got %q, want %q", err, want)
 	}
 }
+
+// TestVerify_ComponentKeyMustBeItsName: Verify digests the components by their
+// registry names but looks a table's target up by map key, so a map whose keys do
+// not match the registries' names re-checks a table against the wrong registry.
+func TestVerify_ComponentKeyMustBeItsName(t *testing.T) {
+	s := NewRegistry("s")
+	on := s.Bool("on")
+	s.DeclEvent("flip", Do(Set(on, Lit(1))))
+	strict := NewRegistry("t") // the table's target: x must stay 0
+	x := strict.Bool("x")
+	strict.DeclInvariant("x_clear", Eq(V(x), Lit(0)), Do(Set(x, Lit(0))))
+	lax := NewRegistry("u") // same variable, no invariant
+	lax.Bool("x")
+
+	// The table writes 1 into t.x: a validity-preservation violation for t.
+	tables := []MorphismTable{{
+		Target: "t", Sources: []string{"s"}, Shared: []string{"x"},
+		Rows: []TableRow{{SourceIDs: []uint64{0}, Values: []uint64{1}}, {SourceIDs: []uint64{1}, Values: []uint64{1}}},
+	}}
+	dig, err := digestComponentsAndTables([]*Registry{s, strict, lax}, tables, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &Certificate{Name: "forged", Digest: dig, Tables: tables}
+	if err := cert.Verify(map[string]*Registry{"s": s, "t": strict, "u": lax}); err == nil {
+		t.Fatal("premise: Verify must refuse the table against the real target")
+	}
+	err = cert.Verify(map[string]*Registry{"s": s, "t": lax, "u": strict})
+	if err == nil {
+		t.Fatal(`Verify accepted the table: with the keys swapped the digest still matches (it uses ` +
+			`registry names) and the table for "t" was re-checked against registry "u"`)
+	}
+	if want := `gsm: certificate "forged": component key "t" names registry "u"`; err.Error() != want {
+		t.Fatalf("got %q, want %q", err, want)
+	}
+}
