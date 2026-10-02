@@ -104,13 +104,11 @@ func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 			c.wfcReachableOK = diffReachableRepairTerminates(r)
 		}
 	}
-	h := sha256.New()
-	fmt.Fprintf(h, "%v|%s|%v|", c.goOK, c.goErr, c.allPairs)
-	h.Write(c.ast)
-	h.Write([]byte{0})
-	h.Write(c.tables)
-	var key [32]byte
-	copy(key[:], h.Sum(nil))
+	id := []byte(fmt.Sprintf("%v|%s|%v|", c.goOK, c.goErr, c.allPairs))
+	id = append(id, c.ast...)
+	id = append(id, 0)
+	id = append(id, c.tables...)
+	key := sha256.Sum256(id)
 	diffMu.Lock()
 	defer diffMu.Unlock()
 	if !diffSeen[key] {
@@ -135,13 +133,22 @@ func diffTables(m *Machine) ([]byte, int) {
 	if err != nil {
 		return nil, n
 	}
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 	p := filepath.Join(dir, "m.tables")
 	if err := m.WriteConvergenceTables(p); err != nil {
 		return nil, n
 	}
-	b, _ := os.ReadFile(p)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return nil, n
+	}
 	return b, n
+}
+
+func removeDir(dir string) {
+	if err := os.RemoveAll(dir); err != nil {
+		fmt.Fprintln(os.Stderr, "differential: removing temp dir:", err)
+	}
 }
 
 func diffAllPairsCommute(m *Machine) bool {
@@ -305,7 +312,7 @@ func runDifferential() int {
 		fmt.Fprintln(os.Stderr, "differential:", err)
 		return 1
 	}
-	defer os.RemoveAll(dir)
+	defer removeDir(dir)
 
 	diffMu.Lock()
 	cases := append([]*diffCase(nil), diffCases...)
@@ -422,19 +429,26 @@ func reportDifferential(results []diffResult) int {
 		b.WriteString("\n")
 	}
 	fmt.Print(b.String())
+	code := 0
 	if p := os.Getenv("GSM_ORACLE_REPORT"); p != "" {
-		_ = os.WriteFile(p, []byte(b.String()), 0o644)
+		if err := os.WriteFile(p, []byte(b.String()), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "differential: writing report:", err)
+			code = 1
+		}
 	}
 	if p := os.Getenv("GSM_ORACLE_CASES"); p != "" {
 		var all strings.Builder
 		for _, r := range results {
 			fmt.Fprintf(&all, "%s\trules=%d %s\ttables=%d %s\n", r.c.name, r.astExit, r.astClass, r.tableExit, r.tableClass)
 		}
-		_ = os.WriteFile(p, []byte(all.String()), 0o644)
+		if err := os.WriteFile(p, []byte(all.String()), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "differential: writing cases:", err)
+			code = 1
+		}
 	}
 	if len(bugLines) > 0 {
 		fmt.Fprintln(os.Stderr, "differential: FAIL: unexplained disagreement(s), see above")
 		return 1
 	}
-	return 0
+	return code
 }
