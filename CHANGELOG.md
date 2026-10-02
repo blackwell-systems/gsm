@@ -49,9 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it differing silently, and `Certify` digested the declaration. A closure that added a morphism
   to the federation reached the later passes (the monotonicity check) but not the machine, and
   `Certify` put its unverified table into the certificate. Both now work on a copy of the
-  federation's wiring taken when they are called, and reject a component registry changed while
-  they run (`gsm: registry "r" was changed while it was being verified ...`). **Behaviour
-  change:** such a federation is now rejected.
+  federation's wiring taken when they are called, so a morphism, component, or resolver added to
+  the federation while they run is ignored (not verified, and not in the machine or certificate),
+  and they reject a component registry changed while they run (`gsm: registry "r" was changed
+  while it was being verified ...`). **Behaviour change:** a federation whose closures declare on
+  a component while it is built or certified is now rejected.
 - **The rules oracle used the wrong arithmetic.** `astchecker` (normalization-confluence) evaluated
   rules over the natural numbers, so `Sub` truncated at 0 and a guard such as
   `Lt(Sub(V(a), V(b)), Lit(0))` was never true. It certified machines that `Build` correctly
