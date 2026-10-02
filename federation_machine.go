@@ -49,9 +49,20 @@ func (m *FedMachine) NewState() FedState {
 	return FedState{states: states}
 }
 
-// Of returns the component state for registry r.
+// Of returns the component state for registry r. Panics if r is not a component of the
+// federation, as Apply does.
 func (m *FedMachine) Of(fs FedState, r *Registry) State {
-	return fs.states[m.idx[r]]
+	return fs.states[m.mustIndex(r)]
+}
+
+// mustIndex returns r's component index, panicking if r is not a component (the map's zero
+// value would otherwise name component 0).
+func (m *FedMachine) mustIndex(r *Registry) int {
+	i, ok := m.idx[r]
+	if !ok {
+		panic(fmt.Sprintf("gsm: registry %q is not part of federation %q", r.name, m.name))
+	}
+	return i
 }
 
 // clone returns a FedState with an independent backing slice.
@@ -162,8 +173,11 @@ func (m *FedMachine) sourcesOf(fs FedState, j int) map[string]State {
 // Note the authority argument in action: if r is a non-source, applying an event that
 // touches r's shared component is overwritten by Phase 2 morphism repair — the source
 // registry is authoritative. Effects on r's local component survive. (§8.5.)
+//
+// Panics if r is not a component of the federation, or if the event is unknown, as
+// Machine.Apply does; ApplyNamed returns an error instead.
 func (m *FedMachine) Apply(fs FedState, r *Registry, event string) FedState {
-	i := m.idx[r]
+	i := m.mustIndex(r)
 	next := fs.clone()
 	next.states[i] = m.comps[i].Apply(next.states[i], event)
 	return m.Normalize(next)

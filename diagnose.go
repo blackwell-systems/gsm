@@ -120,7 +120,21 @@ func (f *Federation) cyclePath() string {
 // converges from the zero seed. Returns (nil, nil) if the network is acyclic. It is a cycle-local
 // analysis (it isolates the cycle's components and morphisms), intended to explain why a cyclic
 // Build was rejected, not to re-decide convergence.
+//
+// Like Build, it analyzes the federation as it was when called: it works on a frozen copy of
+// the wiring, and rejects a component registry changed while it runs (by a morphism closure
+// that declares on it, say), reporting that change over any error it caused.
 func (f *Federation) DiagnoseCycle() (*CycleDiagnostic, error) {
+	g, before := f.frozen()
+	d, err := g.diagnoseCycle()
+	if cerr := checkComponentsUnchanged(g.comps, before); cerr != nil {
+		return nil, cerr
+	}
+	return d, err
+}
+
+// diagnoseCycle is DiagnoseCycle on f itself; DiagnoseCycle calls it on a frozen copy.
+func (f *Federation) diagnoseCycle() (*CycleDiagnostic, error) {
 	cyc := f.findCycle()
 	if cyc == nil {
 		return nil, nil

@@ -10,8 +10,8 @@ can safely skip.
 Implemented (`certificate.go`): `Certificate`, `Federation.Certify`, `Federation.EmbedCertified`
 (re-checks internal edges from the tables instead of their closures, and rebuilds each component
 with `Build`, so component convergence is re-checked rather than trusted),
-morphism/resolver table extraction, a tamper-complete digest over component policies plus those
-tables, and `Certificate.Verify`, a standalone differential re-checker that re-derives the federated
+morphism/resolver table extraction, a digest that is tamper-complete over the declarations
+(component rules, names and declared pairs, plus those tables; see "Versioning and trust policy"), and `Certificate.Verify`, a standalone differential re-checker that re-derives the federated
 conditions from the tables rather than the producer's closures. Input ports are implemented
 (`Certify(Port{...})`): a subsystem may declare free shared variables an outer morphism drives once
 embedded, the inbound boundary morphism is verified at the seam (M1/R2), and the port declaration is
@@ -132,8 +132,15 @@ The capability tag on each internal resolver records how it composes:
 There is a single development certificate version until 1.0 (the digest domain tag
 `gsm-fedcert-v3`). It is not bumped per change, including verifier fixes. A certificate is
 **validated by re-check, never trusted by digest**: the digest only binds the certificate to the
-subsystem it describes (component policies, morphism tables, input ports). Everything the
-certificate asserts is re-derived when it is used:
+subsystem it describes. It covers each component's name, rules (`PolicyBytes`), and the names and
+declared pairs the rules are addressed by (`PolicyNames`: variable names and kinds, enum labels,
+event names, the Independent pairs), the morphism tables, the input ports and the cycle opt-in, so
+it changes when any of those declarations changes. A morphism or resolver closure is bound only
+through its table, which records its images at one representative target: a closure that differs
+only at other targets digests the same, and is caught at runtime by the FedMachine's image check.
+The digest began binding names and pairs during this development version; certificates issued
+before that no longer match and must be re-issued with `Certify` (the version tag is unchanged, per
+this policy). Everything the certificate asserts is re-derived when it is used:
 
 - `EmbedCertified` re-checks the internal morphisms from the tables (M1/R2, port freeness,
   acyclicity) and rebuilds every certified component with `Build`, which re-checks WFC and CC.

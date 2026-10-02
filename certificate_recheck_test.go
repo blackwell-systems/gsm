@@ -16,7 +16,10 @@ import (
 // pay_ship is the naive pay/ship machine (ship guarded on paid), which the old
 // Build certified as convergent through the unchecked disjointness shortcut
 // ("PairsDisjoint": 1). The registries below are the same rules, so the
-// certificate's digest still matches.
+// certificate's digest still matches. Its Digest field was recomputed when the
+// digest began to bind names and declared pairs (PolicyNames); every other field
+// is as v0.11.0 issued it, and the digest is the one the current code computes
+// for the same subsystem, so these tests still isolate the convergence re-check.
 
 func payShipSub() (sub *Federation, ps, audit *Registry) {
 	ps = NewRegistry("pay_ship")
