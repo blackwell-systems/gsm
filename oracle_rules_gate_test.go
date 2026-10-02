@@ -3,6 +3,7 @@ package gsm
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -276,5 +277,42 @@ func TestBuildSkipsTheRulesOracleOnLargeRules(t *testing.T) {
 	}
 	if rep.Assurance != AssuranceOracleTables || !strings.Contains(rep.RulesOracleSkipped, "above RulesOracleMaxWork") {
 		t.Fatalf("Assurance = %v, RulesOracleSkipped = %q; want tables only, skipped above the cap", rep.Assurance, rep.RulesOracleSkipped)
+	}
+}
+
+// At the default cap, RulesOracleMaxWork (2^29): 2^12 states (flags), 20
+// events and every pair is just under it and runs the rules oracle; 2^13
+// states is above it. The oracle is stubbed: this checks the cap, not the
+// oracle.
+func TestRulesOracleMaxWorkBoundary(t *testing.T) {
+	if RulesOracleMaxWork != 1<<29 || rulesOracleCap != RulesOracleMaxWork {
+		t.Fatalf("RulesOracleMaxWork = %d, rulesOracleCap = %d; want 2^29", RulesOracleMaxWork, rulesOracleCap)
+	}
+	for _, c := range []struct {
+		flags int
+		run   bool
+	}{{12, true}, {13, false}} {
+		ran := false
+		withRulesOracle(t, func(string, string) (oracle.RulesResult, error) {
+			ran = true
+			return oracle.RulesResult{Verdict: oracle.RulesCertified}, nil
+		})
+		r := combFlags(c.flags, 20, -1)
+		var mb, pb strings.Builder
+		if r.WriteMachineAST(&mb) != nil || r.WriteDeclaredPairs(&pb) != nil {
+			t.Fatal("not a combinator machine")
+		}
+		w, werr := oracle.RulesCost(mb.String(), pb.String(), 0)
+		if werr != nil {
+			t.Fatal(werr)
+		}
+		if under := w.Total.Cmp(big.NewInt(RulesOracleMaxWork)) <= 0; under != c.run {
+			t.Fatalf("2^%d states: work %v; want it under the cap: %v", c.flags, w, c.run)
+		}
+		if _, rep, err := r.Build(); err != nil || ran != c.run {
+			t.Errorf("2^%d states (work %v): Build: %v, rules oracle ran = %v; want %v", c.flags, w.Total, err, ran, c.run)
+		} else if !c.run && !strings.Contains(rep.RulesOracleSkipped, "is above RulesOracleMaxWork (536870912)") {
+			t.Errorf("2^%d states: RulesOracleSkipped = %q", c.flags, rep.RulesOracleSkipped)
+		}
 	}
 }

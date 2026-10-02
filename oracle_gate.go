@@ -44,19 +44,18 @@ var (
 // Measured on the generated Go (Apple M-series, TestRulesOracleCostPerStep and
 // the review of #17), the rules oracle takes at most about 4 ns per step (the
 // worst, 4.04 ns, on a wide Int domain; 0.7 to 3.2 ns elsewhere). Its memory is
-// the box, about states x (variables + 1) list cells: about 210 bytes per state
-// at 20 variables (213 MB at 2^20 states, 20 flags, the most measured), plus a
-// few MB. A state costs at least 24 x (variables + 1) steps, so the cap also
-// bounds the states. Within the cap the rules oracle adds at most:
-//   - 2^21 (this value): about 8 ms and a few MB;
-//   - 2^29: about 2.2 s and under about 150 MB;
-//   - 2^30: about 4.3 s and under about 300 MB (Build allows at most 2^20 states).
+// mostly the box, about states x (variables + 1) list cells: from about 100
+// bytes per state at 2 variables to about 220 at 20, plus a few MB. A state
+// costs at least 24 x (variables + 1) steps, so the cap also bounds the states
+// and variables together. So within the cap the rules oracle adds at most about
+// 4 ns x 2^29, 2.2 s, and under about 170 MB: the most measured within it is
+// 160 MB, at 2^20 states of 10 four-valued Ints (work 5.0 x 10^8).
 //
 // The bound takes the
 // repair depth from gsm's verification (Report.MaxRepairLen): if the oracle's
 // repair chains were longer than gsm's, it would take longer, up to its fuel
 // (the number of states) of repair steps per normalization.
-const RulesOracleMaxWork = 1 << 21
+const RulesOracleMaxWork = 1 << 29
 
 // rulesOracleCap is RulesOracleMaxWork. Only tests change it.
 var rulesOracleCap = RulesOracleMaxWork
