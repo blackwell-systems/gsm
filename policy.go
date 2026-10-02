@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -32,7 +33,8 @@ func (r *Registry) PolicyBytes() ([]byte, error) {
 // PolicyNames returns the canonical serialization of what the rules are addressed by,
 // which PolicyBytes (the oracle's input), and so PolicyDigest, leave out because the
 // oracle addresses variables and events by position: each variable's name, kind and enum
-// labels, each event's name, and the event pairs CC is checked for (WriteDeclaredPairs).
+// labels, each event's name, and the event pairs CC is checked for, as a set (sorted and
+// deduplicated, so the order and direction of Independent declarations do not matter).
 // PolicyIdentityDigest and certificate digests cover it. Replay logs,
 // projections, certificate tables, input ports and Set address these by name, and the
 // declared pairs decide which orderings the CC check covers, so two registries that
@@ -44,6 +46,9 @@ func (r *Registry) PolicyBytes() ([]byte, error) {
 //	 (event "pay")
 //	 (pairs all)
 //	)
+//
+// With Independent declarations the last line lists the pairs by event index instead,
+// for example (pairs (0 1) (1 2)).
 func (r *Registry) PolicyNames() ([]byte, error) {
 	if err := r.checkNames(); err != nil {
 		return nil, err
@@ -61,11 +66,29 @@ func (r *Registry) PolicyNames() ([]byte, error) {
 	for _, ev := range r.events {
 		fmt.Fprintf(&b, " (event %s)\n", strconv.Quote(ev.name))
 	}
-	var pairs strings.Builder
-	if err := r.WriteDeclaredPairs(&pairs); err != nil {
-		return nil, err
+	// The declared pairs as a set: sorted and deduplicated (each pair already has its
+	// lower event index first), so declaring the same pairs in another order, in the
+	// other direction, or twice is the same policy.
+	if r.allIndependent {
+		b.WriteString(" (pairs all)\n")
+	} else {
+		ps := r.ccPairs()
+		sort.Slice(ps, func(i, j int) bool {
+			if ps[i][0] != ps[j][0] {
+				return ps[i][0] < ps[j][0]
+			}
+			return ps[i][1] < ps[j][1]
+		})
+		b.WriteString(" (pairs")
+		for k, p := range ps {
+			if k > 0 && p == ps[k-1] {
+				continue
+			}
+			fmt.Fprintf(&b, " (%d %d)", p[0], p[1])
+		}
+		b.WriteString(")\n")
 	}
-	fmt.Fprintf(&b, " (%s)\n)\n", strings.TrimSuffix(pairs.String(), "\n"))
+	b.WriteString(")\n")
 	return []byte(b.String()), nil
 }
 

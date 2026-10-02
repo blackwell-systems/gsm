@@ -17,7 +17,8 @@ import (
 // Build certified as convergent through the unchecked disjointness shortcut
 // ("PairsDisjoint": 1). The registries below are the same rules, so the
 // certificate's digest still matches. Its Digest field was recomputed when the
-// digest began to bind names and declared pairs (PolicyNames); every other field
+// digest began to bind names and declared pairs (PolicyNames) and to quote the
+// names it frames; every other field
 // is as v0.11.0 issued it, and the digest is the one the current code computes
 // for the same subsystem, so these tests still isolate the convergence re-check.
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -320,7 +321,7 @@ func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowC
 		if err != nil {
 			return "", fmt.Errorf("gsm: component %q: %w", r.name, err)
 		}
-		h.Write([]byte(fmt.Sprintf("comp %s\n", r.name)))
+		h.Write([]byte(fmt.Sprintf("comp %s\n", strconv.Quote(r.name))))
 		h.Write(b)
 		h.Write(names)
 		h.Write([]byte{'\n'})
@@ -338,7 +339,7 @@ func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowC
 	prefs := append([]PortRef(nil), inputPorts...)
 	sortPortRefs(prefs)
 	for _, p := range prefs {
-		h.Write([]byte("inport " + p.Registry + "." + p.Var + "\n"))
+		h.Write([]byte("inport " + strconv.Quote(p.Registry) + " " + strconv.Quote(p.Var) + "\n"))
 	}
 	if allowCycles {
 		h.Write([]byte("allowcycles\n"))
@@ -349,11 +350,21 @@ func digestComponentsAndTables(comps []*Registry, tables []MorphismTable, allowC
 // serialize renders a table to a canonical, deterministic string for digesting.
 func (t MorphismTable) serialize() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "table %s <- [%s] shared=[%s]\n", t.Target, strings.Join(t.Sources, ","), strings.Join(t.Shared, ","))
+	// Every name is quoted, so no name can carry the framing of another.
+	fmt.Fprintf(&b, "table %s <- [%s] shared=[%s]\n", strconv.Quote(t.Target), quoteAll(t.Sources), quoteAll(t.Shared))
 	for _, row := range t.Rows {
 		fmt.Fprintf(&b, "  %v => %v\n", row.SourceIDs, row.Values)
 	}
 	return b.String()
+}
+
+// quoteAll renders names as space-separated quoted strings.
+func quoteAll(names []string) string {
+	q := make([]string, len(names))
+	for i, n := range names {
+		q[i] = strconv.Quote(n)
+	}
+	return strings.Join(q, " ")
 }
 
 // extractTables reifies every morphism and resolver into its extensional table by enumerating the

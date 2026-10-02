@@ -76,6 +76,22 @@ func (f *Federation) verify(subOf map[*Registry]int) error {
 
 // verifyEdge checks a single morphism: M1 validity-preservation, shared-only well-formedness,
 // and source-determinacy, by enumeration over valid source×target states.
+// checkSharedVars rejects a morphism whose Shared() variable is not its target's: the
+// target must have a variable at that index equal to it by value (sameVar). Freeness and
+// the tables address shared variables by index and name, so a Var of another registry
+// would otherwise stand for whichever variable sits at its index here (or none).
+func (f *Federation) checkSharedVars() error {
+	for _, e := range f.edges {
+		for _, v := range e.shared {
+			if v.index >= len(e.dst.vars) || !sameVar(e.dst.vars[v.index], v) {
+				return fmt.Errorf("gsm: morphism %s→%s: Shared() variable %q is not a variable of registry %q",
+					e.src.name, e.dst.name, v.name, e.dst.name)
+			}
+		}
+	}
+	return nil
+}
+
 // describe names the morphism's Map, for domainCheck.imageError.
 func (e edgeDef) describe() string {
 	return fmt.Sprintf("morphism %s→%s Map", e.src.name, e.dst.name)

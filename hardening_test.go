@@ -60,7 +60,7 @@ func TestBuildCoordinated_UnknownPointRejected(t *testing.T) {
 			t.Errorf("BuildCoordinated(%v): want a rejection of the unknown point, got %v", cp, err)
 		}
 	}
-	if _, _, err := f.BuildCoordinated([]CoordinationPoint{{Src: "src", Dst: "dst"}}); err != nil {
+	if _, _, err := f.BuildCoordinated([]CoordinationPoint{{Src: "src", Dst: "dst", Shared: []string{"n"}}}); err != nil {
 		t.Errorf("a point naming the morphism was rejected: %v", err)
 	}
 }
