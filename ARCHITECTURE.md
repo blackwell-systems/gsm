@@ -400,13 +400,31 @@ both reject the guarded pay/ship machine that `Build`'s former shortcut certifie
 table oracle checks every encodable state in the tables (including invalid states no run reaches),
 so either can reject a machine `Build` correctly accepts. Neither runs as part of `Build` or any
 other entry point: the guarantee they add holds for the machines they are actually run on. gsm's
-test suite runs them on its oracle test machines only when the env vars point at built binaries,
-and gsm's CI does not build them. A runtime gate that runs an extracted checker on every success
-path is planned. Only `Build` machines have tables, and only combinator rules serialize.
+CI builds both from a pinned proof commit, checks them against pinned hashes
+(`.github/oracle/`), and runs the whole test suite with `GSM_REQUIRE_ORACLES=1`, so the oracle
+tests cannot skip. A runtime gate that runs an extracted checker on every success path is planned.
+Only `Build` machines have tables, and only combinator rules serialize.
+
+**Differential cross-check** (`oracle_differential_test.go`). Every `Build` in the test run is
+recorded through a test-only observer, and after all tests `TestMain` runs both oracles on every
+distinct machine (the hand-written ones plus 600 random combinator machines from
+`oracle_random_test.go`). Each disagreement is classified, with Go-side evidence, as one of the
+known spec differences (declared pairs; the zero state; invariant-invalid encodings in the
+tables; `Build` requiring repair to terminate on every encoding where the rules oracle requires it
+only where an event reaches) or as unexplained, which fails the run.
+
+The rules oracle evaluates with gsm's arithmetic: signed integers and comparisons, clamped
+writes. It refuses to certify an expression that could exceed 2^31-1 in magnitude (Go's `int`
+wraps there on 32-bit platforms) and a write that could store a negative value into a two-valued
+variable with minimum 0 (a `Bool` stores `value != 0`). Before this, it subtracted over the
+naturals, truncating at 0, and certified machines `Build` correctly rejects (the guard
+`Lt(Sub(V a, V b), Lit 0)` was never true); the differential test found 36 such disagreements on
+random combinator machines, all on the oracle's side.
 
 If an oracle rejects a machine `Build` accepted, and the failing pair is one `Build` checks on a
-state in `Build`'s domain, one of them has a bug, and the extracted, proof-derived one is the
-reference. (The oracles' "FAIL" output does not name the pair or state; with every pair checked
+state in `Build`'s domain, one of them has a bug. The proof covers the checker's logic, not
+whether its model of the rules matches gsm's Go semantics, so the bug can be on either side: the
+arithmetic mismatch above was the oracle's. (The oracles' "FAIL" output does not name the pair or state; with every pair checked
 by default and a machine whose zero state is valid, a disagreement is always such a case for the
 rules oracle.) See the extraction README in `normalization-confluence` for
 the file formats and how to build the binaries.

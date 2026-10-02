@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The rules oracle used the wrong arithmetic.** `astchecker` (normalization-confluence) evaluated
+  rules over the natural numbers, so `Sub` truncated at 0 and a guard such as
+  `Lt(Sub(V(a), V(b)), Lit(0))` was never true. It certified machines that `Build` correctly
+  rejects. It now evaluates with gsm's signed arithmetic, and refuses to certify expressions that
+  could exceed 2^31-1 in magnitude or writes that could store a negative value into a two-valued,
+  minimum-0 variable (a `Bool` stores `value != 0`). `WriteMachineAST` now exports negative
+  minimums and literals; its output is otherwise unchanged, so `PolicyDigest` and certificate
+  digests are unchanged for every policy that exported before.
+
+### Added
+- **The oracle cross-check is required in CI.** A new `oracles` job builds both extracted checkers
+  from a pinned proof commit in a digest-pinned Rocq image, checks them against pinned SHA-256
+  hashes (`.github/oracle/`), and runs the whole test suite with `GSM_REQUIRE_ORACLES=1`, so the
+  oracle tests fail instead of skipping when a checker is missing.
+- **Differential test of every `Build`.** `oracle_differential_test.go` cross-checks every machine
+  the test suite builds, plus 600 random combinator machines, against both checkers, and fails on
+  any disagreement that is not one of the documented spec differences.
+
 ### Security
 - **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity
   check for any event pair whose triggered invariant footprints were disjoint, and never checked

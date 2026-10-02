@@ -225,7 +225,7 @@ r.On("inc_a").Does(Inc(a)).Add()
 
 Either spelling can be cross-checked against the verified **rules oracle**: `WriteMachineAST` emits the machine as S-expressions and the OCaml `astchecker` (extracted from the axiom-free Coq proof in `normalization-confluence`) recomputes convergence straight from those rules. It also certifies the **CRDT-fragment classification** (a machine-checked `compensation_free` verdict: whether repair is ever needed), so a consumer can confirm from the rules whether a machine is a plain CRDT or a compensation-bearing governed machine. See `astoracle_test.go` (`GSM_AST_CHECKER`).
 
-**Serializable fragment.** Only rules built from the combinator vocabulary can be exported to the oracle: variables over `min .. min+domain-1` (any nonnegative `min`); the comparison predicates `Le`/`Lt`/`Eq`/`Ge`/`Gt`/`Ne` and boolean `And`/`Or`/`Not`; the transforms `Set`/`Add`/`Sub`; and events with an optional guard. Closure-based invariants and events cannot be serialized, so `WriteMachineAST` returns an error rather than emit something the checker would misread. gsm's own `Build` verification has no such restriction; the fragment is only the boundary of what the extracted oracle can independently re-certify.
+**Serializable fragment.** Only rules built from the combinator vocabulary can be exported to the oracle: variables over `min .. min+domain-1` (any `min`, negative included); the comparison predicates `Le`/`Lt`/`Eq`/`Ge`/`Gt`/`Ne` and boolean `And`/`Or`/`Not`; the transforms `Set`/`Add`/`Sub`; and events with an optional guard. Closure-based invariants and events cannot be serialized, so `WriteMachineAST` returns an error rather than emit something the checker would misread. gsm's own `Build` verification has no such restriction; the fragment is only the boundary of what the extracted oracle can independently re-certify.
 
 **Policy as a portable artifact.** `Registry.PolicyBytes` returns those serialized bytes and `Registry.PolicyDigest` a stable, domain-separated SHA-256 over them, so a policy can be named and anchored independently of who built it (a rule written with the sugar surface digests identically to the equivalent primitive combinators). The digested bytes are exactly the oracle's input, so the anchored digest and the re-checked artifact cannot diverge. This is the interchange contract an external audit layer pins to: it commits the digest in a log and hands the same bytes to `astchecker`. `State.Digest` is the companion primitive for the resulting state: a stable, domain-separated hash over a state's packed value (meaningful because the policy pins the layout), so a layer that anchors a policy can also attest which state an action produced and reproduce it by replaying the same events over a reference build.
 
@@ -462,12 +462,13 @@ Machine: pay_ship
 
 Two checkers extracted from the axiom-free Coq proof can re-certify a machine independently of
 gsm's Go code. Neither runs as part of `Build` or any other gsm entry point: each runs only when
-someone invokes it on an exported machine. gsm's test suite invokes them on its oracle test
-machines (`oracle_test.go`, `astoracle_test.go`) when `GSM_CONVERGENCE_CHECKER` /
-`GSM_AST_CHECKER` point at the built binaries; gsm's CI does not build them, so CI skips those
-tests. A runtime gate that runs an extracted checker on every success path is planned (it needs
-the checker specs aligned with `Build`'s declared pairs and valid-state domain, and a way to run
-extracted code in-process).
+someone invokes it on an exported machine. gsm's CI builds both from a pinned, hash-checked
+proof commit (`.github/oracle/`) and cross-checks every machine the test suite passes to `Build`
+(the documented examples, the property-tested machines, and 600 random combinator machines)
+against them; there the oracle tests are required, not skipped. Locally they run when
+`GSM_CONVERGENCE_CHECKER` / `GSM_AST_CHECKER` point at built binaries. A runtime gate that runs
+an extracted checker on every success path is planned (it needs the checker specs aligned with
+`Build`'s declared pairs and valid-state domain, and a way to run extracted code in-process).
 
 - **Table oracle** (`checker`, input from `Machine.WriteConvergenceTables`): checks that every
   ordered pair of events commutes on every state in the emitted tables, by enumeration, with no
@@ -478,7 +479,12 @@ extracted code in-process).
   Only `Build` machines have tables.
 - **Rules oracle** (`astchecker`, input from `Registry.WriteMachineAST`): recomputes every event
   step from the combinator rules and checks that every ordered pair commutes on every valid
-  state, with no footprint shortcut. Closure rules cannot be exported.
+  state, with no footprint shortcut. Closure rules cannot be exported. Its arithmetic is gsm's
+  (signed integers, signed comparisons, clamped writes). It refuses to certify two things it does
+  not model: an expression that could exceed 2^31-1 in magnitude (Go's `int` wraps there on
+  32-bit platforms), and a write that could store a negative value into a two-valued variable
+  with minimum 0 (a `Bool` stores `value != 0`; the format does not say which variables are
+  `Bool`s, so the rule covers every such variable).
 
 Both reject the guarded-shipment machine above. Neither shares the footprint assumption that
 `Build`'s former shortcut relied on.
