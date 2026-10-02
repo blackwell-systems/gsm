@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -228,5 +229,60 @@ func TestScan(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("Scan:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A checker killed by a signal has crashed: it has not run to a verdict, and the
+// gate fails whatever the catalog expects, never reading it as "not run".
+func TestRunCheckerCrash(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell and signals")
+	}
+	crash := filepath.Join(t.TempDir(), "crash.sh")
+	if err := os.WriteFile(crash, []byte("#!/bin/sh\nkill -SEGV $$\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ok := Record{Name: "m", Kind: KindBuild, BuildOK: true}
+	cc := Record{Name: "m", Kind: KindBuild, BuildErr: "CC violated", CCFail: true}
+	cases := []struct {
+		name, catalog string
+		r             Record
+		crashRules    bool // which checker crashes; the other is the fake
+		rules, tables []byte
+	}{
+		{"rejected, rules checker crashes", "p m rejected", cc, true, in(1, "CC fails"), in(1, "no")},
+		{"rejected, table checker crashes", "p m rejected", cc, false, in(1, "CC fails"), in(1, "no")},
+		{"certified, rules checker crashes", "p m certified", ok, true, in(0, "ok"), in(0, "ok")},
+		{"certified, table checker crashes", "p m certified", ok, false, in(0, "ok"), in(0, "ok")},
+		{"synthesized, table checker crashes", "p m synthesized", Record{Name: "m", Kind: KindSynthesized, BuildOK: true}, false, nil, in(0, "ok")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cat, err := ParseCatalog(strings.NewReader(c.catalog))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dumps := t.TempDir()
+			var pairs []byte
+			if c.rules != nil {
+				pairs = []byte("pairs all\n")
+			}
+			if err = WriteRecord(filepath.Join(dumps, "p"), c.r, c.rules, pairs, c.tables); err != nil {
+				t.Fatal(err)
+			}
+			ck := fake()
+			if c.crashRules {
+				ck.Rules = crash
+			} else {
+				ck.Table = crash
+			}
+			rep, err := Run(dumps, cat, ck)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rep.OK() || !strings.Contains(problems(rep), "crashed") {
+				t.Fatalf("want a failure naming the crash, got:\n%s", rep)
+			}
+		})
 	}
 }
