@@ -101,8 +101,13 @@ func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
 	// compares each component's declarations before building with those it digests, so a closure
 	// that declares on a component cannot either.
 	g, before := f.frozen()
+	// A component changed by a closure is reported over any error the change caused (see
+	// Build); the closures run in build and in extractTables.
 	_, rep, err := g.build()
 	if err != nil {
+		if cerr := checkComponentsUnchanged(g.comps, before); cerr != nil {
+			return nil, cerr
+		}
 		return nil, err
 	}
 	refs, err := g.validateInputPorts(inputPorts)
@@ -110,10 +115,10 @@ func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
 		return nil, err
 	}
 	tables, err := g.extractTables()
-	if err != nil {
-		return nil, err
+	if cerr := checkComponentsUnchanged(g.comps, before); cerr != nil {
+		return nil, cerr
 	}
-	if err = checkComponentsUnchanged(g.comps, before); err != nil {
+	if err != nil {
 		return nil, err
 	}
 	dig, err := digestComponentsAndTables(g.comps, tables, g.allowCycles, refs)
