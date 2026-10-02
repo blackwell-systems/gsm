@@ -240,36 +240,54 @@ func TestFederationBuild_RejectsComponentChangedDuringBuild(t *testing.T) {
 }
 
 // TestFederationBuild_VerifiesTheWiringAsCalled: every pass of Federation.Build
-// sees the morphisms the machine is built from. A closure that adds a morphism to
-// the federation mid-build used to reach the later passes (here the monotonicity
-// check of a cyclic network) but not the machine.
+// (and of Certify) sees the morphisms the machine is built from. A closure that
+// adds a morphism to the federation mid-build used to reach the later passes
+// (here the monotonicity check of a cyclic network) but not the machine.
 func TestFederationBuild_VerifiesTheWiringAsCalled(t *testing.T) {
-	a := NewRegistry("a")
-	av := a.Bool("v")
-	b := NewRegistry("b")
-	bv := b.Bool("v")
-	c := NewRegistry("c")
-	cv := c.Bool("v")
-	added := false
-	var f *Federation
-	f = NewFederation("loop").AllowMonotoneCycles().Add(c).
-		Morphism(a, b).Shared(bv).Map(func(s, d State) State {
+	newFed := func(added *bool) *Federation {
+		a := NewRegistry("a")
+		av := a.Bool("v")
+		b := NewRegistry("b")
+		bv := b.Bool("v")
+		c := NewRegistry("c")
+		cv := c.Bool("v")
+		var f *Federation
+		f = NewFederation("loop").AllowMonotoneCycles().Add(c).
+			Morphism(a, b).Shared(bv).Map(func(s, d State) State {
+			if !*added {
+				*added = true
+				// Negation is not monotone; this morphism is never part of the machine.
+				f.Morphism(a, c).Shared(cv).Map(func(s, d State) State { return d.setRaw(cv, 1-s.getRaw(av)) }).Add()
+			}
+			return d.setRaw(bv, s.getRaw(av))
+		}).Add().
+			Morphism(b, a).Shared(av).Map(func(s, d State) State { return d.setRaw(av, s.getRaw(bv)) }).Add()
+		return f
+	}
+	t.Run("Build", func(t *testing.T) {
+		added := false
+		m, _, err := newFed(&added).Build()
 		if !added {
-			added = true
-			// Negation is not monotone; this morphism is never part of the machine.
-			f.Morphism(a, c).Shared(cv).Map(func(s, d State) State { return d.setRaw(cv, 1-s.getRaw(av)) }).Add()
+			t.Fatal("premise: a morphism was added during Build")
 		}
-		return d.setRaw(bv, s.getRaw(av))
-	}).Add().
-		Morphism(b, a).Shared(av).Map(func(s, d State) State { return d.setRaw(av, s.getRaw(bv)) }).Add()
-	m, _, err := f.Build()
-	if !added {
-		t.Fatal("premise: a morphism was added during Build")
-	}
-	if err != nil {
-		t.Fatalf("Build judged a morphism added mid-build, which its machine does not contain: %v", err)
-	}
-	if len(m.edges) != 2 {
-		t.Fatalf("machine has %d morphisms, want the 2 Build was called with", len(m.edges))
-	}
+		if err != nil {
+			t.Fatalf("Build judged a morphism added mid-build, which its machine does not contain: %v", err)
+		}
+		if len(m.edges) != 2 {
+			t.Fatalf("machine has %d morphisms, want the 2 Build was called with", len(m.edges))
+		}
+	})
+	t.Run("Certify", func(t *testing.T) {
+		added := false
+		cert, err := newFed(&added).Certify()
+		if !added {
+			t.Fatal("premise: a morphism was added during Certify")
+		}
+		if err != nil {
+			t.Fatalf("Certify judged a morphism added mid-build, which its certificate does not contain: %v", err)
+		}
+		if len(cert.Tables) != 2 {
+			t.Fatalf("certificate has %d tables, want the 2 morphisms Certify was called with", len(cert.Tables))
+		}
+	})
 }

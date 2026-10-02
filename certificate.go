@@ -96,16 +96,12 @@ type certifiedEmbed struct {
 // not in it, and a component registry changed while Certify runs is rejected.
 func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
 	// Build runs morphism closures after it verifies the components, and so does table
-	// extraction. Certify works on a copy of the federation's wiring, so a closure that adds a
-	// morphism, component, or resolver to f there cannot get it into the certificate, and it
-	// compares each component's declarations before Build with those it digests, so a closure
+	// extraction. Certify works on a frozen copy of the federation's wiring, so a closure that adds
+	// a morphism, component, or resolver to f there cannot get it into the certificate, and it
+	// compares each component's declarations before building with those it digests, so a closure
 	// that declares on a component cannot either.
-	g := f.clone()
-	before := make([]registryShape, len(g.comps))
-	for i, r := range g.comps {
-		before[i] = r.shape()
-	}
-	_, rep, err := g.Build()
+	g, before := f.frozen()
+	_, rep, err := g.build()
 	if err != nil {
 		return nil, err
 	}
@@ -117,10 +113,8 @@ func (f *Federation) Certify(inputPorts ...Port) (*Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i, r := range g.comps {
-		if err = r.checkUnchanged(before[i]); err != nil {
-			return nil, err
-		}
+	if err = checkComponentsUnchanged(g.comps, before); err != nil {
+		return nil, err
 	}
 	dig, err := digestComponentsAndTables(g.comps, tables, g.allowCycles, refs)
 	if err != nil {

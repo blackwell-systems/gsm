@@ -231,7 +231,46 @@ type FedState struct {
 //
 // This is the federated analogue of gsm's single-registry contract: a FedMachine only
 // exists if convergence is guaranteed.
+//
+// Build verifies and builds the federation as it was when Build was called: a morphism,
+// component, or resolver added to f while Build runs (from inside a morphism closure, say) is not
+// part of it, and a component registry changed while Build runs is rejected.
 func (f *Federation) Build() (*FedMachine, *FedReport, error) {
+	g, before := f.frozen()
+	m, rep, err := g.build()
+	if err != nil {
+		return nil, rep, err
+	}
+	if err = checkComponentsUnchanged(g.comps, before); err != nil {
+		return nil, rep, err
+	}
+	return m, rep, nil
+}
+
+// frozen returns a copy of f's wiring, which closures run during verification cannot change,
+// and each component's declarations (shape) as of now, to compare with checkComponentsUnchanged
+// once the closures have run.
+func (f *Federation) frozen() (*Federation, []registryShape) {
+	g := f.clone()
+	before := make([]registryShape, len(g.comps))
+	for i, r := range g.comps {
+		before[i] = r.shape()
+	}
+	return g, before
+}
+
+// checkComponentsUnchanged rejects a component whose declarations differ from before (see frozen).
+func checkComponentsUnchanged(comps []*Registry, before []registryShape) error {
+	for i, r := range comps {
+		if err := r.checkUnchanged(before[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// build is Build on f itself; Build calls it on a frozen copy.
+func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	// Names first: certificate validation and replay address (registry, event) by name.
 	for _, r := range f.comps {
 		if err := r.checkNames(); err != nil {
