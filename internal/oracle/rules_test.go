@@ -48,7 +48,7 @@ func TestCatchTurnsEveryPanicIntoAnError(t *testing.T) {
 	if err := catch(func() { panic("boom") }); err == nil {
 		t.Error("catch(panic) = nil; want an error")
 	}
-	if err := catch(func() { var m map[int]int; m[0] = 1 }); err == nil {
+	if err := catch(func() { var xs []int; _ = xs[len(xs)] }); err == nil {
 		t.Error("catch(runtime panic) = nil; want an error")
 	}
 	if err := catch(func() { failf("bad") }); err == nil || err.Error() != "bad" {

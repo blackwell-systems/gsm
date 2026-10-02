@@ -512,9 +512,11 @@ tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` s
   evaluates every invariant's predicate and one repair), and for each checked pair both events'
   guards and effects, each followed by a normalization, twice. So rule size, pairs, invariants
   and repair depth all count. Measured on the generated Go, the rules oracle takes at most about
-  3.2 ns per step (machines whose work is mostly pairs; 0.7 to 2 ns for expressions, predicates,
-  invariants and repair depth) and about 0.25 bytes of live heap per step plus a few MB, so within
-  the cap it adds at most about 7 ms and a few MB;
+  4 ns per step (the worst, 4.04 ns, on a wide Int domain; 0.7 to 3.2 ns elsewhere). Its memory is
+  the box, about states × (variables + 1) list cells: about 210 bytes per state at 20 variables
+  (213 MB at 2^20 states, the most measured), plus a few MB. Within the cap it adds at most about
+  8 ms and a few MB (2^29 would be about 2.2 s and under about 150 MB; 2^30 about 4.3 s and under
+  about 300 MB);
 - the machine is inside the rules oracle's fragment, which two static checks on the rules decide:
   no expression can leave |2^31-1| (`bounded`), and no write can store a negative value into a
   two-valued variable with minimum 0 (`signSafe`; a gsm `Bool` stores value != 0 where the model
@@ -683,8 +685,8 @@ Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather tha
 
 The rules oracle's own cost, per step of its work (`oracle.CheckRules` alone, Apple M-series;
 `GSM_RULES_COST=14 go test -run TestRulesOracleCostPerStep -v .`). These machines are above the
-cap, so that the times are measurable; within the cap (2^21 steps) the most it adds is about 3.2 ns
-x 2^21, 7 ms:
+cap, so that the times are measurable; within the cap (2^21 steps) the most it adds is about 4 ns
+x 2^21, 8 ms (the worst per step, 4.04 ns, was measured on a wide Int domain in the review of #17):
 
 | Combinator machine | Work (steps) | Rules oracle | Per step | Live heap |
 |---------|------------------|---------------|---------------|---------------|
