@@ -19,7 +19,7 @@ type Report struct {
 	// CC results
 	CC            bool
 	PairsTotal    int
-	PairsDisjoint int        // proved by footprint disjointness
+	PairsDisjoint int        // proved by verified footprint disjointness (BuildCompositional only; always 0 for Build)
 	PairsBrute    int        // proved by exhaustive check
 	CCFailure     *CCFailure // non-nil if CC failed
 
@@ -27,6 +27,12 @@ type Report struct {
 	Components         int  // number of footprint components verified
 	MaxComponentStates int  // largest component subspace enumerated
 	FootprintChecked   bool // closures verified to respect declared footprints
+
+	// FootprintViolation is non-empty when BuildCompositional rejected the machine
+	// because a closure does not respect its declared footprint. The rejection
+	// happens before WFC and CC run, so neither was evaluated and WFC/CC are false
+	// for that reason, not because either check failed.
+	FootprintViolation string
 }
 
 // CCFailure describes a specific CC violation.
@@ -41,9 +47,26 @@ type CCFailure struct {
 func (r *Report) String() string {
 	s := fmt.Sprintf("Machine: %s\n", r.Name)
 	s += fmt.Sprintf("  Variables: %d\n", r.VarCount)
-	s += fmt.Sprintf("  States: %d\n", r.StateCount)
+	if r.Components > 0 {
+		// BuildCompositional never enumerates the global state space.
+		s += fmt.Sprintf("  Components: %d\n", r.Components)
+	} else {
+		s += fmt.Sprintf("  States: %d\n", r.StateCount)
+	}
 	s += fmt.Sprintf("  Events: %d\n", r.EventCount)
 	s += "\n"
+
+	if r.FootprintViolation != "" {
+		// The build stopped before WFC and CC ran; report the cause, not a WFC failure.
+		s += "  Footprint conformance: FAIL\n"
+		s += fmt.Sprintf("    %s\n", r.FootprintViolation)
+		s += "  WFC: not evaluated (footprint violation)\n"
+		s += "  CC (Compensation Commutativity): not evaluated (footprint violation)\n"
+		return s
+	}
+	if r.FootprintChecked {
+		s += fmt.Sprintf("  Footprint conformance: PASS (largest component: %d states)\n", r.MaxComponentStates)
+	}
 
 	if r.WFC {
 		s += fmt.Sprintf("  WFC: PASS (max repair depth: %d)\n", r.MaxRepairLen)
@@ -129,7 +152,7 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 
 	// Phase 3: Verify CC (skipped when a certificate already attests convergence).
 	if runCC {
-		err = r.verifyCC(packedCount, valid, step, mkState, report)
+		err = r.verifyCC(packedCount, valid, nf, step, mkState, report)
 		if err != nil {
 			return nil, report, err
 		}
@@ -219,22 +242,40 @@ func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64,
 	return step
 }
 
-// verifyCC checks compensation commutativity for independent event pairs.
-func (r *Registry) verifyCC(packedCount int, valid []bool, step [][]uint64, mkState func(uint64) State, report *Report) error {
-	pairsDisjoint := 0
-	pairsBrute := 0
+// verifyCC checks compensation commutativity for every event pair ccPairs selects,
+// exactly, over the whole state space: for each valid state s it compares
+// Step[j][Step[i][s]] with Step[i][Step[j][s]]. The step tables are already
+// computed, so each pair costs two table lookups per state and no closure calls.
+//
+// There is deliberately no disjointness shortcut here. Skipping a pair because the
+// two events touch different variables is sound only when each event also READS
+// nothing outside its own footprint (the precondition of disjoint_events_commute in
+// normalization-confluence coq/Gsm.v), and an event's guard or effect may read any
+// variable. Establishing that precondition (verifyFootprints) costs more closure
+// calls per event than the exact check costs table lookups per pair, so Build always
+// runs the exact check and PairsDisjoint is always 0 for Build. BuildCompositional,
+// which cannot enumerate the global space, uses the shortcut only after
+// verifyFootprints has established the precondition for every component.
+func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][]uint64, mkState func(uint64) State, report *Report) error {
+	pairsChecked := 0
+
+	// The CC domain: every valid state (its own normal form), plus the zero state
+	// Machine.NewState returns, so a run started from NewState is covered even when
+	// the zero state violates an invariant. This is CC1 as THEORY.md §6.3 states it
+	// (over valid states). Every step lands on a valid state, so commutation on this
+	// domain makes any permutation of the checked events reach the same state from
+	// any valid start or from NewState. A state that is neither (an invalid state a
+	// caller builds by hand) is outside the guarantee.
+	inDomain := make([]bool, packedCount)
+	for s := 0; s < packedCount; s++ {
+		inDomain[s] = valid[s] && (nf[s] == uint64(s) || s == 0)
+	}
 
 	for _, p := range r.ccPairs() {
 		i, j := p[0], p[1]
-
-		if r.eventsDisjoint(i, j) {
-			pairsDisjoint++
-			continue
-		}
-
-		pairsBrute++
+		pairsChecked++
 		for s := 0; s < packedCount; s++ {
-			if !valid[s] {
+			if !inDomain[s] {
 				continue
 			}
 
@@ -243,9 +284,9 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, step [][]uint64, mkSt
 
 			if after_ij != after_ji {
 				report.CC = false
-				report.PairsTotal = pairsDisjoint + pairsBrute
-				report.PairsDisjoint = pairsDisjoint
-				report.PairsBrute = pairsBrute
+				report.PairsTotal = pairsChecked
+				report.PairsDisjoint = 0
+				report.PairsBrute = pairsChecked
 				report.CCFailure = &CCFailure{
 					Event1:  r.events[i].name,
 					Event2:  r.events[j].name,
@@ -259,9 +300,9 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, step [][]uint64, mkSt
 	}
 
 	report.CC = true
-	report.PairsTotal = pairsDisjoint + pairsBrute
-	report.PairsDisjoint = pairsDisjoint
-	report.PairsBrute = pairsBrute
+	report.PairsTotal = pairsChecked
+	report.PairsDisjoint = 0
+	report.PairsBrute = pairsChecked
 	return nil
 }
 
@@ -318,50 +359,4 @@ func (r *Registry) isValidEncoding(packed uint64) bool {
 		}
 	}
 	return true
-}
-
-// eventsDisjoint returns true if two events have disjoint write sets
-// AND the invariants they can trigger have disjoint footprints.
-func (r *Registry) eventsDisjoint(ei, ej int) bool {
-	// Get invariant footprint vars for each event
-	fp1 := r.eventFootprint(ei)
-	fp2 := r.eventFootprint(ej)
-
-	for v := range fp1 {
-		if fp2[v] {
-			return false
-		}
-	}
-	return true
-}
-
-// eventFootprint returns the union of footprints of all invariants
-// whose footprint overlaps with the event's write set.
-//
-// This computes the transitive closure: if event E writes variable V,
-// and invariant I watches V, then I's entire footprint is included
-// (because E can trigger I, and I's repair may modify other variables in its footprint).
-// Two events have disjoint footprints only if no invariant watches both.
-func (r *Registry) eventFootprint(ei int) map[int]bool {
-	writes := make(map[int]bool)
-	for _, vi := range r.events[ei].writes {
-		writes[vi] = true
-	}
-
-	fp := make(map[int]bool)
-	for _, inv := range r.invariants {
-		overlaps := false
-		for _, vi := range inv.footprint {
-			if writes[vi] {
-				overlaps = true
-				break
-			}
-		}
-		if overlaps {
-			for _, vi := range inv.footprint {
-				fp[vi] = true
-			}
-		}
-	}
-	return fp
 }
