@@ -67,20 +67,36 @@ checkout (its own module, since it needs `golang.org/x/tools`):
 
 ```
 go run . -dumps <dir> -catalog <file> \
-  -table-checker <checker> -rules-checker <astchecker> [-scan <repo root>]
+  -table-checker <checker> -rules-checker <astchecker> \
+  [-rerun <dir2>] [-scan <repo root>]
 ```
 
-`-scan` type-checks every module of the repository that imports gsm (test code
-excluded) and fails if a package refers to a gsm function or method that makes a
-machine (`NewRegistry`, `NewFederation`, a `Build`, `BuildOrSynthesize`,
-`BuildCoordinated`, `BuildCompositional`, `Synthesize`, `Certify` or
-`Synthesis.Machine`, called or taken as a value, under any import name) and is
-not a catalog program; if a catalog program is not a main package, or reads
-flags, its arguments or the environment (a run other than the gate's could make
-other machines); if a non-test Go file imports gsm but a build constraint keeps
-it out of every type-checked package; or if a document (`.md`, `.mdx`, `.rst`,
-`.adoc`, `.txt`, `.html`) shows a gsm machine without an `@doc` line. There is
-no exemption for a package that makes machines.
+`-scan` loads every Go module under the repository root, hidden, `testdata`,
+`vendor` and `node_modules` directories included, with its full import graph
+(test code excluded), and type-checks the packages its rules need. It fails if:
+
+- a main package depends on gsm, directly or through any module (one in a hidden
+  directory or outside the repository included), and is not a catalog program;
+- a package refers to a gsm function or method that makes a machine
+  (`NewRegistry`, `NewFederation`, a `Build`, `BuildOrSynthesize`,
+  `BuildCoordinated`, `BuildCompositional`, `Synthesize`, `Certify` or
+  `Synthesis.Machine`, called or taken as a value, under any import name) and is
+  not a catalog program, or a catalog program is not a main package;
+- a catalog program, or any package of the repository it imports, reads an input
+  that could make another run differ: flags, `os.Args`, the environment (`os`,
+  `syscall`), `os.Stdin`, files (`os.ReadFile`, `Open`, `OpenFile`, `ReadDir`,
+  `DirFS`, `Getwd`) or the platform (`runtime.GOOS`, `GOARCH`), or has a `.go`
+  file a build constraint excludes;
+- a non-test Go file imports gsm but is in no loaded package;
+- a directory is a symbolic link (the scan does not follow it);
+- a document (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.html`)
+  shows a gsm machine without an `@doc` line.
+
+The clock, randomness and the host name are not in that list: bide's core reads
+them for timestamps, keys and lease owners. `-rerun <dir2>`, the records of a
+second run of the same programs, catches a machine that depends on them: the
+gate fails if a program makes different machines on the two runs. There is no
+exemption for a package that makes machines.
 
 What the gate certifies: each listed machine (a registry, including each
 component of a federation) has the property `Build` checks, decided by the
