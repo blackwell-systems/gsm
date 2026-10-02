@@ -93,7 +93,18 @@ func (r *Report) String() string {
 }
 
 // Build verifies WFC and CC, then returns an immutable Machine.
-func (r *Registry) Build() (*Machine, *Report, error) { return r.build(true) }
+func (r *Registry) Build() (*Machine, *Report, error) {
+	m, rep, err := r.build(true)
+	if buildObserver != nil {
+		buildObserver(r, m, rep, err)
+	}
+	return m, rep, err
+}
+
+// buildObserver, when non-nil, sees every Build result. Only this package's tests
+// set it (once, before any test runs), to cross-check every machine the test suite
+// builds against the extracted checkers (oracle_differential_test.go).
+var buildObserver func(r *Registry, m *Machine, rep *Report, err error)
 
 // build is Build with a switch to skip Phase 3 (CC verification). runCC=false is used only by
 // Federation.DiagnoseCycle, which needs a component's normal forms to iterate a loop and makes no
