@@ -59,44 +59,57 @@ each synthesized machine and each compositional machine, which fails the gate
 because it has no global tables) as the checkers' inputs in that directory
 (`gate.go`). `internal/cmd/gsmgate` then runs both checkers on the records and
 compares the verdicts with the catalog (`internal/gate`). Without the tag none of
-this is compiled. A project that uses gsm can gate its own machines the same way:
-build its programs (main packages) with the tag against a gsm commit that has it,
-run each once, with no arguments, recording into its own subdirectory of `<dir>`
-named by its directory, then run, from `internal/cmd/gsmgate` of that gsm
-checkout (its own module, since it needs `golang.org/x/tools`):
+this is compiled. A project that uses gsm can gate its own machines the same way,
+with `internal/cmd/gsmgate` from a gsm checkout that has it (its own module, since
+it needs `golang.org/x/tools`). From that directory:
 
 ```
-go run . -dumps <dir> -catalog <file> \
-  -table-checker <checker> -rules-checker <astchecker> \
-  [-rerun <dir2>] [-scan <repo root>]
+go run . -run-programs <repo root> -gsm <gsm checkout> \
+  -dumps <dir1> -rerun <dir2> -catalog <file> \
+  -table-checker <checker> -rules-checker <astchecker> -scan <repo root>
 ```
+
+`-run-programs` builds each catalog program (a main package's directory) with
+`-tags gsmgate` against that gsm checkout (through a copy of its module's
+`go.mod`, so the repository is not changed) and runs it twice, canonically: no
+arguments, an environment of only `PATH=/usr/bin:/bin`, a fresh empty `HOME` and
+`TMPDIR` and the gate directory, empty standard input, and a fresh empty working
+directory. What the gate certifies is the machines each program makes when run
+that way. The two runs must make the same machines. They start within moments of
+each other on the same host, so a machine that depends on the time of day is not
+detected, and randomness is detected only when the two runs happen to differ.
 
 `-scan` loads every Go module under the repository root, hidden, `testdata`,
 `vendor` and `node_modules` directories included, with its full import graph
 (test code excluded), and type-checks the packages its rules need. It fails if:
 
-- a main package depends on gsm, directly or through any module (one in a hidden
-  directory or outside the repository included), and is not a catalog program;
+- a main package depends on gsm and is not a catalog program. Dependence is
+  taken over the import graphs of this platform and of 13 others (Linux, Windows,
+  macOS, the BSDs, Solaris, AIX, Plan 9, Android, iOS, js/wasm and wasip1), plus
+  any package one of whose excluded files (another platform's or a build tag's)
+  imports gsm itself, through any module, one in a hidden directory or outside
+  the repository included;
 - a package refers to a gsm function or method that makes a machine
   (`NewRegistry`, `NewFederation`, a `Build`, `BuildOrSynthesize`,
   `BuildCoordinated`, `BuildCompositional`, `Synthesize`, `Certify` or
   `Synthesis.Machine`, called or taken as a value, under any import name) and is
   not a catalog program, or a catalog program is not a main package;
-- a catalog program, or any package of the repository it imports, reads an input
-  that could make another run differ: flags, `os.Args`, the environment (`os`,
-  `syscall`), `os.Stdin`, files (`os.ReadFile`, `Open`, `OpenFile`, `ReadDir`,
-  `DirFS`, `Getwd`) or the platform (`runtime.GOOS`, `GOARCH`), or has a `.go`
-  file a build constraint excludes;
+- a catalog program, or any package of the repository it imports, has a `.go`
+  file a build constraint excludes, or refers to one of these identifiers: every
+  identifier of package `flag`; `os.Args`, `os.Getenv`, `os.LookupEnv`,
+  `os.Environ`, `os.ExpandEnv`, `os.Stdin`, `os.ReadFile`, `os.Open`,
+  `os.OpenFile`, `os.ReadDir`, `os.DirFS`, `os.Getwd`; `syscall.Getenv`,
+  `syscall.Environ`; `runtime.GOOS`, `runtime.GOARCH`. This is a list, not a
+  proof: other ways to read input (`fmt.Scan`, `os.Stat`, `filepath.Glob`,
+  `os.UserHomeDir`, running a command, a third-party package reading the
+  environment) are not on it. It is an early warning; the canonical runs are
+  what fix the input;
 - a non-test Go file imports gsm but is in no loaded package;
 - a directory is a symbolic link (the scan does not follow it);
 - a document (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.html`)
   shows a gsm machine without an `@doc` line.
 
-The clock, randomness and the host name are not in that list: bide's core reads
-them for timestamps, keys and lease owners. `-rerun <dir2>`, the records of a
-second run of the same programs, catches a machine that depends on them: the
-gate fails if a program makes different machines on the two runs. There is no
-exemption for a package that makes machines.
+There is no exemption for a package that makes machines.
 
 What the gate certifies: each listed machine (a registry, including each
 component of a federation) has the property `Build` checks, decided by the

@@ -44,6 +44,11 @@ var inputs = map[string]map[string]bool{
 	"runtime": {"GOOS": true, "GOARCH": true},
 }
 
+// otherPlatforms are the platforms whose import graphs the scan adds to this
+// one's, so that a main package that depends on gsm only on another platform is
+// still a program the catalog must list.
+var otherPlatforms = []string{"linux/amd64", "windows/amd64", "darwin/arm64", "freebsd/amd64", "openbsd/amd64", "netbsd/amd64", "solaris/amd64", "aix/ppc64", "plan9/amd64", "android/arm64", "ios/arm64", "js/wasm", "wasip1/wasm"}
+
 // docExts are the files read as documentation.
 var docExts = map[string]bool{".md": true, ".mdx": true, ".markdown": true, ".rst": true, ".adoc": true, ".txt": true, ".html": true, ".htm": true}
 
@@ -192,26 +197,87 @@ func scan(root string, cat *gate.Catalog) ([]string, error) {
 			pkgs[pkg.PkgPath] = info
 		}
 	}
-	var touch func(pkg *packages.Package, seen map[string]bool) bool
-	touch = func(pkg *packages.Package, seen map[string]bool) bool {
-		if v, ok := touches[pkg.PkgPath]; ok {
+	// Which packages depend on gsm, on any platform: the union of the import
+	// graphs of this platform and of otherPlatforms (for the modules with a main
+	// package), plus any package one of whose excluded files (another platform's,
+	// or a build tag's) imports gsm itself.
+	edges := map[string]map[string]bool{}
+	direct := map[string]bool{gsmPath: true}
+	addGraph := func(ps []*packages.Package) error {
+		var verr error
+		packages.Visit(ps, nil, func(pkg *packages.Package) {
+			if edges[pkg.PkgPath] == nil {
+				edges[pkg.PkgPath] = map[string]bool{}
+			}
+			for ip := range pkg.Imports {
+				edges[pkg.PkgPath][ip] = true
+			}
+			for _, f := range pkg.IgnoredFiles {
+				if !strings.HasSuffix(f, ".go") || strings.HasSuffix(f, "_test.go") {
+					continue
+				}
+				imp, ierr := importsGSM(f)
+				if ierr != nil {
+					verr = ierr
+					return
+				}
+				if imp {
+					direct[pkg.PkgPath] = true
+				}
+			}
+		})
+		return verr
+	}
+	if err = addGraph(graph); err != nil {
+		return nil, err
+	}
+	mainMods := map[string]bool{}
+	for _, info := range pkgs {
+		if info.name == "main" {
+			mainMods[info.module] = true
+		}
+	}
+	for _, mod := range modules {
+		if !mainMods[mod] {
+			continue
+		}
+		for _, plat := range otherPlatforms {
+			goos, goarch, _ := strings.Cut(plat, "/")
+			// Best effort: a package that does not load on another platform keeps
+			// its edges from this one.
+			ps, lerr := packages.Load(&packages.Config{
+				Mode: packages.NeedName | packages.NeedFiles | packages.NeedImports | packages.NeedDeps,
+				Dir:  mod,
+				Env:  append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0"),
+			}, patterns[mod]...)
+			if lerr != nil {
+				continue
+			}
+			if err = addGraph(ps); err != nil {
+				return nil, err
+			}
+		}
+	}
+	var touch func(path string, seen map[string]bool) bool
+	touch = func(path string, seen map[string]bool) bool {
+		if v, ok := touches[path]; ok {
 			return v
 		}
-		if seen[pkg.PkgPath] {
+		if seen[path] {
 			return false
 		}
-		seen[pkg.PkgPath] = true
-		v := pkg.PkgPath == gsmPath
-		for _, dep := range pkg.Imports {
+		seen[path] = true
+		v := direct[path]
+		for dep := range edges[path] {
 			if touch(dep, seen) {
 				v = true
 			}
 		}
-		touches[pkg.PkgPath] = v
+		touches[path] = v
 		return v
 	}
-	for _, pkg := range graph {
-		touch(pkg, map[string]bool{})
+	for path := range edges {
+		touch(path, map[string]bool{})
 	}
 
 	// Rule: every main package that depends on gsm is a catalog program.
