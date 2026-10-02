@@ -238,3 +238,101 @@ func TestReview_FederationMapDeclaresMidRun(t *testing.T) {
 		t.Errorf("Federation.Build accepted a Map that declared a variable on its target")
 	}
 }
+
+// R3: lazy Apply with an out-of-domain input and a guard that does not fire returned
+// the input unchanged, outside the machine. The input is now checked at entry.
+func TestReview_LazyApplyGuardFalseOutOfDomainInput(t *testing.T) {
+	r := NewRegistry("rev_guard")
+	n := r.Int("n", 0, 2)
+	r.Event("noop").Writes(n).Guard(func(s State) bool { return false }).
+		Apply(func(s State) State { return s.SetInt(n, 0) }).Add()
+	m, _, err := r.BuildCompositional()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := rawState(m.NewState(), n, 3)
+	for name, call := range map[string]func(){
+		"Apply":     func() { m.Apply(in, "noop") },
+		"Normalize": func() { m.Normalize(in) },
+	} {
+		msg := catchPanic(call)
+		if !strings.Contains(msg, "input {n=3} is not a state of machine") || !strings.Contains(msg, name) {
+			t.Errorf("%s did not reject the out-of-domain input: %q", name, msg)
+		}
+	}
+}
+
+// R4: lazy Apply on a foreign input blamed a correct effect. The input is now
+// rejected before any rule runs.
+func TestReview_LazyApplyForeignInputBlamesEffect(t *testing.T) {
+	r := NewRegistry("rev_blame")
+	n := r.Int("n", 0, 2)
+	r.Event("set2").Writes(n).Apply(func(s State) State { return s.SetInt(n, 2) }).Add()
+	m, _, err := r.BuildCompositional()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := foreignMachine(t, "wider", func(r *Registry) { r.Int("n", 0, 3) })
+	msg := catchPanic(func() { m.Apply(w.NewState(), "set2") })
+	if strings.Contains(msg, `event "set2" effect`) || !strings.Contains(msg, "is not a state of machine") {
+		t.Errorf("want the foreign input rejected, not the effect blamed: %q", msg)
+	}
+}
+
+// R5: MergeProjection wrote values outside the domain and truncated values wider
+// than the field without error; it now refuses them, and a state of another layout.
+func TestReview_MergeProjectionOutOfDomain(t *testing.T) {
+	r := NewRegistry("rev_merge")
+	r.Int("n", 0, 2)
+	m, _, err := r.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []uint64{3, 4, 1 << 40} {
+		out, err := m.MergeProjection(m.NewState(), Projection{Shared: map[string]uint64{"n": raw}})
+		if err == nil {
+			t.Errorf("raw %d: MergeProjection returned %s with no error", raw, out)
+		} else if !strings.Contains(err.Error(), "outside 0..2") {
+			t.Errorf("raw %d: the error does not give the domain: %v", raw, err)
+		}
+	}
+	if _, err := m.MergeProjection(m.NewState(), Projection{Shared: map[string]uint64{"n": 2}}); err != nil {
+		t.Errorf("an in-domain value was refused: %v", err)
+	}
+	w := foreignMachine(t, "wider", func(r *Registry) { r.Int("n", 0, 3) })
+	if _, err := m.MergeProjection(w.NewState(), Projection{Shared: map[string]uint64{"n": 1}}); err == nil ||
+		!strings.Contains(err.Error(), "is not a state of machine") {
+		t.Errorf("a state of another layout was merged into: %v", err)
+	}
+}
+
+// R12: BuildOrSynthesize swallowed Build's out-of-domain repair error and returned a
+// machine with a synthesized compensation. It falls back only when the compensation
+// as written does not converge (or is missing), and returns other errors as they are.
+func TestReview_BuildOrSynthesizeSwallowsDomainError(t *testing.T) {
+	r := capped("rev_bos", func(s State, n Var) State { return rawState(s, n, 3) }, effectSetOne)
+	m, syn, err := r.BuildOrSynthesize()
+	if err == nil || m != nil || syn != nil || !strings.Contains(err.Error(), "not a state of machine") {
+		t.Errorf("want Build's out-of-domain error returned as is; got machine=%v synthesis=%v err=%v", m != nil, syn != nil, err)
+	}
+}
+
+// R13: BuildOrSynthesize after a mid-run declaration synthesized on the changed
+// registry and returned a machine.
+func TestReview_BuildOrSynthesizeSwallowsMidRunChange(t *testing.T) {
+	r := NewRegistry("mid")
+	x := r.Int("x", 0, 2)
+	declared := false
+	r.Event("a").Writes(x).Apply(func(s State) State {
+		if !declared {
+			declared = true
+			r.Bool("late")
+		}
+		return s
+	}).Add()
+	m, _, err := r.BuildOrSynthesize()
+	if m != nil {
+		t.Fatalf("BuildOrSynthesize returned a machine (%d vars) after a rule changed the registry mid-Build", len(m.vars))
+	}
+	wantModified(t, err)
+}
