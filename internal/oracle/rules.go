@@ -112,15 +112,17 @@ type parseError string
 
 func failf(f string, a ...any) { panic(parseError(fmt.Sprintf(f, a...))) }
 
-// catch runs f and turns a parseError into an error.
+// catch runs f and turns any panic into an error: a parseError is the input's
+// fault, anything else a stop in this code, and either way there is no
+// verdict (fail closed).
 func catch(f func()) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			pe, ok := r.(parseError)
-			if !ok {
-				panic(r)
+			if pe, ok := r.(parseError); ok {
+				err = errors.New(string(pe))
+			} else {
+				err = fmt.Errorf("the reader stopped: %v", r)
 			}
-			err = errors.New(string(pe))
 		}
 	}()
 	f()

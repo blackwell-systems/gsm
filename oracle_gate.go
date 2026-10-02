@@ -23,17 +23,21 @@ var tableOracle = oracle.CheckLookup
 // rulesOracle is the rules oracle. Only tests replace it.
 var rulesOracle = oracle.CheckRules
 
-// RulesOracleMaxStatePairs caps the rules oracle's work. Build runs the rules
-// oracle on a combinator machine only when its number of states times its
-// number of checked event pairs (every pair when none is declared; at least 1)
-// is at most this; above it the table oracle alone certifies the machine. The
-// rules oracle re-derives every step from the expression trees, at about 3 µs
-// per state and pair in the generated Go (Apple M-series): at the cap (2^20
-// states with 2 pairs), Build takes about 6 s with both oracles.
-const RulesOracleMaxStatePairs = 1 << 21
+// RulesOracleMaxWork caps the rules oracle's work. Build runs the rules oracle
+// on a combinator machine only when its number of states times its number of
+// events plus checked event pairs (every pair when none is declared), at least
+// the number of states, is at most this; above it the table oracle alone
+// certifies the machine. The rules oracle re-derives every step from the
+// expression trees. Measured on the generated Go (Apple M-series), it adds
+// about 1.2 us per state plus 2.1 us per state and checked pair of time, and
+// about 240 bytes per state plus 9 bytes per state and event of memory. So
+// within the cap it adds at most about 4.5 s (states x pairs near the cap) and
+// about 250 MB (2^20 states), and Build with both oracles stays under about
+// 6 s.
+const RulesOracleMaxWork = 1 << 21
 
-// rulesOracleCap is RulesOracleMaxStatePairs. Only tests change it.
-var rulesOracleCap = RulesOracleMaxStatePairs
+// rulesOracleCap is RulesOracleMaxWork. Only tests change it.
+var rulesOracleCap = RulesOracleMaxWork
 
 // Assurance says what certified a machine's convergence.
 type Assurance int
@@ -178,16 +182,16 @@ func certifyRules(r *Registry) (skipped string, err error) {
 	if werr := r.WriteDeclaredPairs(&pb); werr != nil {
 		return "not a combinator machine (" + werr.Error() + ")", nil
 	}
+	// Build succeeded, so the state space is at most 2^20 states: no product
+	// below overflows.
 	states := 1
 	for _, v := range r.vars {
 		states *= v.domain
-		if states > rulesOracleCap {
-			break
-		}
 	}
-	pairs := max(len(r.ccPairs()), 1)
-	if states > rulesOracleCap || states*pairs > rulesOracleCap {
-		return fmt.Sprintf("%d states x %d pairs is above RulesOracleMaxStatePairs (%d)", states, pairs, rulesOracleCap), nil
+	events, pairs := len(r.events), len(r.ccPairs())
+	if work := states * max(events+pairs, 1); work > rulesOracleCap {
+		return fmt.Sprintf("%d states x (%d events + %d pairs) = %d is above RulesOracleMaxWork (%d)",
+			states, events, pairs, work, rulesOracleCap), nil
 	}
 	res, cerr := rulesOracle(mb.String(), pb.String())
 	if cerr != nil {

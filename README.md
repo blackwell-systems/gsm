@@ -505,11 +505,15 @@ tables: it re-derives every step by evaluating the expression trees, so it does 
 tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` says which did not:
 - every rule is a combinator (`DeclInvariant`, `DeclEvent`, `DeclEventGuarded`), so the machine
   has rules to read;
-- the number of states times the number of checked pairs (every pair when none is declared; at
-  least 1) is at most `RulesOracleMaxStatePairs` (2^21). The rules oracle costs about 3 µs per state
-  and pair; at the cap, `Build` takes about 6 s;
-- the machine is inside the rules oracle's fragment: expressions stay within |2^31-1|, and no
-  write stores a negative value into a two-valued variable (the oracle has no verdict otherwise).
+- the number of states times the number of events plus checked pairs (every pair when none is
+  declared), at least the number of states, is at most `RulesOracleMaxWork` (2^21). The rules
+  oracle adds about 1.2 µs per state plus 2.1 µs per state and checked pair of time, and about
+  240 bytes per state plus 9 bytes per state and event of memory, so within the cap it adds at
+  most about 4.5 s and 250 MB;
+- the machine is inside the rules oracle's fragment, which two static checks on the rules decide:
+  no expression can leave |2^31-1| (`bounded`), and no write can store a negative value into a
+  two-valued variable with minimum 0 (`signSafe`; a gsm `Bool` stores value != 0 where the model
+  clamps). The oracle has no verdict outside it.
 
 If it runs and does not certify the machine (repair does not terminate, or a declared pair does
 not commute), or gives no verdict, `Build` fails closed like the table oracle. `SynthesizeWith`
@@ -674,12 +678,13 @@ Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather tha
 
 The rules oracle adds its own cost on combinator machines within its cap (Build with both oracles):
 
-| Combinator machine | States x pairs | Build |
-|---------|------------------|---------------|
-| 2¹² states, 12 events, every pair (66) | 270,336 | 0.5 s |
-| 2²⁰ states, 20 events, 1 declared pair | 2²⁰ | 4.0 s |
-| 2²⁰ states, 20 events, 2 declared pairs | 2²¹ (the cap) | 5.9 s |
-| 2²⁰ states, 20 events, every pair | above the cap: table oracle only | 6.0 s |
+| Combinator machine | States x (events + pairs) | Build, both oracles | Build, table oracle only | Peak RSS added |
+|---------|------------------|---------------|---------------|---------------|
+| 2²⁰ states, 1 event | 2²⁰ | 1.4 s | 0.13 s | 254 MB |
+| 2¹³ states, 20 events, every pair (190) | 1.7 M | 3.2 s | 0.04 s | 9 MB |
+| 2¹⁴ states, 14 events, every pair (91) | 1.7 M | 3.3 s | 0.04 s | 11 MB |
+| 2¹⁶ states, 16 events, 16 declared pairs | 2²¹ (the cap) | 2.2 s | 0.07 s | 29 MB |
+| 2²⁰ states, 20 events, 1 declared pair | 22 M, above the cap | 1.0 s (table oracle only) | 1.0 s | 0 |
 
 For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast.
 

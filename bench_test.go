@@ -36,16 +36,21 @@ func wideFlags(n int) *Registry {
 	return r
 }
 
-// combFlags: wideFlags written with combinators, so Build's rules oracle can
-// read it; pairs >= 0 declares that many pairs independent (raise0..), -1
+// combFlags: n Bool flags written with combinators, so Build's rules oracle
+// can read it, and events raising them in turn (event e raises flag e mod n);
+// pairs >= 0 declares that many pairs independent (raise0.., in order), -1
 // leaves every pair checked.
-func combFlags(n, pairs int) *Registry {
-	r := NewRegistry(fmt.Sprintf("comb_flags_%d", n))
+func combFlags(n, events, pairs int) *Registry {
+	r := NewRegistry(fmt.Sprintf("comb_flags_%d_%d", n, events))
+	var fs []Var
 	for k := 0; k < n; k++ {
-		r.DeclEvent(fmt.Sprintf("raise%d", k), Raise(r.Bool(fmt.Sprintf("f%d", k))))
+		fs = append(fs, r.Bool(fmt.Sprintf("f%d", k)))
 	}
-	for i, c := 0, 0; i < n && c < pairs; i++ {
-		for j := i + 1; j < n && c < pairs; j, c = j+1, c+1 {
+	for e := 0; e < events; e++ {
+		r.DeclEvent(fmt.Sprintf("raise%d", e), Raise(fs[e%n]))
+	}
+	for i, c := 0, 0; i < events && c < pairs; i++ {
+		for j := i + 1; j < events && c < pairs; j, c = j+1, c+1 {
 			r.Independent(fmt.Sprintf("raise%d", i), fmt.Sprintf("raise%d", j))
 		}
 	}
@@ -98,20 +103,18 @@ func BenchmarkBuild_WideFlags20(b *testing.B) {
 	benchBuild(b, func() *Registry { return wideFlags(20) })
 }
 
-// The rules oracle's cost: 2^20 states with 1 and 2 declared pairs (2^20 and
-// 2^21 state-pairs, at RulesOracleMaxStatePairs), and every pair (above the
-// cap: table oracle only).
-func BenchmarkBuild_CombFlags20Pairs1(b *testing.B) {
-	benchBuild(b, func() *Registry { return combFlags(20, 1) })
+// The rules oracle's cost near RulesOracleMaxWork (2^21): the most states
+// (2^20 states, one event: the most memory), the most pairs (2^13 states, 20
+// events, every pair: 8192 x 210), and above the cap (2^20 states, 20 events,
+// one pair: table oracle only).
+func BenchmarkBuild_CombMostStates(b *testing.B) {
+	benchBuild(b, func() *Registry { return combFlags(20, 1, 0) })
 }
-func BenchmarkBuild_CombFlags20Pairs2(b *testing.B) {
-	benchBuild(b, func() *Registry { return combFlags(20, 2) })
+func BenchmarkBuild_CombMostPairs(b *testing.B) {
+	benchBuild(b, func() *Registry { return combFlags(13, 20, -1) })
 }
-func BenchmarkBuild_CombFlags20AllPairs(b *testing.B) {
-	benchBuild(b, func() *Registry { return combFlags(20, -1) })
-}
-func BenchmarkBuild_CombFlags12AllPairs(b *testing.B) {
-	benchBuild(b, func() *Registry { return combFlags(12, -1) })
+func BenchmarkBuild_CombAboveCap(b *testing.B) {
+	benchBuild(b, func() *Registry { return combFlags(20, 20, 1) })
 }
 
 func benchCompositional(b *testing.B, n int) {

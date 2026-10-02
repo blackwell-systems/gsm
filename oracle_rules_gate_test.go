@@ -92,34 +92,9 @@ func TestBuildSkipsTheRulesOracleWithoutCombinatorRules(t *testing.T) {
 	}
 }
 
-// Above the cap on states x pairs (pairs: every pair when none is declared),
-// the rules oracle does not run; at the cap it does.
+// Above the cap on states x (events + pairs), pairs being every pair when none
+// is declared, the rules oracle does not run; at the cap it does.
 func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
-	// combCapped: 4 x 2 = 8 states, 1 pair (every pair of 2 events).
-	for cap, wantRun := range map[int]bool{7: false, 8: true} {
-		withRulesCap(t, cap)
-		ran := false
-		withRulesOracle(t, func(m, p string) (oracle.RulesResult, error) { ran = true; return oracle.CheckRules(m, p) })
-		m, rep, err := combCapped().Build()
-		if err != nil || m == nil {
-			t.Fatalf("cap %d: Build: %v", cap, err)
-		}
-		if ran != wantRun {
-			t.Errorf("cap %d: the rules oracle ran = %v, want %v", cap, ran, wantRun)
-		}
-		want := AssuranceOracleTables
-		if wantRun {
-			want = AssuranceOracleTablesAndRules
-		}
-		if rep.Assurance != want {
-			t.Errorf("cap %d: Assurance = %v, want %v", cap, rep.Assurance, want)
-		}
-		if !wantRun && !strings.Contains(rep.RulesOracleSkipped, fmt.Sprint(cap)) {
-			t.Errorf("cap %d: RulesOracleSkipped = %q does not name the cap", cap, rep.RulesOracleSkipped)
-		}
-	}
-	// Pairs count: three events give three pairs (8 x 3 = 24), and declaring
-	// one pair independent leaves one (8 x 1).
 	three := func(declare bool) *Registry {
 		r := combCapped()
 		r.DeclEvent("raiseb2", Raise(r.vars[1]))
@@ -128,31 +103,48 @@ func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 		}
 		return r
 	}
+	no := func() *Registry {
+		r := NewRegistry("no_events")
+		r.Int("a", 0, 3)
+		return r
+	}
 	for _, c := range []struct {
-		declare bool
-		cap     int
-		want    Assurance
+		name string
+		mk   func() *Registry
+		cap  int
+		run  bool
+		msg  string
 	}{
-		{false, 23, AssuranceOracleTables},
-		{false, 24, AssuranceOracleTablesAndRules},
-		{true, 7, AssuranceOracleTables},
-		{true, 8, AssuranceOracleTablesAndRules},
+		// combCapped: 4 x 2 = 8 states, 2 events, 1 pair (every pair).
+		{"two events", combCapped, 23, false, "8 states x (2 events + 1 pairs) = 24"},
+		{"two events", combCapped, 24, true, ""},
+		// Three events: every pair is 3 pairs.
+		{"three events", func() *Registry { return three(false) }, 47, false, "8 states x (3 events + 3 pairs) = 48"},
+		{"three events", func() *Registry { return three(false) }, 48, true, ""},
+		// Declaring one pair independent leaves one.
+		{"three events, one pair", func() *Registry { return three(true) }, 31, false, "8 states x (3 events + 1 pairs) = 32"},
+		{"three events, one pair", func() *Registry { return three(true) }, 32, true, ""},
+		// No events: the work is the states.
+		{"no events", no, 3, false, "4 states x (0 events + 0 pairs) = 4"},
+		{"no events", no, 4, true, ""},
 	} {
 		withRulesCap(t, c.cap)
-		m, rep, err := three(c.declare).Build()
+		ran := false
+		withRulesOracle(t, func(m, p string) (oracle.RulesResult, error) { ran = true; return oracle.CheckRules(m, p) })
+		m, rep, err := c.mk().Build()
 		if err != nil || m == nil {
-			t.Fatalf("three events, declare %v, cap %d: Build: %v\n%s", c.declare, c.cap, err, rep)
+			t.Fatalf("%s, cap %d: Build: %v\n%s", c.name, c.cap, err, rep)
 		}
-		if rep.Assurance != c.want {
-			t.Errorf("three events, declare %v, cap %d: Assurance = %v, want %v", c.declare, c.cap, rep.Assurance, c.want)
+		want := AssuranceOracleTables
+		if c.run {
+			want = AssuranceOracleTablesAndRules
 		}
-	}
-	// With no events there are no pairs: the cost is the states.
-	withRulesCap(t, 3)
-	r := NewRegistry("no_events")
-	r.Int("a", 0, 3)
-	if _, rep, err := r.Build(); err != nil || rep.Assurance != AssuranceOracleTables {
-		t.Errorf("4 states, no pairs, cap 3: Assurance = %v, err %v; want tables only", rep.Assurance, err)
+		if ran != c.run || rep.Assurance != want {
+			t.Errorf("%s, cap %d: ran = %v, Assurance = %v; want %v, %v", c.name, c.cap, ran, rep.Assurance, c.run, want)
+		}
+		if !c.run && !strings.Contains(rep.RulesOracleSkipped, c.msg+" is above RulesOracleMaxWork ("+fmt.Sprint(c.cap)+")") {
+			t.Errorf("%s, cap %d: RulesOracleSkipped = %q; want it to give %q and the cap", c.name, c.cap, rep.RulesOracleSkipped, c.msg)
+		}
 	}
 }
 
