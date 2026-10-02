@@ -146,3 +146,40 @@ func TestCertify_RejectsRegistryChangedDuringCertify(t *testing.T) {
 		t.Fatalf("got %q, want %q", err, want)
 	}
 }
+
+// TestCertify_CertifiesTheFederationAsCalled: a morphism closure that adds a
+// morphism to the federation while Certify runs must not put an unverified
+// morphism's table into the certificate.
+func TestCertify_CertifiesTheFederationAsCalled(t *testing.T) {
+	src := NewRegistry("src")
+	flag := src.Bool("flag")
+	src.DeclEvent("raise", Do(Set(flag, Lit(1))))
+	dst := NewRegistry("dst")
+	mir := dst.Bool("mirror")
+	extra := NewRegistry("extra")
+	ex := extra.Bool("ex")
+	extra.DeclInvariant("ex_clear", Eq(V(ex), Lit(0)), Do(Set(ex, Lit(0))))
+	armed, added := false, false
+	var f *Federation
+	f = NewFederation("fed").Add(extra).Morphism(src, dst).Shared(mir).
+		Map(func(s, d State) State {
+			if armed && !added {
+				added = true
+				// Writes ex = 1: breaks validity preservation for extra; never verified.
+				f.Morphism(src, extra).Shared(ex).Map(func(_, d State) State { return d.setRaw(ex, 1) }).Add()
+			}
+			return d.setRaw(mir, s.getRaw(flag))
+		}).Add()
+	armed = true
+	cert, err := f.Certify()
+	if !added {
+		t.Fatal("premise: the morphism added a morphism during Certify")
+	}
+	if err != nil {
+		t.Fatalf("Certify of the federation as called: %v", err)
+	}
+	if len(cert.Tables) != 1 || cert.Tables[0].Target != "dst" {
+		t.Fatalf("the certificate covers %d tables (%v); want only src->dst, the morphism Certify verified",
+			len(cert.Tables), cert.Tables)
+	}
+}
