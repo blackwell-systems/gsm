@@ -6,8 +6,8 @@
 # new hashes for PROVENANCE instead of checking them.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck disable=SC1091
-source <(grep -E '^[A-Z_]+=' "$here/PROVENANCE" | sed -E 's/^([A-Z_]+)=(.*)$/\1="\2"/')
+# PROVENANCE's KEY=value lines (keys may contain digits: JSON_SHA256).
+eval "$(grep -E '^[A-Z0-9_]+=' "$here/PROVENANCE" | sed -E 's/^([A-Z0-9_]+)=(.*)$/\1="\2"/')"
 commit="${1:-$NC_COMMIT}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
