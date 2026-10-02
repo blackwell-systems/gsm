@@ -32,8 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OCaml 4.14.2 in the pinned image) died with `Stack_overflow` on 2^20-state tables, gsm's maximum
   size, so those machines failed the oracle cross-check with an input error. The oracle is now
   pinned to `check_fast` (normalization-confluence `TableFast.v`), proven equal to `check_tables`
-  and axiom-free: it runs in constant stack and takes about 5 s on 2^20 states with 10 declared
-  pairs, where the previous checker took about 60 s when it ran at all.
+  and axiom-free. Its stack depth does not grow with the number of states, events or declared
+  pairs. On 2^20 states with 10 declared pairs it takes about 5 s (OCaml 4.14.2); the previous
+  checker took about 60 s there when built with OCaml 5, and never completed with the pinned 4.14.2
+  build. `TestConvergenceTables_LargestMachine` (20 flags, 2 events) now requires the oracle to
+  certify a 2^20-state machine.
 - **The extracted checkers decide exactly what `Build` checks.** Both oracles previously checked a
   different property, so the differential test had to excuse whole classes of disagreement. Now
   they check `Build`'s: repair terminates from every state (the rules oracle used to require it

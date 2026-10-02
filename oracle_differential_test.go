@@ -8,7 +8,8 @@ package gsm
 // GSM_REQUIRE_ORACLES=1 a missing binary fails the run.
 //
 // The checkers decide the property Build checks (normalization-confluence
-// TableCheck.check_tables and AstChecker.checkBuild): repair terminates from
+// TableFast.check_fast, proven equal to TableCheck.check_tables, and
+// AstChecker.checkBuild): repair terminates from
 // every state, and every declared pair commutes on the valid states and the zero
 // state. So the only expected disagreement is a rules-oracle refusal outside its
 // certified fragment (arithmetic that could wrap, or a possibly negative write
