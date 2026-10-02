@@ -92,10 +92,11 @@ func TestBuildSkipsTheRulesOracleWithoutCombinatorRules(t *testing.T) {
 	}
 }
 
-// Above the cap on the work, states x (1 + events + pairs) x (1 + invariants)
-// x (1 + repair depth), pairs being every pair when none is declared, the
-// rules oracle does not run; at the cap it does. Each factor is tested at its
-// boundary.
+// Above the cap on the rules oracle's work (oracle.RulesCost of the exported
+// rules, the declared pairs and the repair depth) the rules oracle does not
+// run; at the cap it does. The machines vary each term: events, every pair or
+// declared pairs, no events, repair depth, invariants. internal/oracle's tests
+// check each term of the work itself.
 func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 	three := func(declare bool) *Registry {
 		r := combCapped()
@@ -130,47 +131,68 @@ func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 		return r
 	}
 	for _, c := range []struct {
-		name string
-		mk   func() *Registry
-		cap  int
-		run  bool
-		msg  string
+		name  string
+		mk    func() *Registry
+		depth int // Report.MaxRepairLen
 	}{
-		// combCapped: 4 x 2 = 8 states, 2 events, 1 pair (every pair), 1
-		// invariant, repair depth 1.
-		{"two events", combCapped, 127, false, "8 states x (1 + 2 events + 1 pairs) x (1 + 1 invariants) x (1 + repair depth 1) = 128"},
-		{"two events", combCapped, 128, true, ""},
-		// Three events: every pair is 3 pairs.
-		{"three events", func() *Registry { return three(false) }, 223, false, "8 states x (1 + 3 events + 3 pairs) x (1 + 1 invariants) x (1 + repair depth 1) = 224"},
-		{"three events", func() *Registry { return three(false) }, 224, true, ""},
-		// Declaring one pair independent leaves one.
-		{"three events, one pair", func() *Registry { return three(true) }, 159, false, "8 states x (1 + 3 events + 1 pairs) x (1 + 1 invariants) x (1 + repair depth 1) = 160"},
-		{"three events, one pair", func() *Registry { return three(true) }, 160, true, ""},
-		// No events, invariants or repair: the work is the states.
-		{"no events", no, 3, false, "4 states x (1 + 0 events + 0 pairs) x (1 + 0 invariants) x (1 + repair depth 0) = 4"},
-		{"no events", no, 4, true, ""},
-		{"repair depth", deep, 255, false, "8 states x (1 + 1 events + 0 pairs) x (1 + 1 invariants) x (1 + repair depth 7) = 256"},
-		{"repair depth", deep, 256, true, ""},
-		{"invariants", invs, 31, false, "4 states x (1 + 1 events + 0 pairs) x (1 + 3 invariants) x (1 + repair depth 0) = 32"},
-		{"invariants", invs, 32, true, ""},
+		{"two events", combCapped, 1},
+		{"three events, every pair", func() *Registry { return three(false) }, 1},
+		{"three events, one pair", func() *Registry { return three(true) }, 1},
+		{"no events", no, 0},
+		{"repair depth", deep, 7},
+		{"invariants", invs, 0},
 	} {
-		withRulesCap(t, c.cap)
-		ran := false
-		withRulesOracle(t, func(m, p string) (oracle.RulesResult, error) { ran = true; return oracle.CheckRules(m, p) })
-		m, rep, err := c.mk().Build()
-		if err != nil || m == nil {
-			t.Fatalf("%s, cap %d: Build: %v\n%s", c.name, c.cap, err, rep)
+		var mb, pb strings.Builder
+		if err := c.mk().WriteMachineAST(&mb); err != nil {
+			t.Fatal(err)
 		}
-		want := AssuranceOracleTables
-		if c.run {
-			want = AssuranceOracleTablesAndRules
+		if err := c.mk().WriteDeclaredPairs(&pb); err != nil {
+			t.Fatal(err)
 		}
-		if ran != c.run || rep.Assurance != want {
-			t.Errorf("%s, cap %d: ran = %v, Assurance = %v; want %v, %v", c.name, c.cap, ran, rep.Assurance, c.run, want)
+		w, werr := oracle.RulesCost(mb.String(), pb.String(), c.depth)
+		if werr != nil {
+			t.Fatalf("%s: RulesCost: %v", c.name, werr)
 		}
-		if !c.run && !strings.Contains(rep.RulesOracleSkipped, c.msg+" is above RulesOracleMaxWork ("+fmt.Sprint(c.cap)+")") {
-			t.Errorf("%s, cap %d: RulesOracleSkipped = %q; want it to give %q and the cap", c.name, c.cap, rep.RulesOracleSkipped, c.msg)
+		if !w.Total.IsInt64() {
+			t.Fatalf("%s: work %v", c.name, w)
 		}
+		at := int(w.Total.Int64())
+		for _, capv := range []int{at - 1, at} {
+			run := capv == at
+			withRulesCap(t, capv)
+			ran := false
+			withRulesOracle(t, func(m, p string) (oracle.RulesResult, error) { ran = true; return oracle.CheckRules(m, p) })
+			m, rep, err := c.mk().Build()
+			if err != nil || m == nil {
+				t.Fatalf("%s, cap %d: Build: %v\n%s", c.name, capv, err, rep)
+			}
+			if rep.MaxRepairLen != c.depth {
+				t.Fatalf("%s: MaxRepairLen = %d, want %d", c.name, rep.MaxRepairLen, c.depth)
+			}
+			want := AssuranceOracleTables
+			if run {
+				want = AssuranceOracleTablesAndRules
+			}
+			if ran != run || rep.Assurance != want {
+				t.Errorf("%s, cap %d (work %v): ran = %v, Assurance = %v; want %v, %v", c.name, capv, w.Total, ran, rep.Assurance, run, want)
+			}
+			if msg := fmt.Sprintf("the rules oracle's work, %v, is above RulesOracleMaxWork (%d)", w, capv); !run && !strings.Contains(rep.RulesOracleSkipped, msg) {
+				t.Errorf("%s, cap %d: RulesOracleSkipped = %q; want %q", c.name, capv, rep.RulesOracleSkipped, msg)
+			}
+		}
+	}
+}
+
+// When the rules oracle's cost cannot be computed, there is no verdict: Build
+// fails closed.
+func TestBuildFailsClosedWhenTheRulesCostFails(t *testing.T) {
+	saved := rulesCost
+	rulesCost = func(string, string, int) (oracle.RulesWork, error) { return oracle.RulesWork{}, errors.New("boom") }
+	t.Cleanup(func() { rulesCost = saved })
+	m, rep, err := combCapped().Build()
+	assertFailedClosed(t, "Build, rules cost fails", m, err)
+	if rep == nil || rep.Assurance != AssuranceNone || !strings.Contains(rep.OracleDisagreement, "boom") {
+		t.Fatalf("report %+v; want Assurance none and the error", rep)
 	}
 }
 
@@ -213,5 +235,46 @@ func TestBuildFailsClosedWhenTheRulesOracleRejects(t *testing.T) {
 		if rep == nil || rep.Assurance != AssuranceNone || rep.OracleDisagreement == "" {
 			t.Fatalf("%s: report %+v; want Assurance none and the disagreement", name, rep)
 		}
+	}
+}
+
+// exprPairs: n counters x_k in 0..2 and a target in 0..2 (3^(n+1) states),
+// and n guarded events, every pair checked; event k sets x_k to e_k guarded
+// by 0 <= e_k, where e_k = 1 + sum of size terms (x - x) has about 4 x size
+// nodes. From the review of #17.
+func exprPairs(n, size int) *Registry {
+	r := NewRegistry("exprpairs")
+	var xs []Var
+	for i := 0; i < n; i++ {
+		xs = append(xs, r.Int(fmt.Sprintf("x%d", i), 0, 2))
+	}
+	r.Int("tgt", 0, 2)
+	for k := 0; k < n; k++ {
+		e := Expr(Lit(1))
+		for j := 0; j < size; j++ {
+			e = Add(e, Sub(V(xs[(k+j)%n]), V(xs[(k+j)%n])))
+		}
+		r.DeclEventGuarded(fmt.Sprintf("raise%d", k), Le(Lit(0), e), Do(Set(xs[k], e)))
+	}
+	return r
+}
+
+// The rules oracle evaluates each checked pair's guards and effects at every
+// state, so its cost grows with the rules' size: 6 counters, 6 events with
+// 2000-node guards and effects and every pair checked was 48114 under the
+// count of states x (1 + events + pairs), well within the cap, but takes the
+// rules oracle several seconds (8 counters: about 80 s). Its work counts the
+// nodes, so it is above the cap.
+func TestBuildSkipsTheRulesOracleOnLargeRules(t *testing.T) {
+	withRulesOracle(t, func(string, string) (oracle.RulesResult, error) {
+		t.Fatal("the rules oracle ran on rules whose evaluation is above the cap")
+		return oracle.RulesResult{}, nil
+	})
+	m, rep, err := exprPairs(6, 500).Build()
+	if err != nil || m == nil {
+		t.Fatalf("Build: %v\n%s", err, rep)
+	}
+	if rep.Assurance != AssuranceOracleTables || !strings.Contains(rep.RulesOracleSkipped, "above RulesOracleMaxWork") {
+		t.Fatalf("Assurance = %v, RulesOracleSkipped = %q; want tables only, skipped above the cap", rep.Assurance, rep.RulesOracleSkipped)
 	}
 }

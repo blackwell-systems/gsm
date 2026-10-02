@@ -103,15 +103,17 @@ func BenchmarkBuild_WideFlags20(b *testing.B) {
 	benchBuild(b, func() *Registry { return wideFlags(20) })
 }
 
-// The rules oracle's cost near RulesOracleMaxWork (2^21): the most states
-// (2^20 states, one event: 2^20 x 2, the most memory), the most pairs (2^13
-// states, 20 events, every pair: 8192 x 211, the most time), and above the cap
-// (2^20 states, 20 events, one pair: table oracle only).
+// The rules oracle's cost near RulesOracleMaxWork (2^21; the work is
+// oracle.RulesCost): the most states (2^11 states, one event: work about
+// 2^20), the most pairs (2^4 states, 20 events, every pair: about 1.3 M), and
+// above the cap (2^20 states, 20 events, one pair: table oracle only).
+// TestRulesOracleCostPerStep (GSM_RULES_COST) measures the rules oracle
+// alone, on larger machines.
 func BenchmarkBuild_CombMostStates(b *testing.B) {
-	benchBuild(b, func() *Registry { return combFlags(20, 1, 0) })
+	benchBuild(b, func() *Registry { return combFlags(11, 1, 0) })
 }
 func BenchmarkBuild_CombMostPairs(b *testing.B) {
-	benchBuild(b, func() *Registry { return combFlags(13, 20, -1) })
+	benchBuild(b, func() *Registry { return combFlags(4, 20, -1) })
 }
 func BenchmarkBuild_CombAboveCap(b *testing.B) {
 	benchBuild(b, func() *Registry { return combFlags(20, 20, 1) })
