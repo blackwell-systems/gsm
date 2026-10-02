@@ -798,3 +798,31 @@ func TestBuildOrSynthesize_FallsBackOnCompensationFailures(t *testing.T) {
 		t.Errorf("missing Repair: want a synthesized machine, got machine=%v synthesis=%v err=%v", m != nil, syn != nil, err)
 	}
 }
+
+// TestFederationMidRunChangeReportedOverItsError: a Map that declares an invariant on
+// its target makes the M1 check fail; Build and Certify report the change, which is
+// the cause, rather than the M1 failure it produced.
+func TestFederationMidRunChangeReportedOverItsError(t *testing.T) {
+	mk := func() *Federation {
+		src := NewRegistry("src")
+		src.Bool("a")
+		dst := NewRegistry("dst")
+		n := dst.Int("n", 0, 2)
+		declared := false
+		return NewFederation("mid_m1").Morphism(src, dst).Shared(n).Map(func(s, d State) State {
+			if !declared {
+				declared = true
+				dst.Invariant("never").Watches(n).Holds(func(State) bool { return false }).
+					Repair(func(s State) State { return s }).Add()
+			}
+			return d.SetInt(n, 2)
+		}).Add()
+	}
+	want := `registry "dst" was changed while it was being verified`
+	if _, _, err := mk().Build(); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Build: want the change reported, got: %v", err)
+	}
+	if _, err := mk().Certify(); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Certify: want the change reported, got: %v", err)
+	}
+}
