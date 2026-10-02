@@ -132,6 +132,29 @@ func TestPolicyDigest_BindsNames(t *testing.T) {
 			t.Errorf("registries differing only in %s have the same policy digest", name)
 		}
 	}
+	// A Bool and an Int over 0..1 serialize alike in the oracle's format.
+	kind := func(asBool bool) *Registry {
+		r := NewRegistry("kind")
+		var v Var
+		if asBool {
+			v = r.Bool("v")
+		} else {
+			v = r.Int("v", 0, 1)
+		}
+		r.DeclEvent("set", Do(Set(v, Lit(1))))
+		return r
+	}
+	db, err := kind(true).PolicyDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	di, err := kind(false).PolicyDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if db == di {
+		t.Error("registries differing only in a variable's kind have the same policy digest")
+	}
 	again, err := mk("go", "n", "y", false).PolicyDigest()
 	if err != nil {
 		t.Fatal(err)
