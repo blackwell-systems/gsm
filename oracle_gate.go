@@ -21,24 +21,34 @@ import (
 // tableOracle is the table oracle. Only tests replace it.
 var tableOracle = oracle.CheckLookup
 
-// rulesOracle is the rules oracle. Only tests replace it.
-var rulesOracle = oracle.CheckRules
+// rulesOracle is the rules oracle, and rulesCost its cost. Only tests replace
+// them.
+var (
+	rulesOracle = oracle.CheckRules
+	rulesCost   = oracle.RulesCost
+)
 
 // RulesOracleMaxWork caps the rules oracle's work. Build runs the rules oracle
-// on a combinator machine only when its work
+// on a combinator machine only when its work is at most this. The work is
+// oracle.RulesCost of the rules, the checked pairs (every pair when none is
+// declared) and the repair depth (Report.MaxRepairLen): an upper bound on the
+// steps the generated checkBuild takes, counted from the expression trees.
+// Per state it counts what the oracle evaluates there: normalizing the state
+// (each repair step evaluates every invariant's predicate and one repair), and
+// for each checked pair both events' guards and effects, each followed by a
+// normalization, twice; a variable read or write counts its index and its
+// domain's binary digits, and a list cell built counts more than a node
+// evaluated. Above the cap the table oracle alone certifies the machine, and
+// Report.RulesOracleSkipped gives the work.
 //
-//	states x (1 + events + checked pairs) x (1 + invariants) x (1 + max repair depth)
-//
-// is at most this (checked pairs: every pair when none is declared; max repair
-// depth: Report.MaxRepairLen). Above it the table oracle alone certifies the
-// machine. The rules oracle re-derives every step from the expression trees:
-// each state, event and pair it checks normalizes a state, and each repair
-// step evaluates every invariant, so the factors multiply. Measured on the
-// generated Go (Apple M-series) with the rules oracle on and off, it costs at
-// most about 1.8 us per unit of work (machines whose work is mostly pairs;
-// repair depth and invariants cost under 0.25 us per unit) and about 240 bytes
-// per state plus 9 bytes per state and event of memory. So within the cap it
-// adds at most about 4 s and 260 MB (2^20 states).
+// Measured on the generated Go (Apple M-series, TestRulesOracleCostPerStep),
+// the rules oracle takes at most about 3.2 ns per step (machines whose work is
+// mostly pairs; 0.7 to 2 ns for expressions, predicates, invariants and repair
+// depth) and at most about 0.25 bytes of live heap per step, plus a few MB. So
+// within the cap it adds at most about 7 ms and a few MB. The bound takes the
+// repair depth from gsm's verification (Report.MaxRepairLen): if the oracle's
+// repair chains were longer than gsm's, it would take longer, up to its fuel
+// (the number of states) of repair steps per normalization.
 const RulesOracleMaxWork = 1 << 21
 
 // rulesOracleCap is RulesOracleMaxWork. Only tests change it.
@@ -188,18 +198,12 @@ func certifyRules(r *Registry, depth int) (skipped string, err error) {
 	if werr := r.WriteDeclaredPairs(&pb); werr != nil {
 		return "not a combinator machine (" + werr.Error() + ")", nil
 	}
-	states := int64(1)
-	for _, v := range r.vars {
-		states *= int64(v.domain) // Build succeeded: at most 2^20 states.
+	work, werr := rulesCost(mb.String(), pb.String(), depth)
+	if werr != nil {
+		return "", &oracleError{fmt.Sprintf("gsm: the verified rules oracle could not check the machine's rules: %v; not certified", werr)}
 	}
-	events, pairs, invs := len(r.events), len(r.ccPairs()), len(r.invariants)
-	work := new(big.Int).SetInt64(states)
-	work.Mul(work, big.NewInt(int64(1+events+pairs)))
-	work.Mul(work, big.NewInt(int64(1+invs)))
-	work.Mul(work, big.NewInt(int64(1+depth)))
-	if work.Cmp(big.NewInt(int64(rulesOracleCap))) > 0 {
-		return fmt.Sprintf("%d states x (1 + %d events + %d pairs) x (1 + %d invariants) x (1 + repair depth %d) = %s is above RulesOracleMaxWork (%d)",
-			states, events, pairs, invs, depth, work, rulesOracleCap), nil
+	if work.Total.Cmp(big.NewInt(int64(rulesOracleCap))) > 0 {
+		return fmt.Sprintf("the rules oracle's work, %v, is above RulesOracleMaxWork (%d)", work, rulesOracleCap), nil
 	}
 	res, cerr := rulesOracle(mb.String(), pb.String())
 	if cerr != nil {

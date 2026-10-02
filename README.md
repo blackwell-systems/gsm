@@ -505,14 +505,16 @@ tables: it re-derives every step by evaluating the expression trees, so it does 
 tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` says which did not:
 - every rule is a combinator (`DeclInvariant`, `DeclEvent`, `DeclEventGuarded`), so the machine
   has rules to read;
-- its work, states × (1 + events + checked pairs) × (1 + invariants) × (1 + max repair depth), is
-  at most `RulesOracleMaxWork` (2^21). Checked pairs are every pair when none is declared; the
-  repair depth is `Report.MaxRepairLen`. The factors multiply because each state, event and pair
-  the oracle checks normalizes a state, and each repair step evaluates every invariant. Measured
-  on the generated Go, the rules oracle costs at most about 1.8 µs per unit of work (machines
-  whose work is mostly pairs; repair depth and invariants cost under 0.25 µs per unit), and about
-  240 bytes per state plus 9 bytes per state and event of memory, so within the cap it adds at
-  most about 4 s and 260 MB;
+- its work is at most `RulesOracleMaxWork` (2^21). The work (`oracle.RulesCost`) is an upper
+  bound on the steps the generated `checkBuild` takes, counted from the expression trees, the
+  checked pairs (every pair when none is declared) and the repair depth (`Report.MaxRepairLen`).
+  Per state it counts what the oracle evaluates there: normalizing the state (each repair step
+  evaluates every invariant's predicate and one repair), and for each checked pair both events'
+  guards and effects, each followed by a normalization, twice. So rule size, pairs, invariants
+  and repair depth all count. Measured on the generated Go, the rules oracle takes at most about
+  3.2 ns per step (machines whose work is mostly pairs; 0.7 to 2 ns for expressions, predicates,
+  invariants and repair depth) and about 0.25 bytes of live heap per step plus a few MB, so within
+  the cap it adds at most about 7 ms and a few MB;
 - the machine is inside the rules oracle's fragment, which two static checks on the rules decide:
   no expression can leave |2^31-1| (`bounded`), and no write can store a negative value into a
   two-valued variable with minimum 0 (`signSafe`; a gsm `Bool` stores value != 0 where the model
@@ -679,18 +681,24 @@ Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather tha
 | 2²⁰ states, 20 events, 10 declared pairs (oracle alone) | | ~0.3 s |
 | 2²⁰ states, 20 events, every pair (190) | 0.76 s | 5.6 s (peak RSS about 330 MB, against 240 MB without the gate) |
 
-The rules oracle adds its own cost on combinator machines within its cap (Build with both oracles):
+The rules oracle's own cost, per step of its work (`oracle.CheckRules` alone, Apple M-series;
+`GSM_RULES_COST=14 go test -run TestRulesOracleCostPerStep -v .`). These machines are above the
+cap, so that the times are measurable; within the cap (2^21 steps) the most it adds is about 3.2 ns
+x 2^21, 7 ms:
 
-| Combinator machine | Work | Build, both oracles | Build, table oracle only | Peak RSS added |
+| Combinator machine | Work (steps) | Rules oracle | Per step | Live heap |
 |---------|------------------|---------------|---------------|---------------|
-| 2²⁰ states, 1 event | 2²¹ (the cap) | 1.4 s | 0.13 s | 248 MB |
-| 2¹³ states, 20 events, every pair (190) | 1.7 M | 3.2 s | 0.04 s | 9 MB |
-| 2¹⁴ states, 14 events, every pair (91) | 1.7 M | 3.3 s | 0.04 s | 11 MB |
-| 2¹⁶ states, 30 events, 1 declared pair | 2.1 M | 0.23 s | 0.08 s | 35 MB |
-| 2⁹ states, 1 invariant, repair depth 511 | 1.0 M | 0.10 s | 0.02 s | 2 MB |
-| 2¹² states, 200 invariants | 1.6 M | 0.03 s | 0.01 s | 5 MB |
-| 2²⁰ states, 20 events, 1 declared pair | above the cap | 1.0 s (table oracle only) | 1.0 s | 0 |
-| 2¹³ states, repair depth 8191 | above the cap | 4.6 s (table oracle only) | 4.6 s | 0 |
+| 2²⁰ states, 1 event | 9.3 × 10⁸ | 1.65 s | 1.8 ns | 203 MB |
+| 2¹⁴ states, 20 events, every pair (190) | 2.3 × 10⁹ | 7.4 s | 3.2 ns | 6 MB |
+| 2 states, 280 events, every pair | 8.7 × 10⁷ | 0.25 s | 2.9 ns | 6 MB |
+| 3⁵ states, 4 events with 1,400-node guards and effects, every pair | 8.3 × 10⁷ | 0.14 s | 1.7 ns | 4 MB |
+| 2¹³ states, repair depth 8191 | 1.5 × 10¹⁰ | 30 s | 2.0 ns | 4 MB |
+| 2¹⁴ states, 200 invariants | 1.0 × 10⁸ | 0.10 s | 1.0 ns | 3 MB |
+| 2¹⁴ states, 100 writes in an event | 5.9 × 10⁸ | 1.2 s | 2.0 ns | 6 MB |
+| 2¹⁴ states, guards of 100 terms | 1.7 × 10⁸ | 0.12 s | 0.7 ns | 4 MB |
+
+Within the cap, `Build` with both oracles takes 2.9 ms on 2¹¹ states with one event (work about
+2²⁰) and 4.2 ms on 2⁴ states with 20 events and every pair (about 1.3 M).
 
 For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast.
 
