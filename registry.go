@@ -177,7 +177,7 @@ func (r *Registry) Enum(name string, values ...string) Var {
 		offset: r.totalBits,
 		bits:   bits,
 		domain: len(values),
-		labels: values,
+		labels: append([]string(nil), values...), // the caller's slice stays theirs
 		min:    0,
 	}
 	r.totalBits += bits
