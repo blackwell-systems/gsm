@@ -289,14 +289,14 @@ func TestReview_MergeProjectionOutOfDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, raw := range []uint64{3, 4, 1 << 40} {
-		out, err := m.MergeProjection(m.NewState(), Projection{Shared: map[string]uint64{"n": raw}})
-		if err == nil {
+		out, merr := m.MergeProjection(m.NewState(), Projection{Shared: map[string]uint64{"n": raw}})
+		if merr == nil {
 			t.Errorf("raw %d: MergeProjection returned %s with no error", raw, out)
-		} else if !strings.Contains(err.Error(), "outside 0..2") {
-			t.Errorf("raw %d: the error does not give the domain: %v", raw, err)
+		} else if !strings.Contains(merr.Error(), "outside 0..2") {
+			t.Errorf("raw %d: the error does not give the domain: %v", raw, merr)
 		}
 	}
-	if _, err := m.MergeProjection(m.NewState(), Projection{Shared: map[string]uint64{"n": 2}}); err != nil {
+	if _, err = m.MergeProjection(m.NewState(), Projection{Shared: map[string]uint64{"n": 2}}); err != nil {
 		t.Errorf("an in-domain value was refused: %v", err)
 	}
 	// Two bad values: the error names the same one (the first by name) on every call.
