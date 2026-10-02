@@ -284,6 +284,8 @@ s = s.SetBool(enabledVar, true)
 s = s.SetInt(countVar, 42)
 ```
 
+**Rules must return a state of their own machine.** An event effect, a repair, a morphism `Map` and a `Resolver` must return a state with the machine's variable schema and every variable within its declared range. Deriving the result from the input with `Set`/`SetBool`/`SetInt` always does. Membership is by value: a `State` from another machine with an identical variable declaration list is accepted. `Build`, `BuildCompositional`, `Synthesize` and `Federation.Build` reject a rule that returns anything else (a state of a different machine, an out-of-range value), with an error naming the rule, the input state and the result. A lazy `BuildCompositional` machine and a `FedMachine` run closures at `Apply` time, so they check each result there and panic on a bad one.
+
 ## Federated Registries
 
 A single registry governs one machine. Real systems span **multiple** registries with constraints across boundaries. `gsm` composes them into a **federation** connected by directed **morphisms**, and proves the whole network converges - the same build-time guarantee, one level up.
@@ -409,7 +411,8 @@ wide guards, use `Build` (exact, no footprint assumption) or the combinator voca
 
 **Trade-offs.** The returned `Machine` is *lazy*: it computes `Apply`/`Normalize` at runtime from
 the rules instead of via a precomputed table lookup, and `Export` is unavailable (there are no
-global tables to serialize). Preconditions: every invariant declares its footprint and every
+global tables to serialize). Each closure result is checked to be a state of the machine as it is
+computed, and `Apply` panics if one is not. Preconditions: every invariant declares its footprint and every
 event its write set (both automatic with the combinator vocabulary), every event reads only what
 it writes, the zero state is valid, and the machine fits in 64 bits of state.
 

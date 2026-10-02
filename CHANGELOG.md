@@ -106,6 +106,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by `WriteConvergenceTables`, although synthesis never checked it and the pair need not commute.
   `Synthesis` now keeps the variables, event names, and pairs it ran on, and `Machine` and
   `Repairs` use them.
+- **Closures could return a state outside the machine, and `Build` certified it.** Effects,
+  repairs, morphism `Map`s and `Resolver`s are Go closures, and their results were recorded
+  without checking that they were states of the machine: a state built from another machine's
+  variables, a value outside a variable's range, or bits outside the encoding. Depending on the
+  case `Build` certified the machine (and `Apply` then returned a state outside the certified
+  space) or panicked with an index out of range. Every path now checks: `Build`,
+  `BuildCompositional` (including its footprint check), `Synthesize`, `BuildOrSynthesize`,
+  `Federation.Build` (component, `Map` and `Resolver` results), `DiagnoseCycle`, `Certify` and
+  `EmbedCertified` (through `Build`), and the rejection names the rule, the input state and the
+  result. A state of the machine is defined by value: the same variable schema (each variable
+  equal in name, kind, layout, range and labels, so a structurally identical machine's state is
+  accepted), every variable within its range, and no bit outside the encoding. A lazy
+  `BuildCompositional` machine and a `FedMachine` run closures at `Apply` time and now panic on
+  such a result, as `Apply` does for an unknown event. `Certificate.Verify` refuses table values
+  outside a variable's range and rows of the wrong length. The differential test now reports a
+  certified machine whose tables cannot be exported instead of skipping it.
 - **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity
   check for any event pair whose triggered invariant footprints were disjoint, and never checked
   what an event's guard or effect reads. The shortcut's theorem (`disjoint_events_commute` in
@@ -135,6 +151,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   past bit 64 were frozen at 0 yet the machine was certified. It now returns an error.
 
 ### Changed
+- An event effect that returns a variable outside its range is rejected instead of clamped.
+  `Build`, `BuildCompositional`, `Synthesize` and the lazy runtime used to clamp each variable of
+  an effect's result into its range. `Set`, `SetBool`, `SetInt` and the combinators never produce
+  such a value, so only a result built some other way (another machine's state, a raw
+  `MergeProjection` value) was affected, and clamping hid the bug.
 - The CC check runs over the valid states plus the zero state `NewState` returns (CC1 as THEORY.md
   §6.3 states it), instead of every encodable state for the pairs it did check. Checking invalid
   states that no run reaches rejected convergent machines (the order-fulfillment test machine fails

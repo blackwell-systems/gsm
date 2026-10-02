@@ -47,7 +47,8 @@ type Federation struct {
 // verify-the-preconditions contract gsm applies to single-registry WFC/CC and tree-federation
 // M1. A resolver that reads local state (violates R1), can produce an invalid target (violates
 // R2), or writes non-shared variables is rejected at build. Determinism — the resolver is a
-// pure function of a name-keyed source map — gives order-independence.
+// pure function of a name-keyed source map — gives order-independence. Like a morphism Map,
+// it must return a state of the target registry (see MorphismBuilder.Map).
 type Resolver func(dst State, sources map[string]State) State
 
 type edgeDef struct {
@@ -150,8 +151,10 @@ func (mb *MorphismBuilder) Shared(dstVars ...Var) *MorphismBuilder {
 
 // Map sets the morphism image function. Given the source's normal form and the current
 // target state, it returns the target with ONLY its shared component overwritten to the
-// morphism image. (A later milestone verifies at Build time that the function touches
-// nothing outside Shared() and preserves target validity — the M1 condition.)
+// morphism image. Build verifies that the function touches nothing outside Shared(),
+// preserves target validity (the M1 condition), and returns a state of the target registry
+// (its variable schema, every variable within its range); FedMachine panics if an image it
+// computes at Apply time is not one.
 func (mb *MorphismBuilder) Map(fn func(srcNF, dst State) State) *MorphismBuilder {
 	mb.e.mapFn = fn
 	return mb

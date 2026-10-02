@@ -23,7 +23,13 @@ type Registry struct {
 // CheckFunc is a predicate over State.
 type CheckFunc func(State) bool
 
-// EffectFunc transforms a State.
+// EffectFunc transforms a State. Used as an event effect (EventBuilder.Apply) or an
+// invariant repair (InvariantBuilder.Repair), it must return a state of the machine it
+// belongs to: the same variable schema as its input (a State from another machine with an
+// identical variable declaration list qualifies) and every variable within its declared
+// range. Deriving the result from the input with Set, SetBool and SetInt always satisfies
+// this. Build rejects a rule that returns anything else, and a lazy machine's Apply panics
+// (see Machine.Apply).
 type EffectFunc func(State) State
 
 type invariantDef struct {
@@ -242,7 +248,8 @@ func (ib *InvariantBuilder) Holds(fn CheckFunc) *InvariantBuilder {
 }
 
 // Repair sets the compensation function. Called when Check returns false.
-// Must only modify variables declared in Over().
+// Must only modify variables declared in Over(), and must return a state of this
+// machine (see EffectFunc).
 func (ib *InvariantBuilder) Repair(fn EffectFunc) *InvariantBuilder {
 	ib.def.repair = fn
 	return ib
@@ -292,7 +299,8 @@ func (eb *EventBuilder) Guard(fn CheckFunc) *EventBuilder {
 	return eb
 }
 
-// Apply sets the event's effect function.
+// Apply sets the event's effect function. It must return a state of this machine (see
+// EffectFunc); Build rejects the event otherwise.
 func (eb *EventBuilder) Apply(fn EffectFunc) *EventBuilder {
 	eb.def.effect = fn
 	return eb
