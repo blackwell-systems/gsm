@@ -196,3 +196,80 @@ func TestDeclEventNilEffectStaysUnexportable(t *testing.T) {
 		t.Fatalf("got %v, want %q", err, want)
 	}
 }
+
+// wantChanged fails unless err is the rejection of registry reg changed while it
+// was being verified.
+func wantChanged(t *testing.T, err error, reg string) {
+	t.Helper()
+	want := `gsm: registry "` + reg + `" was changed while it was being verified (a rule declared ` +
+		`a variable, invariant, event, or Independent pair)`
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+}
+
+// TestFederationBuild_RejectsComponentChangedDuringBuild: Federation.Build builds
+// each component and then runs morphism closures. A closure that declares on a
+// component there left the registry and the FedMachine's machine for it differing
+// silently (the machine does not know the new event).
+func TestFederationBuild_RejectsComponentChangedDuringBuild(t *testing.T) {
+	src := NewRegistry("src")
+	flag := src.Bool("flag")
+	src.DeclEvent("raise", Do(Set(flag, Lit(1))))
+	dst := NewRegistry("dst")
+	mir := dst.Bool("mirror")
+	dst.DeclEvent("noop", Do())
+	declared := false
+	f := NewFederation("fed").Morphism(src, dst).Shared(mir).
+		Map(func(s, d State) State {
+			if !declared {
+				declared = true
+				src.DeclEvent("lower", Do(Set(flag, Lit(0))))
+			}
+			return d.setRaw(mir, s.getRaw(flag))
+		}).Add()
+	m, _, err := f.Build()
+	if !declared {
+		t.Fatal("premise: the morphism declared an event during Build")
+	}
+	if err == nil {
+		_, aerr := m.ApplyNamed(m.NewState(), "src", "lower")
+		t.Fatalf("Federation.Build accepted; src now declares \"lower\" but its built machine does not (%v)", aerr)
+	}
+	wantChanged(t, err, "src")
+}
+
+// TestFederationBuild_VerifiesTheWiringAsCalled: every pass of Federation.Build
+// sees the morphisms the machine is built from. A closure that adds a morphism to
+// the federation mid-build used to reach the later passes (here the monotonicity
+// check of a cyclic network) but not the machine.
+func TestFederationBuild_VerifiesTheWiringAsCalled(t *testing.T) {
+	a := NewRegistry("a")
+	av := a.Bool("v")
+	b := NewRegistry("b")
+	bv := b.Bool("v")
+	c := NewRegistry("c")
+	cv := c.Bool("v")
+	added := false
+	var f *Federation
+	f = NewFederation("loop").AllowMonotoneCycles().Add(c).
+		Morphism(a, b).Shared(bv).Map(func(s, d State) State {
+		if !added {
+			added = true
+			// Negation is not monotone; this morphism is never part of the machine.
+			f.Morphism(a, c).Shared(cv).Map(func(s, d State) State { return d.setRaw(cv, 1-s.getRaw(av)) }).Add()
+		}
+		return d.setRaw(bv, s.getRaw(av))
+	}).Add().
+		Morphism(b, a).Shared(av).Map(func(s, d State) State { return d.setRaw(av, s.getRaw(bv)) }).Add()
+	m, _, err := f.Build()
+	if !added {
+		t.Fatal("premise: a morphism was added during Build")
+	}
+	if err != nil {
+		t.Fatalf("Build judged a morphism added mid-build, which its machine does not contain: %v", err)
+	}
+	if len(m.edges) != 2 {
+		t.Fatalf("machine has %d morphisms, want the 2 Build was called with", len(m.edges))
+	}
+}
