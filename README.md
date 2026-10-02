@@ -482,8 +482,12 @@ gsm's verification produced:
 - `BuildCompositional`, once per footprint component, over that component's subspace.
 
 If the oracle does not certify the tables (it rejects them, or it cannot check them), the call
-returns an error and no machine. This is a bug in gsm, never a property of your rules, and
-`Report.OracleDisagreement` says so. `Report.Assurance` (and `Synthesis.Assurance`) records what
+returns an error and no machine, and `Report.OracleDisagreement` holds the oracle's error. For
+rules that are deterministic, a disagreement points at a bug in gsm's verification or in the
+oracle's generator, not at your rules. One cause does come from your rules: an impure rule (one
+that reads a clock, a counter or other outside state) can give different results when it runs
+again. `BuildCompositional` runs every rule again to build the component tables, so such a rule
+can make the two checks see different tables. `Report.Assurance` (and `Synthesis.Assurance`) records what
 certified the machine:
 
 - `AssuranceOracleTables`: gsm's verification and the table oracle both certified the machine's
@@ -491,6 +495,24 @@ certified the machine:
 - `AssuranceOracleComponents` (`BuildCompositional`): the oracle certified every component's
   tables. That cross-component pairs commute rests on gsm's footprint check, which the oracle does
   not see.
+
+**`Federation.Build` and certificates.** These rebuild every component with `Build`, so each
+component's tables are oracle-gated. The federation-level checks are gsm's Go code and are not
+oracle-gated:
+- the morphism condition M1;
+- the acyclicity and topological order;
+- the Kleene iteration of monotone cycles;
+- a certificate's digest and morphism tables.
+
+This matches CERTIFICATE-DESIGN.md: an extracted federation oracle is planned separately.
+
+**Memory and process limits.** The oracle's Coq lists and tries need memory on top of `Build`'s
+tables. Measured at 2^20 states, peak RSS is:
+- about 1.2 to 1.4 GB with 10 events (the oracle alone, from text tables);
+- about 2.1 to 2.3 GB with 20 events (gsm `Build` with the gate).
+
+Running out of memory, or out of goroutine stack, kills the process. That is not a fail-closed
+error return: plan memory for the largest machines you build.
 
 What the gate trusts:
 
@@ -627,7 +649,7 @@ Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather tha
 | 24 states, 3 pairs | 0.32 ms | 0.33 ms |
 | 1,024 states, 10 events, 45 pairs | 2.2 ms | 7.6 ms |
 | 2²⁰ states, 10 declared pairs (oracle alone) | | ~3.4 s |
-| 2²⁰ states, 20 events, every pair (190) | 0.88 s | 37 s |
+| 2²⁰ states, 20 events, every pair (190) | 0.88 s | 37 s (peak RSS about 2.1 to 2.3 GB) |
 
 For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast. A faster oracle is in progress in the proof.
 
