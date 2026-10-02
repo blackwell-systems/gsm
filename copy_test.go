@@ -183,3 +183,16 @@ func TestCertify_CertifiesTheFederationAsCalled(t *testing.T) {
 			len(cert.Tables), cert.Tables)
 	}
 }
+
+// TestDeclEventNilEffectStaysUnexportable: copying a declared transform keeps a
+// nil effect nil, so an event declared without one (On(...).Add() with no Does)
+// is still refused by the rules export rather than exported as a no-op.
+func TestDeclEventNilEffectStaysUnexportable(t *testing.T) {
+	r := NewRegistry("nil_effect")
+	r.Bool("x")
+	r.On("e").Add()
+	_, err := r.PolicyBytes()
+	if want := `gsm: event "e" has no combinator AST (declare it with DeclEvent to export)`; err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+}
