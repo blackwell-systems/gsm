@@ -220,3 +220,16 @@ func TestCertificateDigest_V4(t *testing.T) {
 		t.Fatalf("certificate digest domain changed: got %s", got)
 	}
 }
+
+// TestCompositional_RejectsBeyond64Bits: State is one uint64, so variables past
+// bit 64 are frozen at 0. BuildCompositional used to certify such a machine (an
+// increment on the last counter had no effect); it must refuse it.
+func TestCompositional_RejectsBeyond64Bits(t *testing.T) {
+	if _, _, err := wideCounters(32).BuildCompositional(); err != nil {
+		t.Fatalf("64-bit machine rejected: %v", err)
+	}
+	_, _, err := wideCounters(33).BuildCompositional()
+	if err == nil || !strings.Contains(err.Error(), "66 bits") {
+		t.Fatalf("want a 66-bit rejection, got %v", err)
+	}
+}

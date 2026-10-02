@@ -135,6 +135,12 @@ func overlaps(a, b []int) bool {
 // (Writes); the zero state is valid; and no single component exceeds
 // maxComponentBits.
 func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
+	// State packs every variable into one uint64. A variable placed past bit 64
+	// reads as 0 and ignores writes, so a machine that wide cannot be represented,
+	// let alone certified (it used to be certified with those variables frozen).
+	if r.totalBits > 64 {
+		return nil, nil, fmt.Errorf("gsm: machine needs %d bits of state; State holds at most 64", r.totalBits)
+	}
 	for _, inv := range r.invariants {
 		if inv.repair == nil {
 			return nil, nil, fmt.Errorf("gsm: invariant %q has no Repair", inv.name)
