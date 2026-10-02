@@ -69,8 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the same name and another range was taken for the target's. `Federation.Build` and
   `DiagnoseCycle` now return `morphism a→b: Shared() variable "v" is not a variable of registry
   "b"`.
-- **Behaviour change: `BuildCoordinated` checks a point's `Shared`.** It must be exactly the named
-  morphism's shared variable names (in any order), as `CoordinationPlan` returns them.
+- **Behaviour change: `BuildCoordinated` matches a point's `Shared`.** A point removes the
+  morphisms matching its `Src`, `Dst` and shared variable set (in any order), as
+  `CoordinationPlan` returns them; one that matches no morphism on all three is an error.
 - **Behaviour change: `Certify` checks an input port's variable by value.** It used the variable's
   index only, so a `Var` of another registry declared the variable at that index of this one as a
   port (or an index past the end passed). A port's variable must now be this registry's variable

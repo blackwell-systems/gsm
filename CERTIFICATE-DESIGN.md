@@ -136,7 +136,8 @@ subsystem it describes. It covers each component's name, rules (`PolicyBytes`), 
 declared pairs the rules are addressed by (`PolicyNames`: variable names and kinds, enum labels,
 event names, the Independent pairs), the morphism tables, the input ports and the cycle opt-in, so
 it changes when any of those declarations changes. Every name it frames is quoted, so no name can
-carry the framing of another, and the declared pairs are digested as a set. A morphism or resolver closure is bound only
+carry the framing of another, and the declared pairs are digested as a set. The certificate's own `Name`
+is not covered: it labels messages only, and nothing is decided by it. A morphism or resolver closure is bound only
 through its table, which records its images at one representative target: a closure that differs
 only at other targets digests the same, and is caught at runtime by the FedMachine's image check.
 The digest began binding names and pairs during this development version; certificates issued
