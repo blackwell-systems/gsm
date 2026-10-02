@@ -13,7 +13,10 @@
 //	    [-rerun DIR2] [-scan ROOT] [-summary FILE]
 //
 // -rerun names the records of a second run of the same programs; the gate fails
-// if a program made different machines on the two runs.
+// if a program made different machines on the two runs. With -run-programs ROOT
+// -gsm GSMDIR, gsmgate makes both runs itself: it builds each catalog program
+// under ROOT with -tags gsmgate against GSMDIR and runs it canonically (see
+// runCanonical) twice, into -dumps and -rerun.
 package main
 
 import (
@@ -33,27 +36,42 @@ func main() {
 	scanRoot := flag.String("scan", "", "repository root to scan for gsm machines outside the catalog")
 	summary := flag.String("summary", "", "append the Markdown report to this file (GITHUB_STEP_SUMMARY)")
 	rerun := flag.String("rerun", "", "records of a second run of the same programs, which must make the same machines")
+	programs := flag.String("run-programs", "", "repository root: build each catalog program there and run it canonically twice, into -dumps and -rerun")
+	gsmDir := flag.String("gsm", "", "with -run-programs: the gsm checkout to build the programs against")
 	flag.Parse()
 	if *dumps == "" || *catalog == "" || *table == "" || *rules == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(*dumps, *catalog, *table, *rules, *scanRoot, *summary, *rerun); err != nil {
+	if *programs != "" && (*gsmDir == "" || *rerun == "") {
+		fmt.Fprintln(os.Stderr, "gsmgate: -run-programs needs -gsm and -rerun")
+		os.Exit(2)
+	}
+	if err := run(*dumps, *catalog, *table, *rules, *scanRoot, *summary, *rerun, *programs, *gsmDir); err != nil {
 		fmt.Fprintln(os.Stderr, "gsmgate:", err)
 		os.Exit(1)
 	}
 }
 
-func run(dumps, catalog, table, rules, scanRoot, summary, rerun string) error {
+func run(dumps, catalog, table, rules, scanRoot, summary, rerun, programs, gsmDir string) error {
 	cat, err := gate.ParseCatalogFile(catalog)
 	if err != nil {
 		return err
+	}
+	var runFailures []string
+	if programs != "" {
+		if runFailures, err = runPrograms(programs, gsmDir, cat, dumps, rerun); err != nil {
+			return err
+		}
+		for _, f := range runFailures {
+			fmt.Fprintln(os.Stderr, f)
+		}
 	}
 	rep, err := gate.Run(dumps, cat, gate.Checkers{Table: table, Rules: rules})
 	if err != nil {
 		return err
 	}
-	var scanProblems []string
+	scanProblems := runFailures
 	if scanRoot != "" {
 		if scanProblems, err = scan(scanRoot, cat); err != nil {
 			return err
