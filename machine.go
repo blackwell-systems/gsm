@@ -358,46 +358,26 @@ func (m *Machine) inDomain(packed uint64) bool {
 }
 
 func (m *Machine) convergenceTables() ([]byte, error) {
-	newID := make(map[uint64]int)
-	var order []uint64
-	for s := 0; s < len(m.nf); s++ {
-		if m.inDomain(uint64(s)) {
-			newID[uint64(s)] = len(order)
-			order = append(order, uint64(s))
-		}
+	tb, err := m.oracleTables()
+	if err != nil {
+		return nil, err
 	}
-	id := func(packed uint64) (int, error) {
-		i, ok := newID[packed]
-		if !ok {
-			return 0, fmt.Errorf("gsm: table entry %d is not an in-domain encoding", packed)
-		}
-		return i, nil
-	}
-	nE := len(m.step)
 	var b strings.Builder
-	fmt.Fprintf(&b, "gsm-tables 2\n%d %d\nnf", len(order), nE)
-	for _, old := range order {
-		i, err := id(m.nf[old])
-		if err != nil {
-			return nil, err
-		}
+	fmt.Fprintf(&b, "gsm-tables 2\n%d %d\nnf", len(tb.NF), len(tb.Step))
+	for _, i := range tb.NF {
 		fmt.Fprintf(&b, " %d", i)
 	}
-	if m.allPairs {
+	if tb.AllPairs {
 		b.WriteString("\npairs all\n")
 	} else {
-		fmt.Fprintf(&b, "\npairs %d", len(m.ccPairs))
-		for _, p := range m.ccPairs {
+		fmt.Fprintf(&b, "\npairs %d", len(tb.Pairs))
+		for _, p := range tb.Pairs {
 			fmt.Fprintf(&b, " %d %d", p[0], p[1])
 		}
 		b.WriteByte('\n')
 	}
-	for e := 0; e < nE; e++ {
-		for k, old := range order {
-			i, err := id(m.step[e][old])
-			if err != nil {
-				return nil, err
-			}
+	for _, row := range tb.Step {
+		for k, i := range row {
 			if k > 0 {
 				b.WriteByte(' ')
 			}

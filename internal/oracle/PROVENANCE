@@ -1,0 +1,15 @@
+# Where oracle_gen.go comes from. It is generated, never edited: the proof
+# repository extracts its verified checkers from Rocq to MiniML JSON
+# (coq/goextract/ExtractGo.v) and gogen translates the JSON to Go.
+#
+# CI (.github/workflows/test.yml, job "Go oracle provenance") checks out NC_REPO
+# at NC_COMMIT, extracts the JSON in ROCQ_IMAGE, runs gogen with GOGEN_ARGS, and
+# requires the JSON and the Go to have exactly these hashes, and the Go to equal
+# oracle_gen.go byte for byte. To move to a new proof commit, run
+# internal/oracle/regenerate.sh <commit> and update NC_COMMIT and both hashes.
+NC_REPO=blackwell-systems/normalization-confluence
+NC_COMMIT=a12053a66a394d208351c7e722d8e24c7f00050a
+ROCQ_IMAGE=rocq/rocq-prover:9.3@sha256:c357e8864f80359db21725ea8371347a75a1cb439545b47219d7ad5683ba1782
+GOGEN_ARGS=-pkg oracle
+JSON_SHA256=6d685c7aeede31fc20930fe8f78a666cdc6ffb967e11cb1949d4b9ac825cd05c
+GO_SHA256=fbf866ae3038d4fadc14aed5439e40a173cc44f513794c1e6ea52071b1f124a9
