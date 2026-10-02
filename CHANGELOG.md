@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`
   (and so `BuildOrSynthesize` and `Synthesis.Machine`) and `BuildCompositional` (per footprint
   component) now give the tables gsm's verification produced to the table oracle.
-  - **The oracle.** It is `check_fast` from the normalization-confluence proof, generated as Go
+  - **The oracle.** It is `check_fn` from the normalization-confluence proof (the table oracle
+    over accessor functions, proven equal to `check_tables` and to the list oracle `check_fast`;
+    its guarantee, `check_fn_converges`, is stated on the accessors), generated as Go
     from the Rocq extraction and vendored in `internal/oracle` (no OCaml, no subprocess, no
     dependencies). `internal/oracle/PROVENANCE` pins the proof commit, the prover image and the
     hashes. CI regenerates the file from them and requires the same bytes.
@@ -23,8 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`Federation.Build` and `Certificate.Verify`.** They rebuild components with `Build`, so
     every component's tables are gated. The morphism checks (M1, acyclicity, monotone-cycle
     iteration) and certificate re-derivation are gsm's Go code and are not oracle-gated.
+  - **In place.** The oracle reads the machine's tables through accessors (`oracle.Lookup`,
+    `oracle.CheckLookup`) and copies nothing: the gate adds about 12 MB (the renumbering of the
+    in-domain states) at 2^20 states. With 20 events and every pair declared, `Build` with the
+    gate takes about 5.6 s (0.76 s without) and three builds peak at about 330 MB RSS (240 MB
+    without).
   - **Limits.** Running out of memory or goroutine stack kills the process rather than returning
-    an error. At 2^20 states the gate's peak RSS is about 2.1 to 2.3 GB with 20 events.
+    an error.
   - **Output change: `Report.String` ends with an `Assurance:` line.**
     - A certified report prints it after `Convergence: GUARANTEED`.
     - Every report that is not certified now ends with `Assurance: not certified`. This covers a

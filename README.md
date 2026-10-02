@@ -15,7 +15,7 @@ What if distributed systems don't have to coordinate - because they agree on the
 
 The convergence theorem itself is **machine-checked**: an axiom-free Coq/Rocq proof (`Print Assumptions` reports "Closed under the global context") with CI that gates on it. See the [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq) and the [regime field guide](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIMES.md) for when a governed network converges.
 
-And gsm's own verification is **checked again by the proof itself, in-process**. When `Build`, `BuildOrSynthesize`, `SynthesizeWith` (and so `Synthesis.Machine`) or `BuildCompositional` succeeds in Go, the machine's tables go to the table oracle. That oracle is `check_fast` from the Coq/Rocq development, generated as Go from the extraction and vendored in `internal/oracle`. The machine is returned only if the oracle certifies the tables; otherwise the build fails closed, with no machine. `Report.Assurance` says what certified a machine. A bug in gsm's Go verification therefore cannot hand you a machine whose tables do not converge. The extracted checkers can also re-certify a machine you export (`Machine.WriteConvergenceTables`, `Registry.WriteMachineAST`). See [`coq/goextract`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/goextract) and [What the extracted oracles check](#what-the-extracted-oracles-check).
+And gsm's own verification is **checked again by the proof itself, in-process**. When `Build`, `BuildOrSynthesize`, `SynthesizeWith` (and so `Synthesis.Machine`) or `BuildCompositional` succeeds in Go, the machine's tables go to the table oracle. That oracle is `check_fn` from the Coq/Rocq development (the table oracle over accessor functions, proven equal to `check_tables` and to the list oracle `check_fast`), generated as Go from the extraction and vendored in `internal/oracle`. It reads the machine's tables in place through accessors, so it copies nothing. The machine is returned only if the oracle certifies the tables; otherwise the build fails closed, with no machine. `Report.Assurance` says what certified a machine. A bug in gsm's Go verification therefore cannot hand you a machine whose tables do not converge. The extracted checkers can also re-certify a machine you export (`Machine.WriteConvergenceTables`, `Registry.WriteMachineAST`). See [`coq/goextract`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/goextract) and [What the extracted oracles check](#what-the-extracted-oracles-check).
 
 CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
@@ -506,10 +506,11 @@ oracle-gated:
 
 This matches CERTIFICATE-DESIGN.md: an extracted federation oracle is planned separately.
 
-**Memory and process limits.** The oracle's Coq lists and tries need memory on top of `Build`'s
-tables. Measured at 2^20 states, peak RSS is:
-- about 1.2 to 1.4 GB with 10 events (the oracle alone, from text tables);
-- about 2.1 to 2.3 GB with 20 events (gsm `Build` with the gate).
+**Memory and process limits.** The oracle reads `Build`'s own tables through accessors and copies
+nothing; the gate adds only the renumbering of the in-domain states (about 12 MB at 2^20 states).
+Measured with `BenchmarkBuild_WideFlags20` (2^20 states, 20 events, every pair), peak RSS of
+three `Build` calls is about 330 MB with the gate and 240 MB without it (it was 2.1 to 2.4 GB when
+the oracle took the tables as Coq lists).
 
 Running out of memory, or out of goroutine stack, kills the process. That is not a fail-closed
 error return: plan memory for the largest machines you build.
@@ -642,16 +643,16 @@ State space grows as the **product** of variable domains: 5 enums × 100 ints = 
 
 Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather than attempt an intractable enumeration; use `BuildCompositional` (or federation) to go beyond it.
 
-**The oracle gate's cost.** The table oracle re-checks the tables after gsm's own checks. It works on Coq lists and tries rather than arrays, so its cost per state and declared pair is higher than `Build`'s own CC check. Measured locally on a loaded machine (Build with the gate vs without):
+**The oracle gate's cost.** The table oracle re-checks the tables after gsm's own checks, reading them in place through accessors (a closure call per read), so its cost per state and declared pair is higher than `Build`'s own CC check. Measured locally on an Apple M-series laptop (Build with the gate vs without):
 
 | Machine | Without the gate | With the gate |
 |---------|------------------|---------------|
-| 24 states, 3 pairs | 0.32 ms | 0.33 ms |
-| 1,024 states, 10 events, 45 pairs | 2.2 ms | 7.6 ms |
-| 2²⁰ states, 10 declared pairs (oracle alone) | | ~3.4 s |
-| 2²⁰ states, 20 events, every pair (190) | 0.88 s | 37 s (peak RSS about 2.1 to 2.3 GB) |
+| 24 states, 3 pairs | 0.32 ms | 0.35 ms |
+| 1,024 states, 10 events, 45 pairs | 2.2 ms | 3.0 ms |
+| 2²⁰ states, 20 events, 10 declared pairs (oracle alone) | | ~0.3 s |
+| 2²⁰ states, 20 events, every pair (190) | 0.76 s | 5.6 s (peak RSS about 330 MB, against 240 MB without the gate) |
 
-For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast. A faster oracle is in progress in the proof.
+For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast.
 
 ### Runtime
 

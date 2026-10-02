@@ -17,11 +17,12 @@
 //   - gogen, whose prims are checked against their Rocq definitions and whose
 //     output is differentially tested against the OCaml extraction;
 //   - the Go toolchain;
-//   - this file's accessors. The theorem holds for the functions they compute,
-//     so they must be pure and total and return non-negative values: nf(s) is
-//     NF[s] and st(e)(s) is Step[e][s] for in-range arguments and 0 otherwise,
-//     every entry is checked to lie in 0..2^31-1 first, and the slices must not
-//     change while the check runs.
+//   - this file's accessors, and the caller's (Lookup). The theorem holds for
+//     the functions they compute, so they must be pure and total and return
+//     non-negative values: nf(s) is NF(s) and st(e)(s) is Step(e, s) for
+//     in-range arguments and 0 otherwise, every entry is checked to lie in
+//     0..2^31-1 first, and what the accessors read must not change while the
+//     check runs.
 package oracle
 
 import "fmt"
@@ -45,6 +46,38 @@ type Tables struct {
 	AllPairs bool
 }
 
+// Lookup gives a machine's convergence tables by accessors instead of slices,
+// so a caller passes the tables it already holds without copying them. The
+// states are 0..N-1 (state 0 is the zero state) and the events 0..NE-1.
+//   - NF(s) is the normal form of s, for 0 <= s < N.
+//   - Step(e, s) is the state applying event e to s leads to, normalized, for
+//     0 <= e < NE and 0 <= s < N.
+//   - Pairs and AllPairs are as in Tables.
+//
+// The proof's guarantee is about the functions the accessors compute, so they
+// must be pure: the same answer for the same arguments for as long as the
+// check runs (no mutation of what they read meanwhile). CheckLookup calls them
+// only on the arguments above, checks once that every answer lies in
+// 0..2^31-1, and answers 0 for any other argument the checker asks about.
+type Lookup struct {
+	N, NE    int
+	NF       func(s int) int
+	Step     func(e, s int) int
+	Pairs    [][2]int
+	AllPairs bool
+}
+
+// Lookup returns accessors over t's slices. It does not check t; CheckTables
+// does.
+func (t Tables) Lookup() Lookup {
+	return Lookup{
+		N: len(t.NF), NE: len(t.Step),
+		NF:    func(s int) int { return t.NF[s] },
+		Step:  func(e, s int) int { return t.Step[e][s] },
+		Pairs: t.Pairs, AllPairs: t.AllPairs,
+	}
+}
+
 // CheckTables reports whether the tables have the property gsm's Build checks:
 //   - every normal form and every step lands on a valid state;
 //   - every declared pair commutes on every valid state and on the zero state.
@@ -57,36 +90,42 @@ type Tables struct {
 //
 // A caller that certifies convergence must treat an error as a rejection.
 func CheckTables(t Tables) (bool, error) {
-	n, ne := len(t.NF), len(t.Step)
-	if n < 1 {
-		return false, fmt.Errorf("oracle: no states (state 0 is the zero state)")
-	}
-	if n > maxID || ne > maxID {
-		return false, fmt.Errorf("oracle: %d states and %d events exceed the checker's range", n, ne)
-	}
-	if t.AllPairs && t.Pairs != nil {
-		return false, fmt.Errorf("oracle: both AllPairs and declared Pairs given")
-	}
-	ids := func(what string, xs []int) error {
-		for i, x := range xs {
-			if x < 0 || x > maxID {
-				return fmt.Errorf("oracle: %s entry %d is %d, outside 0..%d", what, i, x, maxID)
-			}
-		}
-		return nil
-	}
-	if err := ids("nf", t.NF); err != nil {
-		return false, err
-	}
+	n := len(t.NF)
 	for e, row := range t.Step {
 		if len(row) != n {
 			return false, fmt.Errorf("oracle: step row %d has %d entries, want %d", e, len(row), n)
 		}
-		if err := ids(fmt.Sprintf("step row %d", e), row); err != nil {
-			return false, err
+	}
+	return CheckLookup(t.Lookup())
+}
+
+// CheckLookup is CheckTables on tables given by accessors (see Lookup). It
+// copies nothing: the checker reads every entry through l's accessors. An
+// error means no verdict, as for CheckTables.
+func CheckLookup(l Lookup) (bool, error) {
+	n, ne := l.N, l.NE
+	if n < 1 {
+		return false, fmt.Errorf("oracle: no states (state 0 is the zero state)")
+	}
+	if n > maxID || ne > maxID || ne < 0 {
+		return false, fmt.Errorf("oracle: %d states and %d events exceed the checker's range", n, ne)
+	}
+	if l.AllPairs && l.Pairs != nil {
+		return false, fmt.Errorf("oracle: both AllPairs and declared Pairs given")
+	}
+	for s := 0; s < n; s++ {
+		if x := l.NF(s); x < 0 || x > maxID {
+			return false, fmt.Errorf("oracle: nf entry %d is %d, outside 0..%d", s, x, maxID)
 		}
 	}
-	for _, p := range t.Pairs {
+	for e := 0; e < ne; e++ {
+		for s := 0; s < n; s++ {
+			if x := l.Step(e, s); x < 0 || x > maxID {
+				return false, fmt.Errorf("oracle: step row %d entry %d is %d, outside 0..%d", e, s, x, maxID)
+			}
+		}
+	}
+	for _, p := range l.Pairs {
 		if p[0] < 0 || p[0] >= ne || p[1] < 0 || p[1] >= ne {
 			return false, fmt.Errorf("oracle: declared pair (%d, %d) names an event outside 0..%d", p[0], p[1], ne-1)
 		}
@@ -96,17 +135,17 @@ func CheckTables(t Tables) (bool, error) {
 	n64, ne64 := int64(n), int64(ne)
 	nf := func(s int64) int64 {
 		if s >= 0 && s < n64 {
-			return int64(t.NF[s])
+			return int64(l.NF(int(s)))
 		}
 		return 0
 	}
 	zero := func(int64) int64 { return 0 }
 	rows := make([]func(int64) int64, ne)
-	for e := range t.Step {
-		row := t.Step[e]
+	for e := range rows {
+		e := e
 		rows[e] = func(s int64) int64 {
 			if s >= 0 && s < n64 {
-				return int64(row[s])
+				return int64(l.Step(e, int(s)))
 			}
 			return 0
 		}
@@ -118,9 +157,9 @@ func CheckTables(t Tables) (bool, error) {
 		return zero
 	}
 	pairs := K_None[*I_list[*I_prod[int64, int64]]]()
-	if !t.AllPairs {
-		ps := make([]*I_prod[int64, int64], len(t.Pairs))
-		for i, p := range t.Pairs {
+	if !l.AllPairs {
+		ps := make([]*I_prod[int64, int64], len(l.Pairs))
+		for i, p := range l.Pairs {
 			ps[i] = K_Pair(int64(p[0]), int64(p[1]))
 		}
 		pairs = K_Some(list(ps))
