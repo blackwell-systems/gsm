@@ -180,17 +180,20 @@ func TestSynthesisMachine_UnaffectedByLaterIndependent(t *testing.T) {
 	}
 }
 
-// midRunRegistry returns a registry whose invariant check declares one more event
-// named `extra` the first time it runs, so the declaration lands after the name
-// check and before the result is built.
-func midRunRegistry(name, extra string, withRepair bool) *Registry {
-	r := NewRegistry(name)
+// midRunRegistry returns a registry whose invariant check calls declare(r, x)
+// the first time it runs, so the declaration lands after the name check and
+// before the result is built.
+func midRunRegistry(declare func(r *Registry, x Var), withRepair, declaredOnly bool) *Registry {
+	r := NewRegistry("mid")
+	if declaredOnly {
+		r.OnlyDeclaredPairs()
+	}
 	x := r.Int("x", 0, 2)
 	declared := false
 	ib := r.Invariant("cap").Watches(x).Holds(func(s State) bool {
 		if !declared {
 			declared = true
-			r.Event(extra).Writes(x).Apply(func(s State) State { return s }).Add()
+			declare(r, x)
 		}
 		return s.GetInt(x) <= 1
 	})
@@ -205,53 +208,58 @@ func midRunRegistry(name, extra string, withRepair bool) *Registry {
 
 // wantModified fails unless err is the rejection of a registry changed while it
 // was being verified.
-func wantModified(t *testing.T, err error, reg string) {
+func wantModified(t *testing.T, err error) {
 	t.Helper()
-	want := `gsm: registry "` + reg + `" was changed while it was being verified (a rule declared ` +
+	want := `gsm: registry "mid" was changed while it was being verified (a rule declared ` +
 		`a variable, invariant, event, or Independent pair)`
 	if err == nil {
-		t.Fatalf("accepted a registry that gained an event during verification; want %q", want)
+		t.Fatalf("accepted a registry that changed during verification; want %q", want)
 	}
 	if err.Error() != want {
 		t.Fatalf("got %q, want %q", err, want)
 	}
 }
 
-// TestDeclareDuringVerification: a rule closure that declares an event while the
-// registry is being verified (here a duplicate "a", and a new unique name) must
-// not yield a result built from a registry other than the one checked.
+// TestDeclareDuringVerification: a rule closure that declares on its registry
+// while the registry is being verified (a duplicate event "a", a new event, a
+// variable, an invariant, an Independent pair) must not yield a result built from
+// a registry other than the one checked.
 func TestDeclareDuringVerification(t *testing.T) {
-	for _, extra := range []string{"a", "c"} {
-		t.Run("Synthesize/"+extra, func(t *testing.T) {
-			defer func() {
-				if p := recover(); p != nil {
-					t.Fatalf("panicked: %v", p)
-				}
-			}()
-			s, err := midRunRegistry("mid", extra, false).Synthesize()
-			if err == nil && s.Convergent {
-				m := s.Machine()
-				t.Logf("events %v, Apply(%q) = %s", m.Events(), extra, m.Apply(m.NewState(), extra))
-			}
-			wantModified(t, err, "mid")
-		})
-		t.Run("Build/"+extra, func(t *testing.T) {
-			defer func() {
-				if p := recover(); p != nil {
-					t.Fatalf("panicked: %v", p)
-				}
-			}()
-			_, _, err := midRunRegistry("mid", extra, true).Build()
-			wantModified(t, err, "mid")
-		})
-		t.Run("BuildCompositional/"+extra, func(t *testing.T) {
-			defer func() {
-				if p := recover(); p != nil {
-					t.Fatalf("panicked: %v", p)
-				}
-			}()
-			_, _, err := midRunRegistry("mid", extra, true).BuildCompositional()
-			wantModified(t, err, "mid")
-		})
+	identity := func(s State) State { return s }
+	declares := map[string]func(r *Registry, x Var){
+		"duplicate event": func(r *Registry, x Var) { r.Event("a").Writes(x).Apply(identity).Add() },
+		"new event":       func(r *Registry, x Var) { r.Event("c").Writes(x).Apply(identity).Add() },
+		"variable":        func(r *Registry, x Var) { r.Bool("late") },
+		"invariant": func(r *Registry, x Var) {
+			r.Invariant("late").Watches(x).Holds(func(State) bool { return true }).Repair(identity).Add()
+		},
+		// From all-pairs mode: declares a pair and switches to declared-only mode.
+		"independent": func(r *Registry, x Var) { r.Independent("a", "b") },
+		// Only the mode changes.
+		"declared-only mode": func(r *Registry, x Var) { r.OnlyDeclaredPairs() },
+		// The registry is already in declared-only mode (see below): only the pair
+		// list changes.
+		"pair in declared-only mode": func(r *Registry, x Var) { r.Independent("a", "b") },
+	}
+	for what, declare := range declares {
+		paths := map[string]func(r *Registry) error{
+			"Synthesize": func(r *Registry) error { _, err := r.Synthesize(); return err },
+			"Build":      func(r *Registry) error { _, _, err := r.Build(); return err },
+			"BuildCompositional": func(r *Registry) error {
+				_, _, err := r.BuildCompositional()
+				return err
+			},
+		}
+		for path, run := range paths {
+			t.Run(path+"/"+what, func(t *testing.T) {
+				defer func() {
+					if p := recover(); p != nil {
+						t.Fatalf("panicked: %v", p)
+					}
+				}()
+				r := midRunRegistry(declare, path != "Synthesize", what == "pair in declared-only mode")
+				wantModified(t, run(r))
+			})
+		}
 	}
 }

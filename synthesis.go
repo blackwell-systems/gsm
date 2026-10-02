@@ -116,6 +116,7 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 	if err := r.checkNames(); err != nil {
 		return nil, err
 	}
+	before := r.shape()
 	if r.totalBits > 20 {
 		return nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
@@ -259,6 +260,9 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 	bt(0, 0)
 	found := solution != nil
 
+	if err := r.checkUnchanged(before); err != nil {
+		return nil, err
+	}
 	// Machine and Repairs are built from this snapshot, not the live registry, so
 	// a later declaration (an event, an Independent pair) cannot reach a machine
 	// whose synthesis never saw it.

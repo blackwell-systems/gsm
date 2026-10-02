@@ -115,6 +115,7 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 	if err := r.checkNames(); err != nil {
 		return nil, nil, err
 	}
+	before := r.shape()
 	if r.totalBits > 20 {
 		return nil, nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
@@ -170,6 +171,10 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 		if err != nil {
 			return nil, report, err
 		}
+	}
+
+	if err := r.checkUnchanged(before); err != nil {
+		return nil, report, err
 	}
 
 	// Build immutable machine

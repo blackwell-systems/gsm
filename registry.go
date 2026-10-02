@@ -110,6 +110,30 @@ func (r *Registry) checkNames() error {
 	return nil
 }
 
+// registryShape is what a rule closure could change by declaring on its own
+// registry while that registry is being verified. Declarations only append, so
+// the counts identify the registry that was checked.
+type registryShape struct {
+	vars, invariants, events, independent int
+	allIndependent                        bool
+}
+
+func (r *Registry) shape() registryShape {
+	return registryShape{len(r.vars), len(r.invariants), len(r.events), len(r.independent), r.allIndependent}
+}
+
+// checkUnchanged rejects a registry that changed since before was taken. Build,
+// BuildCompositional and SynthesizeWith run rule closures between checkNames and
+// building their result; a closure that declares on the registry would otherwise
+// get a declaration past the name check, or into a result that never checked it.
+func (r *Registry) checkUnchanged(before registryShape) error {
+	if r.shape() != before {
+		return fmt.Errorf("gsm: registry %q was changed while it was being verified (a rule declared "+
+			"a variable, invariant, event, or Independent pair)", r.name)
+	}
+	return nil
+}
+
 func (r *Registry) eventIndex(name string) int {
 	for i, ev := range r.events {
 		if ev.name == name {
