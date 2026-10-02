@@ -160,9 +160,10 @@ func (x boolP) vars() []int {
 	return out
 }
 
-// And / Or over predicates.
-func And(ps ...Pred) Pred { return boolP{"and", ps} }
-func Or(ps ...Pred) Pred  { return boolP{"or", ps} }
+// And / Or over predicates. Each keeps its own copy of ps, so rewriting the
+// caller's slice afterwards does not change the predicate.
+func And(ps ...Pred) Pred { return boolP{"and", append([]Pred(nil), ps...)} }
+func Or(ps ...Pred) Pred  { return boolP{"or", append([]Pred(nil), ps...)} }
 
 type notP struct{ p Pred }
 
@@ -193,6 +194,17 @@ func Do(as ...Assign) Transform {
 		return Transform{}
 	}
 	return as
+}
+
+// clone returns a copy of t that the caller's Transform (a slice) does not share,
+// so a declared rule cannot be rewritten through it after declaration. Assign and
+// the expressions in it are immutable values, so a shallow copy suffices. A nil
+// transform stays nil (DeclEvent and DeclInvariant keep it as a non-combinator rule).
+func (t Transform) clone() Transform {
+	if t == nil {
+		return nil
+	}
+	return append(Transform{}, t...)
 }
 
 func (t Transform) apply(s State) State {
@@ -241,6 +253,7 @@ func dedup(idx ...[]int) []int {
 // unique. The footprint is derived from the variables the
 // predicate and transform mention, so it is conformant by construction.
 func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
+	repair = repair.clone()
 	fp := dedup(holds.vars(), repair.readVars(), repair.writeVars())
 	r.invariants = append(r.invariants, invariantDef{
 		name:      name,
@@ -256,6 +269,7 @@ func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
 // derived from the assignments, so Writes need not be declared separately. The
 // name must be unique within the registry (see Registry.Event).
 func (r *Registry) DeclEvent(name string, effect Transform) {
+	effect = effect.clone()
 	r.events = append(r.events, eventDef{
 		name:      name,
 		writes:    effect.writeVars(),
@@ -267,6 +281,7 @@ func (r *Registry) DeclEvent(name string, effect Transform) {
 // DeclEventGuarded is DeclEvent with a precondition; the event is a no-op when the
 // guard is false. The name must be unique within the registry (see Registry.Event).
 func (r *Registry) DeclEventGuarded(name string, guard Pred, effect Transform) {
+	effect = effect.clone()
 	r.events = append(r.events, eventDef{
 		name:      name,
 		writes:    effect.writeVars(),
