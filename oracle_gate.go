@@ -19,6 +19,21 @@ import (
 // tableOracle is the table oracle. Only tests replace it.
 var tableOracle = oracle.CheckLookup
 
+// rulesOracle is the rules oracle. Only tests replace it.
+var rulesOracle = oracle.CheckRules
+
+// RulesOracleMaxStatePairs caps the rules oracle's work. Build runs the rules
+// oracle on a combinator machine only when its number of states times its
+// number of checked event pairs (every pair when none is declared; at least 1)
+// is at most this; above it the table oracle alone certifies the machine. The
+// rules oracle re-derives every step from the expression trees, at about 3 µs
+// per state and pair in the generated Go (Apple M-series): at the cap, about
+// 2^20 states with 2 pairs, it takes about 7 s.
+const RulesOracleMaxStatePairs = 1 << 21
+
+// rulesOracleCap is RulesOracleMaxStatePairs. Only tests change it.
+var rulesOracleCap = RulesOracleMaxStatePairs
+
 // Assurance says what certified a machine's convergence.
 type Assurance int
 
@@ -40,12 +55,20 @@ const (
 	// (cross-component pairs commute because footprints are disjoint) rests on
 	// gsm's footprint check, which the oracle does not see.
 	AssuranceOracleComponents
+	// AssuranceOracleTablesAndRules: AssuranceOracleTables, and the rules
+	// oracle generated from the Rocq proof independently certified the
+	// machine from its combinator rules (checkBuild_converges): it re-derives
+	// every step from the expression trees, so it does not trust gsm's tables
+	// at all.
+	AssuranceOracleTablesAndRules
 )
 
 func (a Assurance) String() string {
 	switch a {
 	case AssuranceOracleTables:
 		return "tables certified by the verified table oracle"
+	case AssuranceOracleTablesAndRules:
+		return "tables certified by the verified table oracle; rules certified by the verified rules oracle"
 	case AssuranceOracleComponents:
 		return "component tables certified by the verified table oracle; cross-component independence by gsm's footprint check"
 	}
