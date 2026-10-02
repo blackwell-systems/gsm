@@ -42,6 +42,15 @@ type Report struct {
 	// machine; it holds the error. Verification stopped at that rule, so WFC and CC are
 	// false: the machine was not certified, whatever had been checked before.
 	DomainViolation string
+
+	// Assurance says what certified the machine (see Assurance). It is
+	// AssuranceNone unless the build returned a machine.
+	Assurance Assurance
+
+	// OracleDisagreement is non-empty when gsm's verification passed but the verified
+	// table oracle did not certify the tables (it rejected them, or could not check
+	// them); it holds the error. There is no machine: the build fails closed.
+	OracleDisagreement string
 }
 
 // compensationError is Build's error when the compensation as written is missing or does
@@ -121,8 +130,17 @@ func (r *Report) String() string {
 		s += fmt.Sprintf("    %s→%s: %s\n", r.CCFailure.Event2, r.CCFailure.Event1, r.CCFailure.Result2)
 	}
 
-	if r.WFC && r.CC {
+	if r.OracleDisagreement != "" {
+		s += "\n  Verified table oracle: did not certify\n"
+		s += fmt.Sprintf("    %s\n", r.OracleDisagreement)
+		s += "  Convergence: NOT CERTIFIED (no machine)\n"
+		return s
+	}
+	if r.WFC && r.CC && r.Assurance != AssuranceNone {
 		s += "\n  Convergence: GUARANTEED\n"
+		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
+	} else {
+		s += fmt.Sprintf("\n  Assurance: %s\n", r.Assurance)
 	}
 
 	return s
@@ -136,8 +154,24 @@ func (r *Report) String() string {
 // range, or bits outside the encoding. The error names the event or invariant, the input
 // state and the result. Membership is by value, so a state built from another machine
 // with an identical variable declaration list is accepted.
+//
+// When gsm's verification passes, the machine's tables also go to the verified table
+// oracle: check_fast from the normalization-confluence proof, generated as Go from the
+// Rocq extraction (internal/oracle). The machine is returned only if the oracle certifies
+// the tables, and Report.Assurance is then AssuranceOracleTables. If the oracle rejects
+// them or cannot check them, Build returns an error and no machine (it fails closed), and
+// Report.OracleDisagreement says why.
 func (r *Registry) Build() (*Machine, *Report, error) {
 	m, rep, err := r.build(true)
+	if err == nil {
+		// The oracle gate: the verified table oracle must certify the tables too.
+		if err = certifyMachine(m); err != nil {
+			rep.failClosed(err)
+			m = nil
+		} else {
+			rep.Assurance = AssuranceOracleTables
+		}
+	}
 	if buildObserver != nil {
 		buildObserver(r, m, rep, err)
 	}

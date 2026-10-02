@@ -164,8 +164,9 @@ digesting and rebuilding (the digest requires combinator rules, and the tables r
 morphism closures), so there is nothing there for a closure to change.
 
 The recorded verdict (`Certificate.Report`) is informational. These re-checks are gsm's Go code:
-they remove trust in stored results, not in the Go verifier. An extracted federation oracle and a
-runtime gate that runs extracted checkers on every success path are planned separately. This is what makes a verifier fix
+they remove trust in stored results, not in the Go verifier. Component rebuilds go through `Build`, so the
+in-process table oracle (generated from the proof) also re-certifies every component's tables; an
+extracted federation oracle, for the morphisms, is planned separately. This is what makes a verifier fix
 safe without a version bump: a certificate issued by an older, weaker verifier is re-checked by the
 current one on load. For example, a v0.11.0 certificate for the naive pay/ship component (certified
 then through Build's unchecked disjointness shortcut) still matches its digest, and both

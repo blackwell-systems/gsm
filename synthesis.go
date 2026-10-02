@@ -18,6 +18,11 @@ type Synthesis struct {
 	Nodes      int  // backtracking nodes explored (transparency)
 	Cost       int  // total cost of the representative repair (min-cost when Optimal + Exhaustive)
 
+	// Assurance says what certified the synthesized machine: AssuranceOracleTables
+	// when the verified table oracle certified its tables (SynthesizeWith returns an
+	// error otherwise), AssuranceNone when no convergent compensation was found.
+	Assurance Assurance
+
 	r        *Registry
 	vars     []Var          // the registry's variables when SynthesizeWith returned
 	events   map[string]int // event name -> index, when SynthesizeWith returned
@@ -331,6 +336,12 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (_ *Synthesis, err error)
 				}
 			}
 		}
+		// The oracle gate: the verified table oracle must certify the synthesized
+		// tables, or there is no synthesis to use.
+		if err := certifyMachine(out.machine()); err != nil {
+			return nil, err
+		}
+		out.Assurance = AssuranceOracleTables
 	}
 	return out, nil
 }
@@ -464,10 +475,18 @@ func (r *Registry) impossibilityWitness(rawStep [][]uint64, isValidState []bool,
 // it was when SynthesizeWith returned, which is the registry it checked): events, variables, or
 // Independent pairs declared on the registry afterwards do not reach it (the registry itself is
 // then re-checked by Build or Synthesize).
+//
+// It returns nil unless the verified table oracle certified the machine's tables
+// (Assurance is AssuranceOracleTables), which SynthesizeWith requires.
 func (s *Synthesis) Machine() *Machine {
-	if !s.Convergent {
+	if !s.Convergent || s.Assurance != AssuranceOracleTables {
 		return nil
 	}
+	return s.machine()
+}
+
+// machine builds the synthesized machine, certified or not.
+func (s *Synthesis) machine() *Machine {
 	m := &Machine{name: s.r.name, vars: s.vars, events: make(map[string]int, len(s.events)), step: s.step, nf: s.nf,
 		dom: newDomainCheck(s.vars), ccPairs: s.ccPairs, allPairs: s.allPairs}
 	for name, i := range s.events {

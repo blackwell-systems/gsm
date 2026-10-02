@@ -15,7 +15,7 @@ What if distributed systems don't have to coordinate - because they agree on the
 
 The convergence theorem itself is **machine-checked**: an axiom-free Coq/Rocq proof (`Print Assumptions` reports "Closed under the global context") with CI that gates on it. See the [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq) and the [regime field guide](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIMES.md) for when a governed network converges.
 
-And gsm's own verification can be **differentially checked** against that proof: `Machine.WriteConvergenceTables` emits a built machine's tables, and a checker extracted from the Coq development re-certifies, independently of this Go code, that they converge. A bug in gsm's Go verification cannot make a non-convergent machine pass the extracted oracle, but the oracle protects only the machines it is run on. Today that means machines someone exports and checks by hand, and the oracle tests in gsm's own test suite when they are pointed at built checker binaries. `Build` does not run the oracle, so a user's machine is protected by gsm's Go verifier alone; a runtime gate that runs an extracted checker on every success path is planned. See [`coq/extraction`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/extraction) and [What the extracted oracles check](#what-the-extracted-oracles-check).
+And gsm's own verification is **checked again by the proof itself, in-process**. When `Build`, `BuildOrSynthesize`, `SynthesizeWith` (and so `Synthesis.Machine`) or `BuildCompositional` succeeds in Go, the machine's tables go to the table oracle. That oracle is `check_fast` from the Coq/Rocq development, generated as Go from the extraction and vendored in `internal/oracle`. The machine is returned only if the oracle certifies the tables; otherwise the build fails closed, with no machine. `Report.Assurance` says what certified a machine. A bug in gsm's Go verification therefore cannot hand you a machine whose tables do not converge. The extracted checkers can also re-certify a machine you export (`Machine.WriteConvergenceTables`, `Registry.WriteMachineAST`). See [`coq/goextract`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/goextract) and [What the extracted oracles check](#what-the-extracted-oracles-check).
 
 CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
@@ -128,6 +128,7 @@ When you call `registry.Build()`:
 3. **Verify WFC** - Compensation terminates and reaches valid states
 4. **Build step table** - For every (event, state) pair, precompute the normal form after applying the event
 5. **Verify CC** - For every independent event pair and every valid state, both orderings reach the same normal form (two step-table lookups per state; no pair is skipped)
+6. **Oracle gate** - The table oracle generated from the Coq proof re-checks the normal-form and step tables; if it does not certify them, there is no machine (see [What the extracted oracles check](#what-the-extracted-oracles-check))
 
 If verification passes, you get an immutable `Machine` with precomputed lookup tables.
 
@@ -430,6 +431,7 @@ Machine: order_fulfillment
   CC (Compensation Commutativity): PASS (3 pairs: 0 disjoint, 3 brute-force)
 
   Convergence: GUARANTEED
+  Assurance: tables certified by the verified table oracle
 ```
 
 **WFC (Well-Founded Compensation)**: Compensation terminates from every state. The report shows the maximum number of repair steps needed.
@@ -466,15 +468,47 @@ Machine: pay_ship
 
 ### What the extracted oracles check
 
-Two checkers extracted from the axiom-free Coq proof can re-certify a machine independently of
-gsm's Go code. Neither runs as part of `Build` or any other gsm entry point: each runs only when
-someone invokes it on an exported machine. gsm's CI builds both from a pinned, hash-checked
-proof commit (`.github/oracle/`) and cross-checks every machine the test suite passes to `Build`
-(the documented examples, the property-tested machines, and 600 random combinator machines)
-against them; there the oracle tests are required, not skipped, and any disagreement with
-`Build` fails the run. Locally they run when `GSM_CONVERGENCE_CHECKER` / `GSM_AST_CHECKER` point
-at built binaries. A runtime gate that runs an extracted checker on every success path is planned
-(it needs a way to run extracted code in-process).
+Two checkers extracted from the axiom-free Coq proof re-certify a machine independently of gsm's
+Go verification.
+
+**The oracle gate (in-process, on every success path).** The table oracle also exists as Go,
+generated mechanically from the proof's extraction. It is not written by hand: see
+`internal/oracle/PROVENANCE`, and the proof repository's `coq/goextract`, which also checks the
+generator's arithmetic against its Rocq definitions. Every success path runs it on the tables
+gsm's verification produced:
+
+- `Build`, and so `BuildOrSynthesize` when the rules converge as written;
+- `SynthesizeWith`, and so `BuildOrSynthesize`'s synthesized path and `Synthesis.Machine`;
+- `BuildCompositional`, once per footprint component, over that component's subspace.
+
+If the oracle does not certify the tables (it rejects them, or it cannot check them), the call
+returns an error and no machine. This is a bug in gsm, never a property of your rules, and
+`Report.OracleDisagreement` says so. `Report.Assurance` (and `Synthesis.Assurance`) records what
+certified the machine:
+
+- `AssuranceOracleTables`: gsm's verification and the table oracle both certified the machine's
+  tables.
+- `AssuranceOracleComponents` (`BuildCompositional`): the oracle certified every component's
+  tables. That cross-component pairs commute rests on gsm's footprint check, which the oracle does
+  not see.
+
+What the gate trusts:
+
+- that the tables are what your rules compute (gsm runs your closures to produce them);
+- Rocq's extraction;
+- the generator;
+- the Go toolchain.
+
+CI regenerates `internal/oracle/oracle_gen.go` from the pinned proof commit, in the pinned prover
+image, and requires the same bytes. The cost is small next to `Build` itself (see Performance).
+
+**Cross-checks against the OCaml checkers.** gsm's CI also builds both extracted checkers as OCaml
+binaries, from a pinned, hash-checked proof commit (`.github/oracle/`). It cross-checks every
+machine the test suite passes to `Build` against them: the documented examples, the
+property-tested machines, and 600 random combinator machines. There the oracle tests are required,
+not skipped, and any disagreement with `Build` fails the run. Locally they run when
+`GSM_CONVERGENCE_CHECKER` / `GSM_AST_CHECKER` point at built binaries. The rules oracle runs only
+there and on exported machines, not in-process.
 
 Both checkers decide the property `Build` checks, so they agree with `Build` on every machine,
 except that the rules oracle refuses some arithmetic it does not model (below). That property:
