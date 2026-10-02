@@ -185,6 +185,8 @@ The library **verifies both properties at build time** by exhaustively checking 
 
 Events can arrive **in any order**. The library verifies that different orderings converge to the same final state.
 
+**Names are unique within a registry.** An event is addressed by name after it is declared (`Apply`, `Independent`, `ApplyNamed`, replay logs), and a variable by name in certificate tables, input ports, and shared projections. `Build` returns `gsm: registry "orders": duplicate event name "ship"` (or `duplicate variable name`) for a registry that declares two events, or two variables, with the same name, and so do `BuildCompositional`, `Synthesize`, `BuildOrSynthesize`, `Federation.Build`, `Certify`, `Certificate.Verify`, and the exports for the checkers (`WriteMachineAST`, `PolicyBytes`, `PolicyDigest`, `WriteDeclaredPairs`). Invariant names only label diagnostics and need not be unique.
+
 ### Independence Declarations
 
 By default, gsm checks **all event pairs** for commutativity. For large systems, you can optimize by declaring which pairs are independent:
@@ -363,7 +365,8 @@ m, _, _ := gsm.NewFederation("storefront").
     Morphism(catalog, order)./* ... */Add().
     Build()
 
-// A consumer re-checks the certificate independently, from the tables (not the producer's closures):
+// A consumer re-checks the certificate independently, from the tables (not the producer's closures).
+// Each key is that registry's name.
 err := cert.Verify(map[string]*gsm.Registry{"pricing": pricing, "catalog": catalog})
 ```
 

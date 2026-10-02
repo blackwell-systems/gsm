@@ -118,7 +118,8 @@ func (r *Registry) eventIndex(name string) int {
 	panic(fmt.Sprintf("gsm: unknown event %q", name))
 }
 
-// Bool declares a boolean state variable.
+// Bool declares a boolean state variable. Variable names must be unique within
+// the registry (see Event); Build rejects a duplicate.
 func (r *Registry) Bool(name string) Var {
 	v := Var{
 		name:   name,
@@ -134,7 +135,8 @@ func (r *Registry) Bool(name string) Var {
 	return v
 }
 
-// Enum declares an enumerated state variable.
+// Enum declares an enumerated state variable. Its name must be unique within the
+// registry.
 func (r *Registry) Enum(name string, values ...string) Var {
 	if len(values) < 2 {
 		panic(fmt.Sprintf("gsm: enum %q needs at least 2 values", name))
@@ -155,7 +157,8 @@ func (r *Registry) Enum(name string, values ...string) Var {
 	return v
 }
 
-// Int declares a bounded integer state variable.
+// Int declares a bounded integer state variable. Its name must be unique within
+// the registry.
 func (r *Registry) Int(name string, min, max int) Var {
 	if max < min {
 		panic(fmt.Sprintf("gsm: int %q has max < min", name))
@@ -186,7 +189,8 @@ type InvariantBuilder struct {
 	def invariantDef
 }
 
-// Invariant begins declaring a named invariant.
+// Invariant begins declaring a named invariant. The name labels diagnostics only;
+// invariants are addressed by declaration order, so it need not be unique.
 func (r *Registry) Invariant(name string) *InvariantBuilder {
 	return &InvariantBuilder{
 		r:   r,
@@ -232,7 +236,12 @@ type EventBuilder struct {
 	def eventDef
 }
 
-// Event begins declaring a named event.
+// Event begins declaring a named event. The name is how the event is addressed
+// afterwards (Machine.Apply, Independent, FedMachine.ApplyNamed, replay logs), so
+// it must be unique within the registry: Build, BuildCompositional, Synthesize,
+// the federation and certificate paths, and the rules exports reject a registry
+// that declares two events with the same name. The duplicate is reported by
+// those paths as an error, not by Add.
 func (r *Registry) Event(name string) *EventBuilder {
 	return &EventBuilder{
 		r:   r,

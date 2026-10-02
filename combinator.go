@@ -237,7 +237,8 @@ func dedup(idx ...[]int) []int {
 // ---- registry builders (combinator surface) ----
 
 // DeclInvariant declares an invariant from combinators: it holds when `holds` is
-// true, and `repair` restores it. The footprint is derived from the variables the
+// true, and `repair` restores it. The name labels diagnostics only and need not be
+// unique. The footprint is derived from the variables the
 // predicate and transform mention, so it is conformant by construction.
 func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
 	fp := dedup(holds.vars(), repair.readVars(), repair.writeVars())
@@ -252,7 +253,8 @@ func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
 }
 
 // DeclEvent declares an event from a combinator transform. Its write set is
-// derived from the assignments, so Writes need not be declared separately.
+// derived from the assignments, so Writes need not be declared separately. The
+// name must be unique within the registry (see Registry.Event).
 func (r *Registry) DeclEvent(name string, effect Transform) {
 	r.events = append(r.events, eventDef{
 		name:      name,
@@ -263,7 +265,7 @@ func (r *Registry) DeclEvent(name string, effect Transform) {
 }
 
 // DeclEventGuarded is DeclEvent with a precondition; the event is a no-op when the
-// guard is false.
+// guard is false. The name must be unique within the registry (see Registry.Event).
 func (r *Registry) DeclEventGuarded(name string, guard Pred, effect Transform) {
 	r.events = append(r.events, eventDef{
 		name:      name,

@@ -55,6 +55,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against both checkers, and fails on any disagreement with `Build`.
 
 ### Security
+- **Duplicate event names let `Build` certify a machine that diverges.** A registry could declare
+  two events with the same name. `Independent` resolved the name to the first, while the built
+  machine's `Apply` ran the last, so CC was checked for one event and the runtime applied another;
+  an order-dependent machine was reported convergent. Every path that produces a machine, a
+  certificate, or an export for the checkers now rejects the registry with
+  `gsm: registry "r": duplicate event name "e"`: `Build`, `BuildCompositional`, `Synthesize`,
+  `SynthesizeWith`, `BuildOrSynthesize` (reported as itself, not as a failed synthesis),
+  `Federation.Build` (every component, before certificate validation), `Certify`,
+  `BuildCoordinated`, `EmbedCertified` builds, `Certificate.Verify`, `WriteMachineAST`,
+  `PolicyBytes`, `PolicyDigest`, and `WriteDeclaredPairs`. **Behaviour change:** a registry that
+  reused an event name, which used to build, is now rejected; rename one of the events.
+- **Duplicate variable names misrouted certificate re-checks and projections.** Certificate tables,
+  input ports, and shared projections name variables, so with two variables of the same name
+  `Certificate.Verify` re-checked a table against the last one while `MergeProjection` wrote the
+  first, and a projection sharing both carried one value for the two. The same paths now reject
+  `gsm: registry "r": duplicate variable name "v"`. **Behaviour change:** a registry that reused a
+  variable name is now rejected.
+- **`Certificate.Verify` re-checked tables against whichever registry a key named.** The digest names
+  components by registry name but the re-check looked a table's target up by map key, so a map
+  whose keys did not match the registries' names (for example two keys swapped) still matched the
+  digest and re-checked a table against the wrong registry. `Verify` now requires each key to be
+  its registry's name.
 - **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity
   check for any event pair whose triggered invariant footprints were disjoint, and never checked
   what an event's guard or effect reads. The shortcut's theorem (`disjoint_events_commute` in
