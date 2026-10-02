@@ -97,3 +97,21 @@ func benchCompositional(b *testing.B, n int) {
 func BenchmarkBuildCompositional_WideCounters10(b *testing.B) { benchCompositional(b, 10) }
 func BenchmarkBuildCompositional_WideCounters20(b *testing.B) { benchCompositional(b, 20) }
 func BenchmarkBuildCompositional_WideCounters32(b *testing.B) { benchCompositional(b, 32) }
+
+// Lazy Apply cost: a BuildCompositional machine computes Apply from the rules at
+// runtime (effect, then repairs until every invariant holds), so this is the hot
+// path for machines too large to tabulate. Each step increments one counter; the
+// cap repair fires once every counter has wrapped past 2.
+func BenchmarkLazyApply_WideCounters32(b *testing.B) {
+	m, rep, err := wideCounters(32).BuildCompositional()
+	if err != nil {
+		b.Fatalf("BuildCompositional: %v\n%s", err, rep)
+	}
+	events := m.Events()
+	s := m.NewState()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s = m.Apply(s, events[i%len(events)])
+	}
+}
