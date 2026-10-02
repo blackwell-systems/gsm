@@ -2,6 +2,7 @@ package gsm
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/blackwell-systems/gsm/internal/oracle"
@@ -24,16 +25,20 @@ var tableOracle = oracle.CheckLookup
 var rulesOracle = oracle.CheckRules
 
 // RulesOracleMaxWork caps the rules oracle's work. Build runs the rules oracle
-// on a combinator machine only when its number of states times its number of
-// events plus checked event pairs (every pair when none is declared), at least
-// the number of states, is at most this; above it the table oracle alone
-// certifies the machine. The rules oracle re-derives every step from the
-// expression trees. Measured on the generated Go (Apple M-series), it adds
-// about 1.2 us per state plus 2.1 us per state and checked pair of time, and
-// about 240 bytes per state plus 9 bytes per state and event of memory. So
-// within the cap it adds at most about 4.5 s (states x pairs near the cap) and
-// about 250 MB (2^20 states), and Build with both oracles stays under about
-// 6 s.
+// on a combinator machine only when its work
+//
+//	states x (1 + events + checked pairs) x (1 + invariants) x (1 + max repair depth)
+//
+// is at most this (checked pairs: every pair when none is declared; max repair
+// depth: Report.MaxRepairLen). Above it the table oracle alone certifies the
+// machine. The rules oracle re-derives every step from the expression trees:
+// each state, event and pair it checks normalizes a state, and each repair
+// step evaluates every invariant, so the factors multiply. Measured on the
+// generated Go (Apple M-series) with the rules oracle on and off, it costs at
+// most about 1.8 us per unit of work (machines whose work is mostly pairs;
+// repair depth and invariants cost under 0.25 us per unit) and about 240 bytes
+// per state plus 9 bytes per state and event of memory. So within the cap it
+// adds at most about 4 s and 260 MB (2^20 states).
 const RulesOracleMaxWork = 1 << 21
 
 // rulesOracleCap is RulesOracleMaxWork. Only tests change it.
@@ -171,10 +176,11 @@ func (m *Machine) oracleTables() (oracle.Tables, error) {
 }
 
 // certifyRules runs the rules oracle on r's combinator rules, after the table
-// oracle certified r's machine. It returns why the rules oracle did not run
-// (empty when it ran and certified), or an oracleError when it rejects the
-// machine or gives no verdict.
-func certifyRules(r *Registry) (skipped string, err error) {
+// oracle certified r's machine; depth is the machine's longest repair chain
+// (Report.MaxRepairLen). It returns why the rules oracle did not run (empty
+// when it ran and certified), or an oracleError when it rejects the machine or
+// gives no verdict.
+func certifyRules(r *Registry, depth int) (skipped string, err error) {
 	var mb, pb strings.Builder
 	if werr := r.WriteMachineAST(&mb); werr != nil {
 		return "not a combinator machine (" + werr.Error() + ")", nil
@@ -182,16 +188,18 @@ func certifyRules(r *Registry) (skipped string, err error) {
 	if werr := r.WriteDeclaredPairs(&pb); werr != nil {
 		return "not a combinator machine (" + werr.Error() + ")", nil
 	}
-	// Build succeeded, so the state space is at most 2^20 states: no product
-	// below overflows.
-	states := 1
+	states := int64(1)
 	for _, v := range r.vars {
-		states *= v.domain
+		states *= int64(v.domain) // Build succeeded: at most 2^20 states.
 	}
-	events, pairs := len(r.events), len(r.ccPairs())
-	if work := states * max(events+pairs, 1); work > rulesOracleCap {
-		return fmt.Sprintf("%d states x (%d events + %d pairs) = %d is above RulesOracleMaxWork (%d)",
-			states, events, pairs, work, rulesOracleCap), nil
+	events, pairs, invs := len(r.events), len(r.ccPairs()), len(r.invariants)
+	work := new(big.Int).SetInt64(states)
+	work.Mul(work, big.NewInt(int64(1+events+pairs)))
+	work.Mul(work, big.NewInt(int64(1+invs)))
+	work.Mul(work, big.NewInt(int64(1+depth)))
+	if work.Cmp(big.NewInt(int64(rulesOracleCap))) > 0 {
+		return fmt.Sprintf("%d states x (1 + %d events + %d pairs) x (1 + %d invariants) x (1 + repair depth %d) = %s is above RulesOracleMaxWork (%d)",
+			states, events, pairs, invs, depth, work, rulesOracleCap), nil
 	}
 	res, cerr := rulesOracle(mb.String(), pb.String())
 	if cerr != nil {

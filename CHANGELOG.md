@@ -13,19 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `internal/oracle` with the table oracle; `oracle.CheckRules`) on the machine's combinator rules,
   exactly what `WriteMachineAST` and `WriteDeclaredPairs` write. It re-derives every step from the
   expression trees, so it does not trust gsm's tables.
-  - It runs on machines whose rules are all combinators, whose states times events plus checked
-    pairs (every pair when none is declared) is at most `RulesOracleMaxWork` (2^21), and that are
-    inside its fragment. Otherwise the table oracle alone certifies the machine and the new
-    `Report.RulesOracleSkipped` says why.
+  - It runs on machines whose rules are all combinators, whose work, states x (1 + events +
+    checked pairs) x (1 + invariants) x (1 + max repair depth) (every pair when none is
+    declared), is at most `RulesOracleMaxWork` (2^21), and that are inside its fragment.
+    Otherwise the table oracle alone certifies the machine and the new `Report.RulesOracleSkipped`
+    says why, with the full product.
   - `Report.Assurance` is the new `AssuranceOracleTablesAndRules` when both ran;
     `AssuranceOracleTables` now means the table oracle only.
   - A rejection (repair does not terminate, or a declared pair does not commute), or no verdict,
     fails `Build` closed, with the error in `Report.OracleDisagreement`.
   - `SynthesizeWith` and `BuildCompositional` run the table oracle only.
-  - Cost (generated Go, Apple M-series): about 1.2 µs per state plus 2.1 µs per state and checked
-    pair, and about 240 bytes per state plus 9 bytes per state and event. Within the cap that is at
-    most about 4.5 s and 250 MB; a 2^13-state machine with 20 events and every pair checked takes
-    3.2 s to `Build` with both oracles.
+  - Cost (generated Go, Apple M-series): at most about 1.8 µs per unit of work (pairs-heavy
+    machines; repair depth and invariants under 0.25 µs per unit) and about 240 bytes per state
+    plus 9 bytes per state and event. Within the cap that is at most about 4 s and 260 MB; a
+    2^13-state machine with 20 events and every pair checked takes 3.2 s to `Build` with both
+    oracles.
   - Output change: the report's oracle-failure header is now `Verified oracle: did not certify`,
     and a certified report that skipped the rules oracle ends with a `Rules oracle: not run:` line.
 - **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`

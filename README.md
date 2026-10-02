@@ -505,11 +505,14 @@ tables: it re-derives every step by evaluating the expression trees, so it does 
 tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` says which did not:
 - every rule is a combinator (`DeclInvariant`, `DeclEvent`, `DeclEventGuarded`), so the machine
   has rules to read;
-- the number of states times the number of events plus checked pairs (every pair when none is
-  declared), at least the number of states, is at most `RulesOracleMaxWork` (2^21). The rules
-  oracle adds about 1.2 µs per state plus 2.1 µs per state and checked pair of time, and about
+- its work, states × (1 + events + checked pairs) × (1 + invariants) × (1 + max repair depth), is
+  at most `RulesOracleMaxWork` (2^21). Checked pairs are every pair when none is declared; the
+  repair depth is `Report.MaxRepairLen`. The factors multiply because each state, event and pair
+  the oracle checks normalizes a state, and each repair step evaluates every invariant. Measured
+  on the generated Go, the rules oracle costs at most about 1.8 µs per unit of work (machines
+  whose work is mostly pairs; repair depth and invariants cost under 0.25 µs per unit), and about
   240 bytes per state plus 9 bytes per state and event of memory, so within the cap it adds at
-  most about 4.5 s and 250 MB;
+  most about 4 s and 260 MB;
 - the machine is inside the rules oracle's fragment, which two static checks on the rules decide:
   no expression can leave |2^31-1| (`bounded`), and no write can store a negative value into a
   two-valued variable with minimum 0 (`signSafe`; a gsm `Bool` stores value != 0 where the model
@@ -678,13 +681,16 @@ Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather tha
 
 The rules oracle adds its own cost on combinator machines within its cap (Build with both oracles):
 
-| Combinator machine | States x (events + pairs) | Build, both oracles | Build, table oracle only | Peak RSS added |
+| Combinator machine | Work | Build, both oracles | Build, table oracle only | Peak RSS added |
 |---------|------------------|---------------|---------------|---------------|
-| 2²⁰ states, 1 event | 2²⁰ | 1.4 s | 0.13 s | 254 MB |
+| 2²⁰ states, 1 event | 2²¹ (the cap) | 1.4 s | 0.13 s | 248 MB |
 | 2¹³ states, 20 events, every pair (190) | 1.7 M | 3.2 s | 0.04 s | 9 MB |
 | 2¹⁴ states, 14 events, every pair (91) | 1.7 M | 3.3 s | 0.04 s | 11 MB |
-| 2¹⁶ states, 16 events, 16 declared pairs | 2²¹ (the cap) | 2.2 s | 0.07 s | 29 MB |
-| 2²⁰ states, 20 events, 1 declared pair | 22 M, above the cap | 1.0 s (table oracle only) | 1.0 s | 0 |
+| 2¹⁶ states, 30 events, 1 declared pair | 2.1 M | 0.23 s | 0.08 s | 35 MB |
+| 2⁹ states, 1 invariant, repair depth 511 | 1.0 M | 0.10 s | 0.02 s | 2 MB |
+| 2¹² states, 200 invariants | 1.6 M | 0.03 s | 0.01 s | 5 MB |
+| 2²⁰ states, 20 events, 1 declared pair | above the cap | 1.0 s (table oracle only) | 1.0 s | 0 |
+| 2¹³ states, repair depth 8191 | above the cap | 4.6 s (table oracle only) | 4.6 s | 0 |
 
 For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast.
 

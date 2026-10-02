@@ -180,7 +180,7 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 		if err = certifyMachine(m); err != nil {
 			rep.failClosed(err)
 			m = nil
-		} else if skipped, rerr := certifyRules(r); rerr != nil {
+		} else if skipped, rerr := certifyRules(r, rep.MaxRepairLen); rerr != nil {
 			// The rules oracle: it must certify the rules too, when it runs.
 			err = rerr
 			rep.failClosed(err)
