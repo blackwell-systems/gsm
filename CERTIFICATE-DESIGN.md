@@ -138,7 +138,13 @@ certificate asserts is re-derived when it is used:
 - `EmbedCertified` re-checks the internal morphisms from the tables (M1/R2, port freeness,
   acyclicity) and rebuilds every certified component with `Build`, which re-checks WFC and CC.
 - `Certificate.Verify` does the same from the consumer's own copies of the component registries,
-  after recomputing the digest from them.
+  after recomputing the digest from them. The copies are keyed by registry name, and each key must
+  be its registry's name: the digest and the tables name components that way, so a mismatched key
+  would re-check a table against a different registry than the digest covers.
+
+The tables and ports address variables, and replay addresses events, by name. Every path that
+builds, certifies, or exports therefore rejects a registry that declares two events, or two
+variables, with the same name.
 
 The recorded verdict (`Certificate.Report`) is informational. These re-checks are gsm's Go code:
 they remove trust in stored results, not in the Go verifier. An extracted federation oracle and a

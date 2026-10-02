@@ -123,6 +123,7 @@ type RuleBuilder struct {
 }
 
 // Rule begins a fluent invariant: r.Rule("cap").Require(AtMost(a,3)).RepairWith(SetTo(a,3)).Add().
+// The name labels diagnostics only and need not be unique (see Registry.Invariant).
 func (r *Registry) Rule(name string) *RuleBuilder { return &RuleBuilder{r: r, name: name} }
 
 // Require sets the predicate that must hold.
@@ -144,6 +145,7 @@ type OnBuilder struct {
 }
 
 // On begins a fluent event: r.On("inc_a").Does(Inc(a)).Add().
+// The name must be unique within the registry (see Registry.Event).
 func (r *Registry) On(name string) *OnBuilder { return &OnBuilder{r: r, name: name} }
 
 // Does sets the event's effect transform.
