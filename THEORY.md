@@ -675,17 +675,27 @@ the proof, at two different trust boundaries. Both checkers are extracted from t
 development (`coq/extraction`) to runnable binaries, so a bug in gsm's hand-written Go verifier
 cannot make a non-convergent machine pass:
 
-1. **Table oracle.** `Machine.WriteConvergenceTables` emits a built machine's step tables, and
-   the extracted checker re-certifies that they converge (the per-event step functions commute
-   and stay in range) independently of gsm's Go. It trusts that gsm computed the tables, and
-   confirms those tables converge. Proven sound in Coq via `checked_converges` /
-   `check_commuting_sound`. Cross-checked in `oracle_test.go` (`GSM_CONVERGENCE_CHECKER`).
-2. **Rules oracle.** `Registry.WriteMachineAST` serializes the combinator **rules** themselves,
-   and a second extracted checker recomputes each event's step function by evaluating the rule
-   AST (apply the event, then normalize by iterated repair), confirming convergence from scratch.
-   It trusts neither gsm's enumeration nor its tables: it re-derives the verdict straight from the
-   declarations. Proven sound in Coq via `check_sound_converges` / `check_sound_commute`.
-   Cross-checked in `astoracle_test.go` (`GSM_AST_CHECKER`). The same oracle also emits a
+Both checkers decide exactly what §9.4 says the algorithm verifies: WFC over the whole state
+space, and CC1 for every declared-independent pair over the valid states plus the zero state.
+The conclusion they are proven to support is the runtime guarantee of §6.5: from a valid state
+or the zero state, event sequences that differ only by the order of adjacent declared-independent
+events reach the same state (trace equivalence; with every pair declared, any permutation).
+
+1. **Table oracle.** `Machine.WriteConvergenceTables` emits a built machine's step tables, its
+   normal-form table, and the declared pairs, and the extracted checker re-certifies, independently
+   of gsm's Go, that normal forms and steps land on valid states (`nf[s] = s`) and that the
+   declared pairs commute on the valid states and the zero state. It trusts that gsm computed the
+   tables, and confirms those tables converge. Proven sound in Coq via `check_tables_converges`
+   (`TableCheck.v`). Cross-checked in `oracle_test.go` and `oracle_buildspec_test.go`
+   (`GSM_CONVERGENCE_CHECKER`).
+2. **Rules oracle.** `Registry.WriteMachineAST` serializes the combinator **rules** themselves
+   (and `Registry.WriteDeclaredPairs` the declared pairs, as a separate file), and a second
+   extracted checker recomputes each event's step function by evaluating the rule AST (apply the
+   event if its guard holds, then normalize by iterated repair), checking WFC from every state and
+   CC1 as above. It trusts neither gsm's enumeration nor its tables: it re-derives the verdict
+   straight from the declarations. Proven sound in Coq via `checkBuild_converges` and
+   `checkBuild_wfc_terminates` (`AstChecker.v`). Cross-checked in `astoracle_test.go` and
+   `oracle_buildspec_test.go` (`GSM_AST_CHECKER`). The same oracle also emits a
    machine-checked `compensation_free` verdict (whether repair is ever needed on any in-domain
    state), so the CRDT-fragment classification is certified from the rules, not asserted (Coq:
    `compensationFree_step_no_repair`).
@@ -694,11 +704,14 @@ cannot make a non-convergent machine pass:
 and `WriteMachineAST` returns an error for anything outside it, so a passing differential test
 always compares semantics-identical checkers:
 
-- **Variables** range over `min .. min+domain-1` for any nonnegative `min`; the state stores the
-  raw `0..domain-1` offset.
+- **Variables** range over `min .. min+domain-1` for any `min`, negative included; the state
+  stores the raw `0..domain-1` offset.
 - **Predicates:** comparisons `le`, `lt`, `eq`, `ge`, `gt`, `ne`, and the boolean combinators
   `and`, `or`, `not`.
-- **Transforms:** `Set`, `Add`, `Sub` (arithmetic over the naturals, truncating at 0).
+- **Transforms:** `Set`, `Add`, `Sub`, over gsm's signed integers, with a write clamping into the
+  variable's range. The oracle refuses to certify (exit 1, "outside the certified fragment") an
+  expression that could exceed 2^31-1 in magnitude, and a write that could store a negative value
+  into a two-valued variable with minimum 0.
 - **Events:** an effect transform with an optional guard predicate (a guarded event is a no-op
   when its guard is false).
 

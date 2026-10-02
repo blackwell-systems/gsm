@@ -465,21 +465,29 @@ gsm's Go code. Neither runs as part of `Build` or any other gsm entry point: eac
 someone invokes it on an exported machine. gsm's CI builds both from a pinned, hash-checked
 proof commit (`.github/oracle/`) and cross-checks every machine the test suite passes to `Build`
 (the documented examples, the property-tested machines, and 600 random combinator machines)
-against them; there the oracle tests are required, not skipped. Locally they run when
-`GSM_CONVERGENCE_CHECKER` / `GSM_AST_CHECKER` point at built binaries. A runtime gate that runs
-an extracted checker on every success path is planned (it needs the checker specs aligned with
-`Build`'s declared pairs and valid-state domain, and a way to run extracted code in-process).
+against them; there the oracle tests are required, not skipped, and any disagreement with
+`Build` fails the run. Locally they run when `GSM_CONVERGENCE_CHECKER` / `GSM_AST_CHECKER` point
+at built binaries. A runtime gate that runs an extracted checker on every success path is planned
+(it needs a way to run extracted code in-process).
 
-- **Table oracle** (`checker`, input from `Machine.WriteConvergenceTables`): checks that every
-  ordered pair of events commutes on every state in the emitted tables, by enumeration, with no
-  footprint shortcut. It trusts that the tables are what the rules compute (gsm produces them from
-  your closures), checks all pairs whether or not you declared them `Independent`, and checks
-  every encodable state, including invalid ones a run never reaches. So it can reject a machine
-  `Build` accepts (a stricter check), but it never accepts tables whose events fail to commute.
-  Only `Build` machines have tables.
-- **Rules oracle** (`astchecker`, input from `Registry.WriteMachineAST`): recomputes every event
-  step from the combinator rules and checks that every ordered pair commutes on every valid
-  state, with no footprint shortcut. Closure rules cannot be exported. Its arithmetic is gsm's
+Both checkers decide the property `Build` checks, so they agree with `Build` on every machine,
+except that the rules oracle refuses some arithmetic it does not model (below). That property:
+repair terminates from every state; and every pair of events declared `Independent` (every pair
+when none is declared) commutes on every valid state and on the zero state `NewState` returns,
+valid or not. The guarantee that follows is that event sequences differing only by the order of
+declared-independent events reach the same state from those states.
+
+- **Table oracle** (`checker`, input from `Machine.WriteConvergenceTables`): reads the step
+  tables, the normal-form table and the declared pairs, and checks that every normal form and
+  every step lands on a valid state and that every declared pair commutes on the valid states and
+  the zero state, by enumeration, with no footprint shortcut. It trusts that the tables are what
+  the rules compute (gsm produces them from your closures). Only `Build` machines have tables.
+- **Rules oracle** (`astchecker`, input from `Registry.WriteMachineAST`, plus the declared pairs
+  from `Registry.WriteDeclaredPairs`): recomputes every event step from the combinator rules and
+  checks the same property, with no footprint shortcut. Without the pairs file it checks every
+  pair, which is stronger, so its verdict then holds for any declaration. The pairs are a separate
+  file so that `PolicyBytes` and every digest stay as they were. Closure rules cannot be exported.
+  Its arithmetic is gsm's
   (signed integers, signed comparisons, clamped writes). It refuses to certify two things it does
   not model: an expression that could exceed 2^31-1 in magnitude (Go's `int` wraps there on
   32-bit platforms), and a write that could store a negative value into a two-valued variable
