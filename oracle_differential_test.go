@@ -54,6 +54,10 @@ type diffCase struct {
 	// reject them). nil when Build failed otherwise or the tables are too large.
 	tables      []byte
 	tableStates int
+	// tableClass is set when Build certified the machine but its tables could not be
+	// exported for the table oracle (an entry outside the in-domain encodings). That
+	// is a disagreement in itself, counted with the oracle results, not a skip.
+	tableClass string
 }
 
 var (
@@ -65,6 +69,24 @@ var (
 func init() { buildObserver = recordBuild }
 
 func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
+	c := newDiffCase(r, m, rep, err)
+	id := []byte(fmt.Sprintf("%v|%s|%v|%s|", c.goOK, c.goErr, c.allPairs, c.tableClass))
+	id = append(id, c.ast...)
+	id = append(id, 0)
+	id = append(id, c.pairs...)
+	id = append(id, 0)
+	id = append(id, c.tables...)
+	key := sha256.Sum256(id)
+	diffMu.Lock()
+	defer diffMu.Unlock()
+	if !diffSeen[key] {
+		diffSeen[key] = true
+		diffCases = append(diffCases, c)
+	}
+}
+
+// newDiffCase records one Build result for the cross-check.
+func newDiffCase(r *Registry, m *Machine, rep *Report, err error) *diffCase {
 	c := &diffCase{name: r.name, goOK: err == nil, allPairs: r.allIndependent}
 	if err != nil {
 		c.goErr = err.Error()
@@ -84,32 +106,30 @@ func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 	if e := r.WriteDeclaredPairs(&pb); e == nil {
 		c.pairs = pb.Bytes()
 	}
+	var terr error
 	switch {
 	case m != nil && !m.lazy:
-		c.tables, c.tableStates = diffTables(m)
+		c.tables, c.tableStates, terr = diffTables(m)
+		if terr != nil {
+			c.tableClass = "BUG: Build certified tables that cannot be exported for the table oracle (" + firstLine(terr.Error()) + ")"
+		}
 	case c.ccFail:
 		if m2, _, e := r.build(false); e == nil {
-			c.tables, c.tableStates = diffTables(m2)
+			c.tables, c.tableStates, terr = diffTables(m2)
+			if terr != nil {
+				c.tableClass = "BUG: the CC-failing machine's tables cannot be exported for the table oracle (" + firstLine(terr.Error()) + ")"
+			}
 		}
 	}
-	id := []byte(fmt.Sprintf("%v|%s|%v|", c.goOK, c.goErr, c.allPairs))
-	id = append(id, c.ast...)
-	id = append(id, 0)
-	id = append(id, c.pairs...)
-	id = append(id, 0)
-	id = append(id, c.tables...)
-	key := sha256.Sum256(id)
-	diffMu.Lock()
-	defer diffMu.Unlock()
-	if !diffSeen[key] {
-		diffSeen[key] = true
-		diffCases = append(diffCases, c)
-	}
+	return c
 }
 
-// diffTables renders the machine's tables exactly as WriteConvergenceTables does,
-// or returns nil when they exceed the size cap.
-func diffTables(m *Machine) ([]byte, int) {
+// diffTables renders the machine's tables exactly as WriteConvergenceTables does.
+// Tables over the size cap return nil and no error. Any other failure returns the
+// error, so the case is reported instead of silently not compared: in particular a
+// certified machine whose tables WriteConvergenceTables refuses (an entry outside
+// the in-domain encodings).
+func diffTables(m *Machine) ([]byte, int, error) {
 	n := 0
 	for s := range m.valid {
 		if m.valid[s] {
@@ -117,22 +137,22 @@ func diffTables(m *Machine) ([]byte, int) {
 		}
 	}
 	if n > diffMaxTableStates {
-		return nil, n
+		return nil, n, nil
 	}
 	dir, err := os.MkdirTemp("", "gsm-diff-")
 	if err != nil {
-		return nil, n
+		return nil, n, err
 	}
 	defer removeDir(dir)
 	p := filepath.Join(dir, "m.tables")
 	if err = m.WriteConvergenceTables(p); err != nil {
-		return nil, n
+		return nil, n, err
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return nil, n
+		return nil, n, err
 	}
-	return b, n
+	return b, n, nil
 }
 
 func removeDir(dir string) {
@@ -259,7 +279,7 @@ func runDifferential() int {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			r := diffResult{c: c, astExit: -1, tableExit: -1}
+			r := diffResult{c: c, astExit: -1, tableExit: -1, tableClass: c.tableClass}
 			if c.ast != nil && c.boxStates > 0 && c.boxStates <= diffMaxBoxStates {
 				x, out, cerr := runChecker(abin, c.ast, c.pairs, fmt.Sprintf("%d.machine", i), dir)
 				if cerr != nil {
@@ -306,6 +326,8 @@ func reportDifferential(results []diffResult) int {
 		}
 		if r.tableExit >= 0 {
 			tabRun++
+		}
+		if r.tableClass != "" {
 			counts["tables: "+r.tableClass]++
 		}
 		for _, x := range []struct{ which, class, out string }{

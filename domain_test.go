@@ -412,3 +412,51 @@ func TestCertificateVerify_RejectsOutOfDomainTableValue(t *testing.T) {
 		t.Fatal("Verify accepted a table row with fewer values than shared variables")
 	}
 }
+
+// TestDifferential_CountsUnexportableTables: the differential cross-check used to
+// drop a certified machine whose tables WriteConvergenceTables refuses (an entry
+// outside the in-domain encodings, which is what an out-of-domain repair leaves in
+// nf), so the table oracle never saw it and nothing was reported. Build now rejects
+// such machines; this pins the differential's side with hand-made tables of that
+// shape (the repair of the only invalid state, n=1, lands on the encoding 3).
+func TestDifferential_CountsUnexportableTables(t *testing.T) {
+	r := NewRegistry("diff_ood")
+	n := r.Int("n", 0, 2)
+	r.Event("set_one").Writes(n).Apply(func(s State) State { return s.SetInt(n, 1) }).Add()
+	m := &Machine{
+		name:     r.name,
+		vars:     r.vars,
+		events:   map[string]int{"set_one": 0},
+		nf:       []uint64{0, 3, 2, 3},
+		step:     [][]uint64{{3, 3, 3, 0}},
+		valid:    []bool{true, true, true, false},
+		allPairs: true,
+	}
+	c := newDiffCase(r, m, &Report{StateCount: 3, WFC: true, CC: true}, nil)
+	if !strings.HasPrefix(c.tableClass, "BUG") {
+		t.Fatalf("a certified machine with out-of-domain tables is not reported (tables=%v, class %q)", c.tables != nil, c.tableClass)
+	}
+	if !strings.Contains(c.tableClass, "not an in-domain encoding") {
+		t.Fatalf("the report does not say why the tables were not compared: %q", c.tableClass)
+	}
+}
+
+// TestDiagnoseCycle_RejectsOutOfDomainMap: DiagnoseCycle iterates the loop's Maps
+// itself and normalizes each image with a table lookup, so it checks the image
+// first instead of indexing the table with it.
+func TestDiagnoseCycle_RejectsOutOfDomainMap(t *testing.T) {
+	a := NewRegistry("A")
+	av := a.Int("v", 0, 2)
+	b := NewRegistry("B")
+	bv := b.Int("v", 0, 2)
+	f := NewFederation("ood_cycle").
+		Morphism(a, b).Shared(bv).Map(func(src, d State) State { return rawState(d, bv, 3) }).Add().
+		Morphism(b, a).Shared(av).Map(func(src, d State) State { return d.SetInt(av, src.GetInt(bv)) }).Add()
+	var err error
+	if msg := catchPanic(func() { _, err = f.DiagnoseCycle() }); msg != "" {
+		t.Fatalf("DiagnoseCycle panicked instead of returning an error: %s", msg)
+	}
+	if err == nil || !strings.Contains(err.Error(), "A→B") || !strings.Contains(err.Error(), "not a state of") {
+		t.Fatalf("want an out-of-domain error naming the morphism A→B, got: %v", err)
+	}
+}
