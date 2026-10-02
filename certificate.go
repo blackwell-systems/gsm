@@ -155,7 +155,7 @@ func (f *Federation) validateInputPorts(ports []Port) ([]PortRef, error) {
 		// The variable must be this registry's, by value (sameVar), not merely an index into
 		// it: a Var of another registry would otherwise free, or seal, whichever variable
 		// sits at its index here.
-		if p.Var.index < 0 || p.Var.index >= len(p.Registry.vars) || !sameVar(p.Registry.vars[p.Var.index], p.Var) {
+		if p.Var.index >= len(p.Registry.vars) || !sameVar(p.Registry.vars[p.Var.index], p.Var) {
 			return nil, fmt.Errorf("gsm: input port %s.%s is not a variable of registry %q", p.Registry.name, p.Var.name, p.Registry.name)
 		}
 		if written[p.Registry][p.Var.index] {
