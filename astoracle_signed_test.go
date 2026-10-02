@@ -44,8 +44,10 @@ func TestMachineAST_SignedSubGuard(t *testing.T) {
 }
 
 // TestMachineAST_BoolWriteOfNegative: a Bool write stores (value != 0), so
-// flag := a - b sets flag when a - b = -1. A model that clamps instead (or that
-// truncates subtraction) stores 0 and certifies the machine.
+// flag := a - b sets flag when a - b = -1. The rules format has no variable
+// kinds, and the oracle's write clamps, so the oracle must refuse to certify
+// any write that could store a negative value into a two-valued variable with
+// minimum 0. Before, it stored 0 and certified this machine.
 func TestMachineAST_BoolWriteOfNegative(t *testing.T) {
 	r := gsm.NewRegistry("bool-write-negative")
 	a := r.Int("a", 0, 1)
@@ -91,16 +93,17 @@ func TestMachineAST_NegativeMinAndLiteral(t *testing.T) {
 	}
 }
 
-// TestWriteMachineAST_RefusesPossibleOverflow: gsm's int is 32 bits on 32-bit
+// TestMachineAST_RefusesPossibleOverflow: gsm's int is 32 bits on 32-bit
 // platforms, and the oracle certifies only machines whose expressions provably
-// stay within 2^31-1 in magnitude. The exporter refuses anything else.
-func TestWriteMachineAST_RefusesPossibleOverflow(t *testing.T) {
+// stay within 2^31-1 in magnitude. This machine converges in gsm on 64-bit
+// platforms, but the oracle must not certify it.
+func TestMachineAST_RefusesPossibleOverflow(t *testing.T) {
 	r := gsm.NewRegistry("overflow")
 	a := r.Int("a", 0, 3)
 	r.DeclEvent("big", gsm.Do(gsm.Set(a, gsm.Add(gsm.Lit(2147483647), gsm.V(a)))))
-	var buf bytes.Buffer
-	err := r.WriteMachineAST(&buf)
-	if err == nil || !strings.Contains(err.Error(), "2^31-1") {
-		t.Fatalf("expected an out-of-range error, got %v\n%s", err, buf.String())
+	machine := exportAST(t, r)
+	code, out := runOracle(t, oracleBinary(t, envASTOracle), "overflow.machine", machine)
+	if code != 1 || !strings.Contains(out, "outside the certified fragment") {
+		t.Fatalf("rules oracle must refuse to certify (exit 1, outside the fragment), got exit %d:\n%s", code, out)
 	}
 }

@@ -8,9 +8,17 @@ package gsm
 // This is faithful for the fragment the Coq model covers: variables over
 // min..min+domain-1 (the state stores the raw offset), predicates built from
 // <=,<,==,>=,>,!=,and,or,not, transforms built from Set/Add/Sub, and events with an
-// optional guard. WriteMachineAST returns an error (rather than emit something the
-// oracle would misread) whenever a rule falls outside that fragment, so a passing
-// differential test always compares like semantics.
+// optional guard. The oracle's arithmetic is gsm's: signed integers, signed
+// comparisons, and a write that clamps into the variable's range. Two things it
+// does not model, and instead refuses to certify (exit 1, "outside the certified
+// fragment"), so it never misreads them: an expression whose value could exceed
+// 2^31-1 in magnitude, where Go's int may wrap (it wraps at 2^31 on 32-bit
+// platforms); and a write that could store a negative value into a two-valued
+// variable with minimum 0, where a Bool stores (value != 0) but the oracle clamps.
+// The format carries no variable kinds, so the oracle applies that second rule to
+// every such variable, Bool or not. WriteMachineAST returns an error (rather than
+// emit something the oracle would misread) whenever a rule falls outside the
+// grammar, so a passing differential test always compares like semantics.
 
 import (
 	"fmt"
@@ -23,9 +31,6 @@ func exprSexp(e Expr) (string, error) {
 	case varRef:
 		return fmt.Sprintf("(var %d)", x.v.index), nil
 	case litE:
-		if x.n < 0 {
-			return "", fmt.Errorf("gsm: cannot export negative literal %d (AST oracle is over naturals)", x.n)
-		}
 		return fmt.Sprintf("(lit %d)", x.n), nil
 	case binE:
 		a, err := exprSexp(x.a)
@@ -124,17 +129,13 @@ func transformSexp(t Transform) (string, error) {
 
 // WriteMachineAST serializes this registry's combinator rules to the S-expression
 // format the verified AST oracle reads. It fails if any rule was not declared via
-// the combinator vocabulary (no retained AST), if any event is guarded, or if any
-// variable is outside the oracle's min=0 raw-value fragment.
+// the combinator vocabulary (no retained AST) or if a guard is a closure.
 func (r *Registry) WriteMachineAST(w io.Writer) error {
 	doms := make([]string, len(r.vars))
 	mins := make([]string, len(r.vars))
 	for i, v := range r.vars {
 		if v.index != i {
 			return fmt.Errorf("gsm: variable %q index %d out of order", v.name, v.index)
-		}
-		if v.min < 0 {
-			return fmt.Errorf("gsm: cannot export variable %q with negative min=%d (AST oracle is over naturals)", v.name, v.min)
 		}
 		doms[i] = fmt.Sprintf("%d", v.domain)
 		mins[i] = fmt.Sprintf("%d", v.min)

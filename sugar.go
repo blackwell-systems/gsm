@@ -91,7 +91,7 @@ func SetTo(v Var, n int) Transform { return Do(Set(v, Lit(n))) }
 // Inc: v := v + 1 (clamped into v's domain).
 func Inc(v Var) Transform { return Do(Set(v, Add(V(v), Lit(1)))) }
 
-// Dec: v := v - 1 (nat-truncated at 0).
+// Dec: v := v - 1 (clamped into v's domain).
 func Dec(v Var) Transform { return Do(Set(v, Sub(V(v), Lit(1)))) }
 
 // IncBy: v := v + n.
