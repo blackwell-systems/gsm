@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer panics on a synthesized machine, and fails rather than writing a wrong id if a table
   entry is not an in-domain encoding.
 
+- **`WriteMachineAST` refuses a variable from another registry.** The rules format names a variable
+  by index only, so a `Var` from another registry with the same name and index (which gsm reads
+  with that registry's minimum and domain) was exported as this registry's variable, a different
+  machine.
+- **`Do()` with no assignments is a combinator rule.** It returned a nil `Transform`, so an event
+  declared with an empty effect could not be exported.
+
 ### Added
 - **`Registry.WriteDeclaredPairs`** writes the pairs CC is checked for, in the format the rules
   oracle takes as an optional second file. It is not part of `WriteMachineAST`'s output, so

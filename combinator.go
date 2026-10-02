@@ -187,7 +187,13 @@ func Set(v Var, e Expr) Assign { return Assign{v, e} }
 type Transform []Assign
 
 // Do groups assignments into a transform.
-func Do(as ...Assign) Transform { return as }
+func Do(as ...Assign) Transform {
+	if as == nil {
+		// Non-nil, so an empty effect is still a combinator rule (exportable).
+		return Transform{}
+	}
+	return as
+}
 
 func (t Transform) apply(s State) State {
 	for _, a := range t {

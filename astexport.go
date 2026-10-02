@@ -26,18 +26,41 @@ import (
 	"strings"
 )
 
-func exprSexp(e Expr) (string, error) {
+// ownVar reports whether v is exactly this registry's variable at v.index. The
+// rules format names a variable by index only, so a Var from another registry
+// (read and clamped with that registry's layout, minimum and domain) would
+// otherwise be exported as this registry's variable: a different machine.
+func (r *Registry) ownVar(v Var) error {
+	if v.index < 0 || v.index >= len(r.vars) {
+		return fmt.Errorf("gsm: variable %q (index %d) is not declared in registry %q", v.name, v.index, r.name)
+	}
+	w := r.vars[v.index]
+	same := w.name == v.name && w.kind == v.kind && w.offset == v.offset && w.bits == v.bits &&
+		w.domain == v.domain && w.min == v.min && len(w.labels) == len(v.labels)
+	for i := 0; same && i < len(w.labels); i++ {
+		same = w.labels[i] == v.labels[i]
+	}
+	if !same {
+		return fmt.Errorf("gsm: variable %q (index %d) belongs to another registry, not %q", v.name, v.index, r.name)
+	}
+	return nil
+}
+
+func (r *Registry) exprSexp(e Expr) (string, error) {
 	switch x := e.(type) {
 	case varRef:
+		if err := r.ownVar(x.v); err != nil {
+			return "", err
+		}
 		return fmt.Sprintf("(var %d)", x.v.index), nil
 	case litE:
 		return fmt.Sprintf("(lit %d)", x.n), nil
 	case binE:
-		a, err := exprSexp(x.a)
+		a, err := r.exprSexp(x.a)
 		if err != nil {
 			return "", err
 		}
-		b, err := exprSexp(x.b)
+		b, err := r.exprSexp(x.b)
 		if err != nil {
 			return "", err
 		}
@@ -56,14 +79,14 @@ func exprSexp(e Expr) (string, error) {
 	}
 }
 
-func predSexp(p Pred) (string, error) {
+func (r *Registry) predSexp(p Pred) (string, error) {
 	switch x := p.(type) {
 	case cmpP:
-		a, err := exprSexp(x.a)
+		a, err := r.exprSexp(x.a)
 		if err != nil {
 			return "", err
 		}
-		b, err := exprSexp(x.b)
+		b, err := r.exprSexp(x.b)
 		if err != nil {
 			return "", err
 		}
@@ -97,7 +120,7 @@ func predSexp(p Pred) (string, error) {
 		}
 		parts := make([]string, 0, len(x.ps))
 		for _, q := range x.ps {
-			s, err := predSexp(q)
+			s, err := r.predSexp(q)
 			if err != nil {
 				return "", err
 			}
@@ -105,7 +128,7 @@ func predSexp(p Pred) (string, error) {
 		}
 		return "(" + head + " " + strings.Join(parts, " ") + ")", nil
 	case notP:
-		s, err := predSexp(x.p)
+		s, err := r.predSexp(x.p)
 		if err != nil {
 			return "", err
 		}
@@ -115,10 +138,13 @@ func predSexp(p Pred) (string, error) {
 	}
 }
 
-func transformSexp(t Transform) (string, error) {
+func (r *Registry) transformSexp(t Transform) (string, error) {
 	parts := make([]string, 0, len(t))
 	for _, a := range t {
-		e, err := exprSexp(a.e)
+		if err := r.ownVar(a.v); err != nil {
+			return "", err
+		}
+		e, err := r.exprSexp(a.e)
 		if err != nil {
 			return "", err
 		}
@@ -150,11 +176,11 @@ func (r *Registry) WriteMachineAST(w io.Writer) error {
 		if inv.predAST == nil || inv.repairAST == nil {
 			return fmt.Errorf("gsm: invariant %q has no combinator AST (declare it with DeclInvariant to export)", inv.name)
 		}
-		p, err := predSexp(inv.predAST)
+		p, err := r.predSexp(inv.predAST)
 		if err != nil {
 			return fmt.Errorf("invariant %q: %w", inv.name, err)
 		}
-		t, err := transformSexp(inv.repairAST)
+		t, err := r.transformSexp(inv.repairAST)
 		if err != nil {
 			return fmt.Errorf("invariant %q repair: %w", inv.name, err)
 		}
@@ -169,12 +195,12 @@ func (r *Registry) WriteMachineAST(w io.Writer) error {
 		if ev.guard != nil && ev.guardAST == nil {
 			return fmt.Errorf("gsm: event %q has a closure guard with no AST (declare it with DeclEventGuarded to export)", ev.name)
 		}
-		t, err := transformSexp(ev.effectAST)
+		t, err := r.transformSexp(ev.effectAST)
 		if err != nil {
 			return fmt.Errorf("event %q: %w", ev.name, err)
 		}
 		if ev.guardAST != nil {
-			g, err := predSexp(ev.guardAST)
+			g, err := r.predSexp(ev.guardAST)
 			if err != nil {
 				return fmt.Errorf("event %q guard: %w", ev.name, err)
 			}
