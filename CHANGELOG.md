@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared pairs share a `PolicyDigest`. The new `Registry.PolicyIdentityDigest` (tag
   `gsm-policy-identity-v1`) covers `PolicyBytes` and `PolicyNames` together. Moving the names into
   the serialized format, and so into `PolicyDigest`, is planned before 1.0.
+- **The table oracle now certifies gsm's largest machines.** The pinned `checker` (built with
+  OCaml 4.14.2 in the pinned image) died with `Stack_overflow` on 2^20-state tables, gsm's maximum
+  size, so those machines failed the oracle cross-check with an input error. The oracle is now
+  pinned to `check_fast` (normalization-confluence `TableFast.v`), proven equal to `check_tables`
+  and axiom-free: it runs in constant stack and takes about 5 s on 2^20 states with 10 declared
+  pairs, where the previous checker took about 60 s when it ran at all.
 - **The extracted checkers decide exactly what `Build` checks.** Both oracles previously checked a
   different property, so the differential test had to excuse whole classes of disagreement. Now
   they check `Build`'s: repair terminates from every state (the rules oracle used to require it
