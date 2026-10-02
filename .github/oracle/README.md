@@ -50,8 +50,8 @@ input or crashes (is killed by a signal), a checker disagrees with `Build`, a
 program makes a machine `machines.txt` does not list, or a listed machine is not
 made. `TestGateCatalogListsEveryExample` (in every `go test` run) fails if an
 `Example` function or run block is not in `machines.txt`. An example that makes
-no machine is listed `@none <program> <reason>`, and the gate fails if it makes
-one.
+no machine is listed `@none <program> <reason>`; the gate runs it too and fails
+if it makes one.
 
 How it works: built with `-tags gsmgate` and run with `GSM_GATE_DIR=<dir>`, any
 program records every machine it makes (each `Build` result, accepted or not,
