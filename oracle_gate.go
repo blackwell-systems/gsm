@@ -2,6 +2,7 @@ package gsm
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/blackwell-systems/gsm/internal/oracle"
 )
@@ -27,8 +28,8 @@ var rulesOracle = oracle.CheckRules
 // number of checked event pairs (every pair when none is declared; at least 1)
 // is at most this; above it the table oracle alone certifies the machine. The
 // rules oracle re-derives every step from the expression trees, at about 3 µs
-// per state and pair in the generated Go (Apple M-series): at the cap, about
-// 2^20 states with 2 pairs, it takes about 7 s.
+// per state and pair in the generated Go (Apple M-series): at the cap (2^20
+// states with 2 pairs), Build takes about 6 s with both oracles.
 const RulesOracleMaxStatePairs = 1 << 21
 
 // rulesOracleCap is RulesOracleMaxStatePairs. Only tests change it.
@@ -163,6 +164,45 @@ func (m *Machine) oracleTables() (oracle.Tables, error) {
 		}
 	}
 	return tb, nil
+}
+
+// certifyRules runs the rules oracle on r's combinator rules, after the table
+// oracle certified r's machine. It returns why the rules oracle did not run
+// (empty when it ran and certified), or an oracleError when it rejects the
+// machine or gives no verdict.
+func certifyRules(r *Registry) (skipped string, err error) {
+	var mb, pb strings.Builder
+	if werr := r.WriteMachineAST(&mb); werr != nil {
+		return "not a combinator machine (" + werr.Error() + ")", nil
+	}
+	if werr := r.WriteDeclaredPairs(&pb); werr != nil {
+		return "not a combinator machine (" + werr.Error() + ")", nil
+	}
+	states := 1
+	for _, v := range r.vars {
+		states *= v.domain
+		if states > rulesOracleCap {
+			break
+		}
+	}
+	pairs := max(len(r.ccPairs()), 1)
+	if states > rulesOracleCap || states*pairs > rulesOracleCap {
+		return fmt.Sprintf("%d states x %d pairs is above RulesOracleMaxStatePairs (%d)", states, pairs, rulesOracleCap), nil
+	}
+	res, cerr := rulesOracle(mb.String(), pb.String())
+	if cerr != nil {
+		return "", &oracleError{fmt.Sprintf("gsm: the verified rules oracle could not check the machine's rules: %v; not certified", cerr)}
+	}
+	switch res.Verdict {
+	case oracle.RulesCertified:
+		return "", nil
+	case oracle.RulesOutsideFragment:
+		return "outside the rules oracle's fragment (" + res.Reason + ")", nil
+	case oracle.RulesNotTerminating, oracle.RulesNotCommuting:
+		return "", &oracleError{fmt.Sprintf("gsm: the verified rules oracle rejects the machine's rules (%v), which gsm's verification "+
+			"accepted; not certified (a bug in gsm's verification or in the oracle)", res.Verdict)}
+	}
+	return "", &oracleError{"gsm: the verified rules oracle gave no verdict on the machine's rules; not certified"}
 }
 
 // certifyMachine runs the gate on a machine Build or SynthesizeWith produced.

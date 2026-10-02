@@ -137,7 +137,7 @@ func (r *Report) String() string {
 	}
 
 	if r.OracleDisagreement != "" {
-		s += "\n  Verified table oracle: did not certify\n"
+		s += "\n  Verified oracle: did not certify\n"
 		s += fmt.Sprintf("    %s\n", r.OracleDisagreement)
 		s += "  Convergence: NOT CERTIFIED (no machine)\n"
 		return s
@@ -145,6 +145,9 @@ func (r *Report) String() string {
 	if r.WFC && r.CC && r.Assurance != AssuranceNone {
 		s += "\n  Convergence: GUARANTEED\n"
 		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
+		if r.RulesOracleSkipped != "" {
+			s += fmt.Sprintf("  Rules oracle: not run: %s\n", r.RulesOracleSkipped)
+		}
 	} else {
 		s += fmt.Sprintf("\n  Assurance: %s\n", r.Assurance)
 	}
@@ -164,9 +167,12 @@ func (r *Report) String() string {
 // When gsm's verification passes, the machine's tables also go to the verified table
 // oracle: check_fn from the normalization-confluence proof, generated as Go from the
 // Rocq extraction (internal/oracle). The machine is returned only if the oracle certifies
-// the tables, and Report.Assurance is then AssuranceOracleTables. If the oracle rejects
-// them or cannot check them, Build returns an error and no machine (it fails closed), and
-// Report.OracleDisagreement says why.
+// the tables. Build then runs the verified rules oracle (checkBuild, generated the same
+// way) on the machine's combinator rules, when it can (see RulesOracleMaxStatePairs):
+// Report.Assurance is AssuranceOracleTablesAndRules when both certified, and
+// AssuranceOracleTables when the rules oracle did not run (Report.RulesOracleSkipped says
+// why). If either oracle rejects the machine or cannot check it, Build returns an error
+// and no machine (it fails closed), and Report.OracleDisagreement says why.
 func (r *Registry) Build() (*Machine, *Report, error) {
 	m, rep, err := r.build(true)
 	if err == nil {
@@ -174,8 +180,15 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 		if err = certifyMachine(m); err != nil {
 			rep.failClosed(err)
 			m = nil
+		} else if skipped, rerr := certifyRules(r); rerr != nil {
+			// The rules oracle: it must certify the rules too, when it runs.
+			err = rerr
+			rep.failClosed(err)
+			m = nil
+		} else if skipped != "" {
+			rep.Assurance, rep.RulesOracleSkipped = AssuranceOracleTables, skipped
 		} else {
-			rep.Assurance = AssuranceOracleTables
+			rep.Assurance = AssuranceOracleTablesAndRules
 		}
 	}
 	if buildObserver != nil {
