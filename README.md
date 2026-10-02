@@ -500,7 +500,7 @@ What the gate trusts:
 - the Go toolchain.
 
 CI regenerates `internal/oracle/oracle_gen.go` from the pinned proof commit, in the pinned prover
-image, and requires the same bytes. The cost is small next to `Build` itself (see Performance).
+image, and requires the same bytes. Its cost grows with states times declared pairs (see Performance).
 
 **Cross-checks against the OCaml checkers.** gsm's CI also builds both extracted checkers as OCaml
 binaries, from a pinned, hash-checked proof commit (`.github/oracle/`). It cross-checks every
@@ -619,6 +619,17 @@ Verification cost depends on state space size:
 State space grows as the **product** of variable domains: 5 enums × 100 ints = 500 states.
 
 Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather than attempt an intractable enumeration; use `BuildCompositional` (or federation) to go beyond it.
+
+**The oracle gate's cost.** The table oracle re-checks the tables after gsm's own checks. It works on Coq lists and tries rather than arrays, so its cost per state and declared pair is higher than `Build`'s own CC check. Measured locally on a loaded machine (Build with the gate vs without):
+
+| Machine | Without the gate | With the gate |
+|---------|------------------|---------------|
+| 24 states, 3 pairs | 0.32 ms | 0.33 ms |
+| 1,024 states, 10 events, 45 pairs | 2.2 ms | 7.6 ms |
+| 2²⁰ states, 10 declared pairs (oracle alone) | | ~3.4 s |
+| 2²⁰ states, 20 events, every pair (190) | 0.88 s | 37 s |
+
+For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast. A faster oracle is in progress in the proof.
 
 ### Runtime
 
