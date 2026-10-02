@@ -264,9 +264,7 @@ func (m *FedMachine) IsValid(fs FedState) bool {
 		}
 		// The morphism/merge invariant holds iff recomputing the target's shared component is a
 		// no-op — it already equals the (single) morphism image or the resolver's merge.
-		var want State
-		want = m.repair(fs, j)
-		if want.ID() != fs.states[j].ID() {
+		if want := m.repair(fs, j); want.ID() != fs.states[j].ID() {
 			return false
 		}
 	}

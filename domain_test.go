@@ -389,7 +389,7 @@ func TestCertificateVerify_RejectsOutOfDomainTableValue(t *testing.T) {
 	}
 	src := f.comps[0]
 	comps := map[string]*Registry{"src": src, "dst": dst}
-	if err := cert.Verify(comps); err != nil {
+	if err = cert.Verify(comps); err != nil {
 		t.Fatalf("the untampered certificate does not verify: %v", err)
 	}
 	cert.Tables[0].Rows[0].Values[0] = 3 // n's raw field holds 0..2
@@ -566,7 +566,11 @@ func TestFedMachine_EveryRuntimeImageChecked(t *testing.T) {
 	src := f.comps[0]
 	fs := fm.NewState()
 	leak = true
-	if msg := catchPanic(func() { _, _ = fm.SharedProjection(fs.states[0], src, dst) }); !strings.Contains(msg, "not a state of") {
+	if msg := catchPanic(func() {
+		if _, perr := fm.SharedProjection(fs.states[0], src, dst); perr != nil {
+			t.Errorf("SharedProjection: %v", perr)
+		}
+	}); !strings.Contains(msg, "not a state of") {
 		t.Errorf("SharedProjection did not reject the out-of-domain image: %q", msg)
 	}
 	if msg := catchPanic(func() { fm.IsValid(fs) }); !strings.Contains(msg, "not a state of") {
