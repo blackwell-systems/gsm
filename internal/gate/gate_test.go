@@ -118,6 +118,7 @@ func TestRun(t *testing.T) {
 		{"unlisted machine", "p m certified", []rec{{"p", ok, in(0, ""), in(0, "")}, {"p", Record{Name: "n", Kind: KindBuild, BuildOK: true}, in(0, ""), in(0, "")}}, "\"n\" is not in the catalog"},
 		{"listed machine not made", "p m certified\np n certified", []rec{{"p", ok, in(0, ""), in(0, "")}}, "did not make n"},
 		{"program not listed", "p m certified", []rec{{"p", ok, in(0, ""), in(0, "")}, {"q/r", ok, in(0, ""), in(0, "")}}, "program q/r made gsm machines but is not in the catalog"},
+		{"program listed @none makes a machine", "p m certified\n@none q builds nothing", []rec{{"p", ok, in(0, ""), in(0, "")}, {"q", ok, in(0, ""), in(0, "")}}, "program q is listed @none but made gsm machines"},
 		{"synthesized", "p m synthesized", []rec{{"p", Record{Name: "m", Kind: KindSynthesized, BuildOK: true}, nil, in(0, "ok")}}, ""},
 		{"synthesized, table checker rejects", "p m synthesized", []rec{{"p", Record{Name: "m", Kind: KindSynthesized, BuildOK: true}, nil, in(1, "no")}}, "table checker does not verify"},
 		{"synthesized listed as certified", "p m certified", []rec{{"p", Record{Name: "m", Kind: KindSynthesized, BuildOK: true}, nil, in(0, "ok")}}, "listed certified, but it is a synthesized machine"},
@@ -159,7 +160,7 @@ func TestParseCatalog(t *testing.T) {
 README.md#1  order  certified-tables   # trailing comment
 dir/prog     m      rejected
 @doc docs/x.md shows a fragment
-@exempt tools/gen generates machines at build time
+@none ExampleDoc builds no machine
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -167,68 +168,13 @@ dir/prog     m      rejected
 	if len(c.Entries) != 2 || c.Entries[0].Program != "README.md#1" || c.Entries[1].Verdict != Rejected {
 		t.Fatalf("entries: %+v", c.Entries)
 	}
-	if c.Docs["docs/x.md"] != "shows a fragment" || c.Exempt["tools/gen"] == "" {
-		t.Fatalf("docs %v exempt %v", c.Docs, c.Exempt)
+	if c.Docs["docs/x.md"] != "shows a fragment" || c.None["ExampleDoc"] == "" {
+		t.Fatalf("docs %v none %v", c.Docs, c.None)
 	}
 	for _, bad := range []string{"p m maybe", "p m", "p m certified\np m certified", "@doc only-a-path", "@doc a b\n@doc a c"} {
 		if _, err := ParseCatalog(strings.NewReader(bad)); err == nil {
 			t.Errorf("ParseCatalog(%q): want an error", bad)
 		}
-	}
-}
-
-func TestScan(t *testing.T) {
-	root := t.TempDir()
-	write := func(path, content string) {
-		t.Helper()
-		p := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	const imp = "import \"github.com/blackwell-systems/gsm\"\n"
-	write("ex/a/main.go", "package main\n"+imp+"func main() { gsm.NewRegistry(\"a\") }\n")
-	write("ex/b/main.go", "package main\nimport g \"github.com/blackwell-systems/gsm\"\nfunc main() { g.NewFederation(\"f\") }\n")
-	write("ex/c/main.go", "package main\nimport . \"github.com/blackwell-systems/gsm\"\nfunc main() { NewRegistry(\"c\") }\n")
-	write("ex/d/main.go", "package main\n"+imp+"func main() { var m *gsm.Machine; _ = m }\n") // uses gsm, makes no machine
-	write("ex/e/e_test.go", "package e\n"+imp+"func f() { gsm.NewRegistry(\"t\") }\n")        // test code is not shipped
-	write("ex/.hidden/main.go", "package main\n"+imp+"func main() { gsm.NewRegistry(\"h\") }\n")
-	write("docs/guide.md", "```go\nr := gsm.NewRegistry(\"order\")\n```\n")
-	write("docs/other.md", "no machines here\n")
-
-	cat, err := ParseCatalog(strings.NewReader("ex/a a certified\n@doc docs/guide.md a fragment\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := Scan(root, cat)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		"ex/b creates gsm machines (ex/b/main.go) but is not a catalog program or @exempt",
-		"ex/c creates gsm machines (ex/c/main.go) but is not a catalog program or @exempt",
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("Scan:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-
-	cat, err = ParseCatalog(strings.NewReader("ex/a a certified\nex/b f certified\n@exempt ex/c reason\n@exempt ex/d stale\n@doc docs/other.md stale\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err = Scan(root, cat); err != nil {
-		t.Fatal(err)
-	}
-	want = []string{
-		"@doc docs/other.md: the document shows no gsm machine",
-		"@exempt ex/d: no gsm machine is created there",
-		"docs/guide.md shows a gsm machine but is not listed with @doc",
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("Scan:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 

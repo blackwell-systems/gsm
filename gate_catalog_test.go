@@ -68,19 +68,19 @@ func TestGateCatalogListsEveryExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A program that makes no machine is listed with @exempt.
+	// A program that makes no machine is listed with @none.
 	listed := map[string]bool{}
 	for _, p := range cat.Programs() {
 		listed[p] = true
 	}
-	for p := range cat.Exempt {
+	for p := range cat.None {
 		listed[p] = true
 	}
 	want := map[string]bool{}
 	for _, p := range gatePrograms(t) {
 		want[p] = true
 		if !listed[p] {
-			t.Errorf("%s is not in %s: list each machine it makes and its verdict (or @exempt it if it makes none)", p, gateCatalog)
+			t.Errorf("%s is not in %s: list each machine it makes and its verdict (or list it @none if it makes none)", p, gateCatalog)
 		}
 	}
 	for p := range listed {

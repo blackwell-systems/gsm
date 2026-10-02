@@ -15,7 +15,7 @@
 #                            the checkers (an invariant without a repair, left
 #                            to synthesis).
 #
-# @exempt <program> <reason> lists an example that makes no machine.
+# @none <program> <reason> lists an example that makes no machine.
 #
 # TestGateCatalogListsEveryExample fails when an example or run block is missing
 # here; the gate fails when a listed program makes a machine not listed here, or

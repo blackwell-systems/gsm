@@ -1,11 +1,14 @@
 // Command gsmgate checks the machines that programs built with -tags gsmgate
 // recorded (one subdirectory of -dumps per program, written with GSM_GATE_DIR)
 // against the two extracted checkers and a catalog of every machine and its
-// expected verdict. With -scan it also checks that the repository at that root
-// makes no gsm machine outside the catalog. It exits 1 when the gate fails. See
-// internal/gate and .github/oracle/README.md.
+// expected verdict. With -scan it also type-checks the repository at that root
+// and fails if it makes a gsm machine outside the catalog's programs (see scan).
+// It exits 1 when the gate fails. See internal/gate and .github/oracle/README.md.
 //
-//	go run ./internal/cmd/gsmgate -dumps DIR -catalog FILE \
+// It is its own module (it needs golang.org/x/tools; gsm itself has no
+// dependencies). From this directory:
+//
+//	go run . -dumps DIR -catalog FILE \
 //	    -table-checker checker -rules-checker astchecker [-scan ROOT] [-summary FILE]
 package main
 
@@ -23,20 +26,20 @@ func main() {
 	catalog := flag.String("catalog", "", "catalog file")
 	table := flag.String("table-checker", "", "the extracted table checker (checker)")
 	rules := flag.String("rules-checker", "", "the extracted rules checker (astchecker)")
-	scan := flag.String("scan", "", "repository root to scan for gsm machines outside the catalog")
+	scanRoot := flag.String("scan", "", "repository root to scan for gsm machines outside the catalog")
 	summary := flag.String("summary", "", "append the Markdown report to this file (GITHUB_STEP_SUMMARY)")
 	flag.Parse()
 	if *dumps == "" || *catalog == "" || *table == "" || *rules == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(*dumps, *catalog, *table, *rules, *scan, *summary); err != nil {
+	if err := run(*dumps, *catalog, *table, *rules, *scanRoot, *summary); err != nil {
 		fmt.Fprintln(os.Stderr, "gsmgate:", err)
 		os.Exit(1)
 	}
 }
 
-func run(dumps, catalog, table, rules, scan, summary string) error {
+func run(dumps, catalog, table, rules, scanRoot, summary string) error {
 	cat, err := gate.ParseCatalogFile(catalog)
 	if err != nil {
 		return err
@@ -46,8 +49,8 @@ func run(dumps, catalog, table, rules, scan, summary string) error {
 		return err
 	}
 	var scanProblems []string
-	if scan != "" {
-		if scanProblems, err = gate.Scan(scan, cat); err != nil {
+	if scanRoot != "" {
+		if scanProblems, err = scan(scanRoot, cat); err != nil {
 			return err
 		}
 	}

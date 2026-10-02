@@ -45,11 +45,13 @@ verdict:
   `BuildOrSynthesize`), so no checker can run on it; the machine the program uses
   instead is listed separately.
 
-The step fails if a checker rejects a machine listed as accepted, a checker
-disagrees with `Build`, a program makes a machine `machines.txt` does not list,
-or a listed machine is not made. `TestGateCatalogListsEveryExample` (in every
-`go test` run) fails if an `Example` function or run block is not in
-`machines.txt`.
+The step fails if a checker rejects a machine listed as accepted, refuses its
+input or crashes (is killed by a signal), a checker disagrees with `Build`, a
+program makes a machine `machines.txt` does not list, or a listed machine is not
+made. `TestGateCatalogListsEveryExample` (in every `go test` run) fails if an
+`Example` function or run block is not in `machines.txt`. An example that makes
+no machine is listed `@none <program> <reason>`, and the gate fails if it makes
+one.
 
 How it works: built with `-tags gsmgate` and run with `GSM_GATE_DIR=<dir>`, any
 program records every machine it makes (each `Build` result, accepted or not,
@@ -58,21 +60,33 @@ because it has no global tables) as the checkers' inputs in that directory
 (`gate.go`). `internal/cmd/gsmgate` then runs both checkers on the records and
 compares the verdicts with the catalog (`internal/gate`). Without the tag none of
 this is compiled. A project that uses gsm can gate its own machines the same way:
-build its programs with the tag against a gsm commit that has it, then run
+build its programs (main packages) with the tag against a gsm commit that has it,
+run each once, with no arguments, recording into its own subdirectory of `<dir>`
+named by its directory, then run, from `internal/cmd/gsmgate` of that gsm
+checkout (its own module, since it needs `golang.org/x/tools`):
 
 ```
-go run ./internal/cmd/gsmgate -dumps <dir> -catalog <file> \
+go run . -dumps <dir> -catalog <file> \
   -table-checker <checker> -rules-checker <astchecker> [-scan <repo root>]
 ```
 
-from that gsm checkout, with one subdirectory of `<dir>` per program. `-scan`
-also fails if a directory of the repository creates a gsm registry or federation
-outside the catalog's programs, or a document shows one without an `@doc` line.
+`-scan` type-checks every module of the repository that imports gsm (test code
+excluded) and fails if a package refers to a gsm function or method that makes a
+machine (`NewRegistry`, `NewFederation`, a `Build`, `BuildOrSynthesize`,
+`BuildCoordinated`, `BuildCompositional`, `Synthesize`, `Certify` or
+`Synthesis.Machine`, called or taken as a value, under any import name) and is
+not a catalog program; if a catalog program is not a main package, or reads
+flags, its arguments or the environment (a run other than the gate's could make
+other machines); if a non-test Go file imports gsm but a build constraint keeps
+it out of every type-checked package; or if a document (`.md`, `.mdx`, `.rst`,
+`.adoc`, `.txt`, `.html`) shows a gsm machine without an `@doc` line. There is
+no exemption for a package that makes machines.
 
 What the gate certifies: each listed machine (a registry, including each
 component of a federation) has the property `Build` checks, decided by the
-checkers extracted from the proof. It does not check a federation's morphisms or
-its acyclicity, which no extracted checker covers.
+checkers extracted from the proof. Federation-level checks (morphisms,
+resolvers, acyclicity, the monotone-cycle check) are done by `Build`, not by an
+extracted checker.
 
 To run it locally, with the checkers built:
 

@@ -171,7 +171,9 @@ func Run(dumps string, cat *Catalog, ck Checkers) (*Report, error) {
 	sort.Strings(progs)
 	for _, prog := range progs {
 		entries, listed := byProgram[prog]
-		if !listed {
+		if _, none := cat.None[prog]; none {
+			rep.Problems = append(rep.Problems, fmt.Sprintf("program %s is listed @none but made gsm machines", prog))
+		} else if !listed {
 			rep.Problems = append(rep.Problems, fmt.Sprintf("program %s made gsm machines but is not in the catalog", prog))
 		}
 		rs := recs[prog]
