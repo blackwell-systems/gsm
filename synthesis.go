@@ -113,15 +113,25 @@ func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis,
 // machine (see EffectFunc). Repairs are not run, so a malformed repair does not matter here:
 // BuildOrSynthesize falls back to synthesis when Build rejects a repair's result, and the
 // returned Synthesis then reports the substituted compensation.
-func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
+func (r *Registry) SynthesizeWith(opts ...SynthOption) (_ *Synthesis, err error) {
 	var cfg synthConfig
 	for _, o := range opts {
 		o(&cfg)
 	}
-	if err := r.checkNames(); err != nil {
+	if err = r.checkNames(); err != nil {
 		return nil, err
 	}
 	before := r.shape()
+	// A rule that declares on the registry mid-run can also make a later check fail (a
+	// result built after a declaration has the new variable list, so it is not a state of
+	// the machine being verified). The change is the cause, so report it instead.
+	defer func() {
+		if err != nil {
+			if gerr := r.checkUnchanged(before); gerr != nil {
+				err = gerr
+			}
+		}
+	}()
 	if r.totalBits > 20 {
 		return nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
 	}
