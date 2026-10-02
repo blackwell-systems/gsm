@@ -138,6 +138,7 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 	if err := r.checkNames(); err != nil {
 		return nil, nil, err
 	}
+	before := r.shape()
 	// State packs every variable into one uint64. A variable placed past bit 64
 	// reads as 0 and ignores writes, so a machine that wide cannot be represented,
 	// let alone certified (it used to be certified with those variables frozen).
@@ -262,6 +263,9 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 	report.PairsBrute = pairsBrute
 	report.PairsTotal = pairsDisjoint + pairsBrute
 
+	if err := r.checkUnchanged(before); err != nil {
+		return nil, report, err
+	}
 	m := &Machine{
 		name:       r.name,
 		vars:       r.vars,
