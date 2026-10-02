@@ -104,9 +104,9 @@ func BenchmarkBuild_WideFlags20(b *testing.B) {
 }
 
 // The rules oracle's cost near RulesOracleMaxWork (2^21): the most states
-// (2^20 states, one event: the most memory), the most pairs (2^13 states, 20
-// events, every pair: 8192 x 210), and above the cap (2^20 states, 20 events,
-// one pair: table oracle only).
+// (2^20 states, one event: 2^20 x 2, the most memory), the most pairs (2^13
+// states, 20 events, every pair: 8192 x 211, the most time), and above the cap
+// (2^20 states, 20 events, one pair: table oracle only).
 func BenchmarkBuild_CombMostStates(b *testing.B) {
 	benchBuild(b, func() *Registry { return combFlags(20, 1, 0) })
 }

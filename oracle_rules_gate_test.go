@@ -92,8 +92,10 @@ func TestBuildSkipsTheRulesOracleWithoutCombinatorRules(t *testing.T) {
 	}
 }
 
-// Above the cap on states x (events + pairs), pairs being every pair when none
-// is declared, the rules oracle does not run; at the cap it does.
+// Above the cap on the work, states x (1 + events + pairs) x (1 + invariants)
+// x (1 + repair depth), pairs being every pair when none is declared, the
+// rules oracle does not run; at the cap it does. Each factor is tested at its
+// boundary.
 func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 	three := func(declare bool) *Registry {
 		r := combCapped()
@@ -108,6 +110,25 @@ func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 		r.Int("a", 0, 3)
 		return r
 	}
+	// A counter in 0..7 walked down to 0 one step at a time: repair depth 7.
+	deep := func() *Registry {
+		r := NewRegistry("deep")
+		x := r.Int("x", 0, 7)
+		r.DeclInvariant("zero", Le(V(x), Lit(0)), Do(Set(x, Sub(V(x), Lit(1)))))
+		r.DeclEvent("noop", Do())
+		return r
+	}
+	// Three invariants that always hold.
+	invs := func() *Registry {
+		r := NewRegistry("invs")
+		a := r.Bool("a")
+		r.Bool("b")
+		for k := 0; k < 3; k++ {
+			r.DeclInvariant(fmt.Sprintf("i%d", k), Le(Lit(0), Lit(1)), Do())
+		}
+		r.DeclEvent("raise", Raise(a))
+		return r
+	}
 	for _, c := range []struct {
 		name string
 		mk   func() *Registry
@@ -115,18 +136,23 @@ func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 		run  bool
 		msg  string
 	}{
-		// combCapped: 4 x 2 = 8 states, 2 events, 1 pair (every pair).
-		{"two events", combCapped, 23, false, "8 states x (2 events + 1 pairs) = 24"},
-		{"two events", combCapped, 24, true, ""},
+		// combCapped: 4 x 2 = 8 states, 2 events, 1 pair (every pair), 1
+		// invariant, repair depth 1.
+		{"two events", combCapped, 127, false, "8 states x (1 + 2 events + 1 pairs) x (1 + 1 invariants) x (1 + repair depth 1) = 128"},
+		{"two events", combCapped, 128, true, ""},
 		// Three events: every pair is 3 pairs.
-		{"three events", func() *Registry { return three(false) }, 47, false, "8 states x (3 events + 3 pairs) = 48"},
-		{"three events", func() *Registry { return three(false) }, 48, true, ""},
+		{"three events", func() *Registry { return three(false) }, 223, false, "8 states x (1 + 3 events + 3 pairs) x (1 + 1 invariants) x (1 + repair depth 1) = 224"},
+		{"three events", func() *Registry { return three(false) }, 224, true, ""},
 		// Declaring one pair independent leaves one.
-		{"three events, one pair", func() *Registry { return three(true) }, 31, false, "8 states x (3 events + 1 pairs) = 32"},
-		{"three events, one pair", func() *Registry { return three(true) }, 32, true, ""},
-		// No events: the work is the states.
-		{"no events", no, 3, false, "4 states x (0 events + 0 pairs) = 4"},
+		{"three events, one pair", func() *Registry { return three(true) }, 159, false, "8 states x (1 + 3 events + 1 pairs) x (1 + 1 invariants) x (1 + repair depth 1) = 160"},
+		{"three events, one pair", func() *Registry { return three(true) }, 160, true, ""},
+		// No events, invariants or repair: the work is the states.
+		{"no events", no, 3, false, "4 states x (1 + 0 events + 0 pairs) x (1 + 0 invariants) x (1 + repair depth 0) = 4"},
 		{"no events", no, 4, true, ""},
+		{"repair depth", deep, 255, false, "8 states x (1 + 1 events + 0 pairs) x (1 + 1 invariants) x (1 + repair depth 7) = 256"},
+		{"repair depth", deep, 256, true, ""},
+		{"invariants", invs, 31, false, "4 states x (1 + 1 events + 0 pairs) x (1 + 3 invariants) x (1 + repair depth 0) = 32"},
+		{"invariants", invs, 32, true, ""},
 	} {
 		withRulesCap(t, c.cap)
 		ran := false
