@@ -144,10 +144,16 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 	return m, rep, err
 }
 
-// buildObserver, when non-nil, sees every Build result. Only this package's tests
-// set it (once, before any test runs), to cross-check every machine the test suite
-// builds against the extracted checkers (oracle_differential_test.go).
+// buildObserver, when non-nil, sees every Build result. This package's tests set
+// it (once, before any test runs), to cross-check every machine the test suite
+// builds against the extracted checkers (oracle_differential_test.go), and so does
+// the example-machine gate (gate.go, built only with the gsmgate tag).
 var buildObserver func(r *Registry, m *Machine, rep *Report, err error)
+
+// machineObserver, when non-nil, sees every machine made without Build: kind
+// "synthesized" (Synthesis.Machine) or "compositional" (BuildCompositional). Only
+// the example-machine gate sets it (gate.go, built with the gsmgate tag).
+var machineObserver func(kind string, r *Registry, m *Machine)
 
 // build is Build with a switch to skip Phase 3 (CC verification). runCC=false is used only by
 // Federation.DiagnoseCycle, which needs a component's normal forms to iterate a loop and makes no

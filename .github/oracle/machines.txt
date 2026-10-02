@@ -1,0 +1,37 @@
+# Every machine gsm's examples make, checked by the extracted checkers in the
+# oracle job (TestExampleMachinesGate, built with -tags gsmgate). See README.md.
+#
+# <program> <machine> <verdict>
+#
+# program: an Example function (any _test.go file in this directory), or the k-th
+#   `gocheck: run` block of a document (README.md#1).
+# verdict: certified         Build accepts it; both checkers verify it.
+#          certified-tables  Build accepts it; the table checker verifies it. Its
+#                            rules are closures, so the rules checker cannot run.
+#          rejected          Build rejects it (WFC or CC); every checker that can
+#                            run rejects it for the same reason.
+#          synthesized       a synthesized repair; the table checker verifies it.
+#          not-built         Build fails before its convergence check (an
+#                            invariant without a repair, left to synthesis).
+#
+# @exempt <program> <reason> lists an example that makes no machine.
+#
+# TestGateCatalogListsEveryExample fails when an example or run block is missing
+# here; the gate fails when a listed program makes a machine not listed here, or
+# a listed machine is not made.
+
+README.md#1                      order_fulfillment  certified-tables
+
+Example                          counter            certified-tables
+ExampleRegistry_Build            counter            certified-tables
+ExampleMachine_Apply             light              certified-tables
+ExampleState_String              example            certified
+ExampleRegistry_Invariant        stock              certified-tables
+ExampleMachine_Export            simple             certified-tables
+ExampleFederation                manufacturer       certified-tables
+ExampleFederation                supplier           certified-tables
+Example_acceptWithCoordination   primary            certified-tables
+Example_acceptWithCoordination   mirror             certified
+
+# Deliberately non-convergent, listed as certified to show the gate failing.
+Example_naivePayShip              naive_pay_ship     certified

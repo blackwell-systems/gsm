@@ -145,7 +145,15 @@ func overlaps(a, b []int) bool {
 // invariant declares a footprint (Watches) and every event declares its writes
 // (Writes); the zero state is valid; and no single component exceeds
 // maxComponentBits.
-func (r *Registry) BuildCompositional() (_ *Machine, rep *Report, err error) {
+func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
+	m, rep, err := r.buildCompositional()
+	if err == nil && machineObserver != nil {
+		machineObserver("compositional", r, m)
+	}
+	return m, rep, err
+}
+
+func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 	if err = r.checkNames(); err != nil {
 		return nil, nil, err
 	}

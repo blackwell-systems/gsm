@@ -60,6 +60,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared with an empty effect could not be exported.
 
 ### Added
+- **Example-machine gate in CI.** Every machine gsm's examples make (each `Example` function and
+  the README run block) is checked by both extracted checkers in the oracle job, against a catalog
+  of every machine and its expected verdict (`.github/oracle/machines.txt`). The job fails if a
+  checker rejects a listed machine, disagrees with `Build`, or an example makes a machine the
+  catalog does not list; a test fails if an example is missing from the catalog. A program built
+  with `-tags gsmgate` and run with `GSM_GATE_DIR` set records every machine it makes (each `Build`
+  result, synthesized and compositional machine) for `internal/cmd/gsmgate`, which projects using
+  gsm can run on their own machines. Without the tag nothing changes. The checker binaries are
+  named in `pins.env`, so a faster checker replaces one by pin.
 - **`Registry.WriteDeclaredPairs`** writes the pairs CC is checked for, in the format the rules
   oracle takes as an optional second file. It is not part of `WriteMachineAST`'s output, so
   `PolicyBytes`, `PolicyDigest` and certificate digests are unchanged.
