@@ -80,7 +80,10 @@ func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 	} else {
 		c.astErr = e.Error()
 	}
-	c.pairs = diffPairsFile(r)
+	var pb bytes.Buffer
+	if e := r.WriteDeclaredPairs(&pb); e == nil {
+		c.pairs = pb.Bytes()
+	}
 	switch {
 	case m != nil && !m.lazy:
 		c.tables, c.tableStates = diffTables(m)
@@ -102,22 +105,6 @@ func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
 		diffSeen[key] = true
 		diffCases = append(diffCases, c)
 	}
-}
-
-// diffPairsFile renders the pairs Build checks (ccPairs) in the rules oracle's
-// pairs-file format.
-func diffPairsFile(r *Registry) []byte {
-	if r.allIndependent {
-		return []byte("pairs all\n")
-	}
-	ps := r.ccPairs()
-	var b strings.Builder
-	fmt.Fprintf(&b, "pairs %d", len(ps))
-	for _, p := range ps {
-		fmt.Fprintf(&b, " %d %d", p[0], p[1])
-	}
-	b.WriteString("\n")
-	return []byte(b.String())
 }
 
 // diffTables renders the machine's tables exactly as WriteConvergenceTables does,

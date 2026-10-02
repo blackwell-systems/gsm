@@ -408,7 +408,8 @@ func (s *Synthesis) Machine() *Machine {
 	if !s.Convergent {
 		return nil
 	}
-	m := &Machine{name: s.r.name, vars: s.r.vars, events: make(map[string]int), step: s.step, nf: s.nf}
+	m := &Machine{name: s.r.name, vars: s.r.vars, events: make(map[string]int), step: s.step, nf: s.nf,
+		ccPairs: s.r.ccPairs(), allPairs: s.r.allIndependent}
 	for i, ev := range s.r.events {
 		m.events[ev.name] = i
 	}

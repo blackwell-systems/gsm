@@ -189,3 +189,27 @@ func (r *Registry) WriteMachineAST(w io.Writer) error {
 	}
 	return nil
 }
+
+// WriteDeclaredPairs writes the event pairs CC is checked for, in the pairs-file
+// format the rules oracle takes next to the machine (astchecker <machine>
+// <pairs>): "pairs all" when no pair was declared independent, otherwise
+// "pairs k a1 b1 ... ak bk" with event indices in the order WriteMachineAST
+// emits the events. It is a separate file, not part of WriteMachineAST's output,
+// so PolicyBytes and PolicyDigest do not depend on it. Without it the oracle
+// checks every pair, the stronger property, so a verdict obtained without the
+// pairs file holds for any declaration.
+func (r *Registry) WriteDeclaredPairs(w io.Writer) error {
+	if r.allIndependent {
+		_, err := io.WriteString(w, "pairs all\n")
+		return err
+	}
+	ps := r.ccPairs()
+	var b strings.Builder
+	fmt.Fprintf(&b, "pairs %d", len(ps))
+	for _, p := range ps {
+		fmt.Fprintf(&b, " %d %d", p[0], p[1])
+	}
+	b.WriteByte('\n')
+	_, err := io.WriteString(w, b.String())
+	return err
+}
