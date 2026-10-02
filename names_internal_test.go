@@ -1,6 +1,10 @@
 package gsm
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 // TestDuplicateVariableName_VerifyRechecksTheWrongVariable: a certificate table
 // names shared variables by name. With two variables named "x" in the target, the
@@ -79,5 +83,73 @@ func TestVerify_ComponentKeyMustBeItsName(t *testing.T) {
 		if want := `gsm: certificate "forged": component key "t" names registry "u"`; err.Error() != want {
 			t.Fatalf("got %q, want %q", err, want)
 		}
+	}
+}
+
+// synthRegistry is a registry Synthesize finds a convergent repair for.
+func synthRegistry() (*Registry, Var) {
+	r := NewRegistry("syn")
+	x := r.Int("x", 0, 2)
+	r.Invariant("cap").Watches(x).Holds(func(s State) bool { return s.GetInt(x) <= 1 }).Add()
+	r.Event("a").Writes(x).Apply(func(s State) State { return s.SetInt(x, 1) }).Add()
+	r.Event("b").Writes(x).Apply(func(s State) State { return s }).Add()
+	return r, x
+}
+
+// TestSynthesisMachine_UnaffectedByLaterDuplicate: Synthesis.Machine is the
+// machine that was synthesized. An event declared on the registry afterwards
+// (here a duplicate "a") does not reach it, and every other path rejects the
+// registry.
+func TestSynthesisMachine_UnaffectedByLaterDuplicate(t *testing.T) {
+	r, x := synthRegistry()
+	s, err := r.Synthesize()
+	if err != nil || !s.Convergent {
+		t.Fatalf("premise: synthesis converges: %v %v", err, s)
+	}
+	r.Event("a").Writes(x).Apply(func(s State) State { return s.SetInt(x, 0) }).Add()
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("the synthesized machine panics after a duplicate was declared on its registry: %v", p)
+		}
+	}()
+
+	m := s.Machine()
+	if got := fmt.Sprint(m.Events()); got != "[a b]" {
+		t.Fatalf("synthesized machine's events are %s, want [a b]", got)
+	}
+	if got := m.Apply(m.NewState(), "a"); got.GetInt(x) != 1 {
+		t.Fatalf("Apply(\"a\") ran the event declared after synthesis: %s", got)
+	}
+	if _, _, err := r.Build(); err == nil {
+		t.Fatal("Build accepted the registry with the duplicate")
+	}
+	if _, err := r.Synthesize(); err == nil {
+		t.Fatal("Synthesize accepted the registry with the duplicate")
+	}
+}
+
+// TestSynthesisMachine_UnaffectedByLaterIndependent: a pair declared Independent
+// after Synthesize was never checked, so the machine and its tables must not
+// claim it.
+func TestSynthesisMachine_UnaffectedByLaterIndependent(t *testing.T) {
+	r := NewRegistry("syn2")
+	x := r.Bool("x")
+	r.Invariant("any").Watches(x).Holds(func(s State) bool { return true }).Add()
+	r.Event("up").Writes(x).Apply(func(s State) State { return s.SetBool(x, true) }).Add()
+	r.Event("down").Writes(x).Apply(func(s State) State { return s.SetBool(x, false) }).Add()
+	r.Event("noop").Writes(x).Apply(func(s State) State { return s }).Add()
+	r.Independent("up", "noop")
+	s, err := r.Synthesize()
+	if err != nil || !s.Convergent {
+		t.Fatalf("premise: synthesis converges: %v %v", err, s)
+	}
+	r.Independent("up", "down") // up;down != down;up
+
+	b, err := s.Machine().convergenceTables()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(string(b), "\n")[3]; got != "pairs 1 0 2" {
+		t.Fatalf("tables claim %q, want only the pair synthesis checked: %q", got, "pairs 1 0 2")
 	}
 }
