@@ -15,7 +15,7 @@ func TestGateDoesNotCopyTheTables(t *testing.T) {
 	if testing.Short() {
 		t.Skip("2^20 states")
 	}
-	withTableOracle(t, func(oracle.Tables) (bool, error) { return true, nil })
+	withTableOracle(t, func(oracle.Lookup) (bool, error) { return true, nil })
 	m, rep, err := wideFlags(20).Build()
 	if err != nil {
 		t.Fatalf("Build: %v\n%s", err, rep)
@@ -23,7 +23,7 @@ func TestGateDoesNotCopyTheTables(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	tableOracle = oracle.CheckTables
+	tableOracle = oracle.CheckLookup
 	err = certifyMachine(m)
 	runtime.ReadMemStats(&after)
 	if err != nil {

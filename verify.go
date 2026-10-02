@@ -156,7 +156,7 @@ func (r *Report) String() string {
 // with an identical variable declaration list is accepted.
 //
 // When gsm's verification passes, the machine's tables also go to the verified table
-// oracle: check_fast from the normalization-confluence proof, generated as Go from the
+// oracle: check_fn from the normalization-confluence proof, generated as Go from the
 // Rocq extraction (internal/oracle). The machine is returned only if the oracle certifies
 // the tables, and Report.Assurance is then AssuranceOracleTables. If the oracle rejects
 // them or cannot check them, Build returns an error and no machine (it fails closed), and

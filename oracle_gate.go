@@ -9,15 +9,15 @@ import (
 // The oracle gate.
 //
 // gsm's own verification (WFC and CC in Go) is followed by an independent check.
-// The checker is check_fast from the normalization-confluence proof, translated
+// The checker is check_fn from the normalization-confluence proof, translated
 // from Rocq to Go mechanically (internal/oracle). It reads only the tables the
-// verification produced. If it does not certify them, there is no machine:
+// verification produced, in place, through accessors (oracleLookup). If it does not certify them, there is no machine:
 // Build, BuildOrSynthesize, SynthesizeWith (and so Synthesis.Machine) and
 // BuildCompositional return an error and no machine. Report.Assurance says what
 // certified a machine.
 
 // tableOracle is the table oracle. Only tests replace it.
-var tableOracle = oracle.CheckTables
+var tableOracle = oracle.CheckLookup
 
 // Assurance says what certified a machine's convergence.
 type Assurance int
@@ -32,7 +32,7 @@ const (
 	// tables:
 	//   - normal forms and steps land on valid states;
 	//   - the declared pairs commute on the valid states and the zero state.
-	// check_fast_converges then gives convergence for the machine as built.
+	// check_fn_converges then gives convergence for the machine as built.
 	AssuranceOracleTables
 	// AssuranceOracleComponents: BuildCompositional's verification passed, and
 	// the table oracle certified every footprint component's tables over that
@@ -59,7 +59,7 @@ type oracleError struct{ msg string }
 func (e *oracleError) Error() string { return e.msg }
 
 // certifyTables runs the table oracle on tb. what names the tables in the error.
-func certifyTables(tb oracle.Tables, what string) error {
+func certifyTables(tb oracle.Lookup, what string) error {
 	ok, err := tableOracle(tb)
 	if err != nil {
 		return &oracleError{fmt.Sprintf("gsm: the verified table oracle could not check %s: %v; not certified", what, err)}
@@ -72,44 +72,71 @@ func certifyTables(tb oracle.Tables, what string) error {
 	return nil
 }
 
-// oracleTables returns the machine's tables for the table oracle: the
+// oracleLookup gives the table oracle the machine's tables in place: the
 // in-domain encodings, renumbered 0..V-1 in encoding order (so the zero state is
-// 0), with the declared pairs. They are the tables WriteConvergenceTables writes.
-func (m *Machine) oracleTables() (oracle.Tables, error) {
-	newID := make(map[uint64]int)
-	var order []uint64
-	for s := 0; s < len(m.nf); s++ {
+// 0), with the declared pairs. They are the tables WriteConvergenceTables writes
+// (oracleTables), read through m.nf and m.step rather than copied. Every entry
+// of an in-domain state is checked to be an in-domain encoding first, so the
+// accessors only index. m.nf and m.step do not change after Build, so the
+// accessors are pure, as oracle.Lookup requires.
+func (m *Machine) oracleLookup() (oracle.Lookup, error) {
+	rid := make([]int32, len(m.nf))
+	order := make([]uint64, 0, len(m.nf))
+	for s := range rid {
+		rid[s] = -1
 		if m.inDomain(uint64(s)) {
-			newID[uint64(s)] = len(order)
+			rid[s] = int32(len(order))
 			order = append(order, uint64(s))
 		}
 	}
-	id := func(packed uint64) (int, error) {
-		i, ok := newID[packed]
-		if !ok {
-			return 0, fmt.Errorf("gsm: table entry %d is not an in-domain encoding", packed)
+	in := func(packed uint64) error {
+		if packed >= uint64(len(rid)) || rid[packed] < 0 {
+			return fmt.Errorf("gsm: table entry %d is not an in-domain encoding", packed)
 		}
-		return i, nil
+		return nil
 	}
-	tb := oracle.Tables{NF: make([]int, len(order)), Step: make([][]int, len(m.step)), AllPairs: m.allPairs}
-	for k, old := range order {
-		i, err := id(m.nf[old])
-		if err != nil {
-			return tb, err
+	for _, old := range order {
+		if err := in(m.nf[old]); err != nil {
+			return oracle.Lookup{}, err
 		}
-		tb.NF[k] = i
+		for e := range m.step {
+			if err := in(m.step[e][old]); err != nil {
+				return oracle.Lookup{}, err
+			}
+		}
+	}
+	l := oracle.Lookup{
+		N: len(order), NE: len(m.step),
+		NF:       func(k int) int { return int(rid[m.nf[order[k]]]) },
+		Step:     func(e, k int) int { return int(rid[m.step[e][order[k]]]) },
+		AllPairs: m.allPairs,
+	}
+	if len(order) == len(m.nf) {
+		// Every encoding is in the domain, so ids are encodings: skip rid.
+		l.NF = func(k int) int { return int(m.nf[k]) }
+		l.Step = func(e, k int) int { return int(m.step[e][k]) }
 	}
 	if !m.allPairs {
-		tb.Pairs = append([][2]int{}, m.ccPairs...)
+		l.Pairs = append([][2]int{}, m.ccPairs...)
 	}
-	for e := range m.step {
-		tb.Step[e] = make([]int, len(order))
-		for k, old := range order {
-			i, err := id(m.step[e][old])
-			if err != nil {
-				return tb, err
-			}
-			tb.Step[e][k] = i
+	return l, nil
+}
+
+// oracleTables returns oracleLookup's tables as slices, for
+// WriteConvergenceTables.
+func (m *Machine) oracleTables() (oracle.Tables, error) {
+	l, err := m.oracleLookup()
+	if err != nil {
+		return oracle.Tables{}, err
+	}
+	tb := oracle.Tables{NF: make([]int, l.N), Step: make([][]int, l.NE), Pairs: l.Pairs, AllPairs: l.AllPairs}
+	for k := range tb.NF {
+		tb.NF[k] = l.NF(k)
+	}
+	for e := range tb.Step {
+		tb.Step[e] = make([]int, l.N)
+		for k := range tb.Step[e] {
+			tb.Step[e][k] = l.Step(e, k)
 		}
 	}
 	return tb, nil
@@ -117,11 +144,11 @@ func (m *Machine) oracleTables() (oracle.Tables, error) {
 
 // certifyMachine runs the gate on a machine Build or SynthesizeWith produced.
 func certifyMachine(m *Machine) error {
-	tb, err := m.oracleTables()
+	l, err := m.oracleLookup()
 	if err != nil {
 		return &oracleError{fmt.Sprintf("gsm: cannot give the machine's tables to the verified table oracle: %v; not certified", err)}
 	}
-	return certifyTables(tb, "the machine's tables")
+	return certifyTables(l, "the machine's tables")
 }
 
 // componentTables returns one footprint component's tables for the table

@@ -167,3 +167,22 @@ func TestCheckTablesDoesNotCopyTheTables(t *testing.T) {
 		t.Fatalf("CheckTables allocated %d MiB; want at most %d MiB", got>>20, budget>>20)
 	}
 }
+
+// CheckLookup checks every accessor answer before the proof's checker sees it:
+// the theorem is about non-negative ids below 2^31.
+func TestCheckLookupRefusesOutOfRangeAnswers(t *testing.T) {
+	good := counters().Lookup()
+	if ok, err := CheckLookup(good); err != nil || !ok {
+		t.Fatalf("CheckLookup(counters) = %v, %v; want true, nil", ok, err)
+	}
+	for name, l := range map[string]Lookup{
+		"negative nf":   {N: good.N, NE: good.NE, NF: func(int) int { return -1 }, Step: good.Step, AllPairs: true},
+		"negative step": {N: good.N, NE: good.NE, NF: good.NF, Step: func(e, s int) int { return -1 }, AllPairs: true},
+		"huge step":     {N: good.N, NE: good.NE, NF: good.NF, Step: func(e, s int) int { return maxID + 1 }, AllPairs: true},
+		"no states":     {N: 0, NE: 0, NF: good.NF, Step: good.Step, AllPairs: true},
+	} {
+		if ok, err := CheckLookup(l); err == nil || ok {
+			t.Errorf("%s: CheckLookup = %v, %v; want false and an error", name, ok, err)
+		}
+	}
+}

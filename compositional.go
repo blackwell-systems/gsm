@@ -294,7 +294,7 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 	for ci := range comps {
 		tb, terr := r.componentTables(&comps[ci], local)
 		if terr == nil {
-			terr = certifyTables(tb, fmt.Sprintf("the tables of component %v", comps[ci].vars))
+			terr = certifyTables(tb.Lookup(), fmt.Sprintf("the tables of component %v", comps[ci].vars))
 		} else {
 			terr = &oracleError{fmt.Sprintf("gsm: cannot give component %v to the verified table oracle: %v; not certified", comps[ci].vars, terr)}
 		}
