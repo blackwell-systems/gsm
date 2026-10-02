@@ -18,8 +18,8 @@ type Synthesis struct {
 	Cost       int  // total cost of the representative repair (min-cost when Optimal + Exhaustive)
 
 	r        *Registry
-	vars     []Var          // the registry's variables when it was synthesized
-	events   map[string]int // event name -> index, when it was synthesized
+	vars     []Var          // the registry's variables when SynthesizeWith returned
+	events   map[string]int // event name -> index, when SynthesizeWith returned
 	ccPairs  [][2]int       // the pairs the search checked
 	allPairs bool           // whether those are every pair
 	nf       []uint64       // representative convergent normal-form table (nil if none)
@@ -428,7 +428,8 @@ func (r *Registry) impossibilityWitness(rawStep [][]uint64, isValidState []bool,
 }
 
 // Machine returns a ready-to-use Machine built from the synthesized compensation, or nil if
-// no convergent compensation was found. It is the machine as synthesized: events, variables, or
+// no convergent compensation was found. It is the machine as synthesized (from the registry as
+// it was when SynthesizeWith returned, which is the registry it checked): events, variables, or
 // Independent pairs declared on the registry afterwards do not reach it (the registry itself is
 // then re-checked by Build or Synthesize).
 func (s *Synthesis) Machine() *Machine {
