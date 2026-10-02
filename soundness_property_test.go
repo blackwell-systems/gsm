@@ -360,11 +360,15 @@ func TestBuildMatchesBruteForce(t *testing.T) {
 }
 
 // readsOutsideWrites reports whether some event's guard or effect depends on a
-// variable outside its write set (detected by single-variable flips).
+// variable outside its write set: changing that one variable, to any value, from
+// some state changes the event's result on its write set.
 func readsOutsideWrites(r *Registry) bool {
 	ref := newRef(r)
 	for _, ev := range r.events {
-		ws := indexSet(ev.writes)
+		ws := map[int]bool{}
+		for _, w := range ev.writes {
+			ws[w] = true
+		}
 		apply := func(s State) State {
 			if ev.guard != nil && !ev.guard(s) {
 				return s
@@ -372,12 +376,18 @@ func readsOutsideWrites(r *Registry) bool {
 			return ev.effect(s)
 		}
 		for _, s := range ref.states {
+			base := apply(s)
 			for vi, v := range r.vars {
 				if ws[vi] {
 					continue
 				}
-				if !r.writesMatch(apply(s), apply(r.flipVar(s, v)), ws) {
-					return true
+				for d := 0; d < v.domain; d++ {
+					t := apply(s.setRaw(v, uint64(d)))
+					for _, w := range ev.writes {
+						if t.getRaw(r.vars[w]) != base.getRaw(r.vars[w]) {
+							return true
+						}
+					}
 				}
 			}
 		}

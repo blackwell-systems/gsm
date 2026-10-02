@@ -37,14 +37,6 @@ func indexSet(idx []int) map[int]bool {
 	return m
 }
 
-// flipVar returns s with variable v set to a value different from its current one
-// (domains have size >= 2, so this always changes it).
-func (r *Registry) flipVar(s State, v Var) State {
-	cur := s.getRaw(v)
-	next := (cur + 1) % uint64(v.domain)
-	return s.setRaw(v, next)
-}
-
 // changedVars names the outside variable(s) a perturbation altered (b is -1 for one).
 type changedVars struct{ a, b int }
 
@@ -55,7 +47,7 @@ func (r *Registry) describe(c changedVars) string {
 	return fmt.Sprintf("%q and %q", r.vars[c.a].name, r.vars[c.b].name)
 }
 
-// perturb calls fn with s changed in the variables outside the footprint: every
+// perturber.run calls fn with s changed in the variables outside the footprint: every
 // other value of each single outside variable, and every combination of other
 // values of each pair of outside variables. changed names the variable(s) altered.
 // It stops and returns false as soon as fn does.
@@ -64,32 +56,41 @@ func (r *Registry) describe(c changedVars) string {
 // enumeration, so a single flip would only ever test value 1. Pairs, not only
 // singles: a guard such as `paid && inStock` over two outside variables is masked
 // by every single change from the zero background (each conjunct stays false).
-func (r *Registry) perturb(s State, footprint map[int]bool, fn func(s2 State, changed changedVars) bool) bool {
-	var outside []int
+type perturber struct {
+	r       *Registry
+	outside []int
+}
+
+func (r *Registry) newPerturber(footprint map[int]bool) perturber {
+	p := perturber{r: r}
 	for i := range r.vars {
 		if !footprint[i] {
-			outside = append(outside, i)
+			p.outside = append(p.outside, i)
 		}
 	}
-	others := func(v Var, cur uint64) []uint64 {
-		out := make([]uint64, 0, v.domain-1)
-		for d := 0; d < v.domain; d++ {
-			if uint64(d) != cur {
-				out = append(out, uint64(d))
+	return p
+}
+
+func (p perturber) run(s State, fn func(s2 State, changed changedVars) bool) bool {
+	vars := p.r.vars
+	for a, ia := range p.outside {
+		va := vars[ia]
+		ca := s.getRaw(va)
+		for da := uint64(0); da < uint64(va.domain); da++ {
+			if da == ca {
+				continue
 			}
-		}
-		return out
-	}
-	for a, ia := range outside {
-		va := r.vars[ia]
-		for _, da := range others(va, s.getRaw(va)) {
 			sa := s.setRaw(va, da)
 			if !fn(sa, changedVars{ia, -1}) {
 				return false
 			}
-			for _, ib := range outside[a+1:] {
-				vb := r.vars[ib]
-				for _, db := range others(vb, s.getRaw(vb)) {
+			for _, ib := range p.outside[a+1:] {
+				vb := vars[ib]
+				cb := s.getRaw(vb)
+				for db := uint64(0); db < uint64(vb.domain); db++ {
+					if db == cb {
+						continue
+					}
 					if !fn(sa.setRaw(vb, db), changedVars{ia, ib}) {
 						return false
 					}
@@ -100,9 +101,23 @@ func (r *Registry) perturb(s State, footprint map[int]bool, fn func(s2 State, ch
 	return true
 }
 
+// fieldMask returns the packed-state bits that hold the variables in set.
+func (r *Registry) fieldMask(set map[int]bool) uint64 {
+	var m uint64
+	for i := range set {
+		v := r.vars[i]
+		m |= uint64((1<<v.bits)-1) << v.offset
+	}
+	return m
+}
+
 // firstOutsideWrite returns the index of the first variable NOT in writeSet whose
 // value differs between s and t, or -1 if the change set is within writeSet.
-func (r *Registry) firstOutsideWrite(s, t State, writeSet map[int]bool) int {
+// writeMask is fieldMask(writeSet); the common no-difference case is one XOR.
+func (r *Registry) firstOutsideWrite(s, t State, writeSet map[int]bool, writeMask uint64) int {
+	if (s.packed^t.packed)&^writeMask == 0 {
+		return -1
+	}
 	for i, v := range r.vars {
 		if writeSet[i] {
 			continue
@@ -114,14 +129,10 @@ func (r *Registry) firstOutsideWrite(s, t State, writeSet map[int]bool) int {
 	return -1
 }
 
-// writesMatch reports whether s and t agree on every variable in writeSet.
-func (r *Registry) writesMatch(s, t State, writeSet map[int]bool) bool {
-	for i, v := range r.vars {
-		if writeSet[i] && s.getRaw(v) != t.getRaw(v) {
-			return false
-		}
-	}
-	return true
+// writesMatch reports whether s and t agree on every variable in the write set
+// whose bits are writeMask.
+func writesMatch(s, t State, writeMask uint64) bool {
+	return (s.packed^t.packed)&writeMask == 0
 }
 
 // verifyFootprints checks that every event effect and invariant repair/check that
@@ -132,7 +143,7 @@ func (r *Registry) writesMatch(s, t State, writeSet map[int]bool) bool {
 // assignments read) must lie inside its write set, and an invariant's footprint is
 // derived from every variable its predicate and repair mention, so it is conformant
 // by construction. Closure rules are opaque, so they are checked by perturbation
-// (see perturb), which is a test rather than a proof (see the soundness note above).
+// (see perturber), which is a test rather than a proof (see the soundness note above).
 func (r *Registry) verifyFootprints(c *component) error {
 	for _, ei := range c.events {
 		ev := r.events[ei]
@@ -180,31 +191,33 @@ func (r *Registry) verifyFootprints(c *component) error {
 
 // checkTransformFootprint verifies a state transform fn whose declared writes are
 // writeSet and declared footprint is footprint (writeSet is a subset). Over the
-// component subspace, and for each variable flipped outside the footprint, it
+// component subspace, and for every change of one or two variables outside the footprint, it
 // confirms fn writes nothing outside writeSet and its writeSet outputs do not
 // depend on the outside variable.
 func (r *Registry) checkTransformFootprint(c *component, fn func(State) State, writeSet, footprint map[int]bool, kind, name string) error {
 	var outErr error
+	wm := r.fieldMask(writeSet)
+	pt := r.newPerturber(footprint)
 	r.enumComponent(c, func(s State) {
 		if outErr != nil {
 			return
 		}
 		base := fn(s)
-		if v := r.firstOutsideWrite(s, base, writeSet); v >= 0 {
+		if v := r.firstOutsideWrite(s, base, writeSet, wm); v >= 0 {
 			outErr = fmt.Errorf("gsm: %s %q writes variable %q outside its declared footprint",
 				kind, name, r.vars[v].name)
 			return
 		}
-		r.perturb(s, footprint, func(s2 State, changed changedVars) bool {
+		pt.run(s, func(s2 State, changed changedVars) bool {
 			t2 := fn(s2)
-			if w := r.firstOutsideWrite(s2, t2, writeSet); w >= 0 {
+			if w := r.firstOutsideWrite(s2, t2, writeSet, wm); w >= 0 {
 				outErr = fmt.Errorf("gsm: %s %q writes variable %q outside its declared footprint",
 					kind, name, r.vars[w].name)
 				return false
 			}
 			// s and s2 agree on the footprint, so a footprint-local fn must produce
 			// the same declared-write outputs.
-			if !r.writesMatch(base, t2, writeSet) {
+			if !writesMatch(base, t2, wm) {
 				outErr = fmt.Errorf("gsm: %s %q reads variable %s outside its declared footprint",
 					kind, name, r.describe(changed))
 				return false
@@ -218,12 +231,13 @@ func (r *Registry) checkTransformFootprint(c *component, fn func(State) State, w
 // checkPredicateFootprint verifies an invariant's check depends only on its footprint.
 func (r *Registry) checkPredicateFootprint(c *component, check CheckFunc, footprint map[int]bool, name string) error {
 	var outErr error
+	pt := r.newPerturber(footprint)
 	r.enumComponent(c, func(s State) {
 		if outErr != nil {
 			return
 		}
 		base := check(s)
-		r.perturb(s, footprint, func(s2 State, changed changedVars) bool {
+		pt.run(s, func(s2 State, changed changedVars) bool {
 			if check(s2) != base {
 				outErr = fmt.Errorf("gsm: invariant %q check reads variable %s outside its declared footprint",
 					name, r.describe(changed))
