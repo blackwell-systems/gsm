@@ -105,15 +105,14 @@ type docBlock struct {
 
 func extractBlocks(t *testing.T, file string) []docBlock {
 	t.Helper()
-	f, err := os.Open(file)
+	data, err := os.ReadFile(file)
 	if err != nil {
-		t.Fatalf("open %s: %v", file, err)
+		t.Fatalf("read %s: %v", file, err)
 	}
-	defer f.Close()
 	var out []docBlock
 	var lastNonEmpty string
 	var cur *docBlock
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(strings.NewReader(string(data)))
 	n := 0
 	for sc.Scan() {
 		n++
@@ -219,7 +218,12 @@ func TestDocSnippets(t *testing.T) {
 					hard = append(hard, err.Error())
 				},
 			}
-			_, _ = conf.Check("main", fset, []*ast.File{f}, nil)
+			// conf.Error sees every error; Check also returns the first, already collected.
+			if _, err := conf.Check("main", fset, []*ast.File{f}, nil); err != nil && len(hard) == 0 {
+				if te, ok := err.(types.Error); !ok || !te.Soft {
+					hard = append(hard, err.Error())
+				}
+			}
 			if len(hard) > 0 {
 				t.Errorf("%s: does not compile:\n  %s\n--- snippet ---\n%s", where, strings.Join(hard, "\n  "), b.code)
 				continue
@@ -242,7 +246,10 @@ func TestDocSnippets(t *testing.T) {
 	for _, b := range runs {
 		b := b
 		where := fmt.Sprintf("%s:%d", b.file, b.line)
-		src, _ := wrap(b)
+		src, err := wrap(b)
+		if err != nil {
+			t.Fatalf("%s: %v", where, err)
+		}
 		dir := t.TempDir()
 		mod := "module docsnippet\n\ngo 1.22\n\nrequire github.com/blackwell-systems/gsm v0.0.0\n\nreplace github.com/blackwell-systems/gsm => " + repo + "\n"
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o644); err != nil {

@@ -1,0 +1,89 @@
+{
+  "Name": "pay-ship-sub",
+  "Digest": "5310d840882015702c700cde016a9535b397fe049873937dfcd399d743be47d1",
+  "Report": {
+    "Name": "pay-ship-sub",
+    "Components": [
+      {
+        "Name": "pay_ship",
+        "StateCount": 4,
+        "VarCount": 2,
+        "EventCount": 2,
+        "WFC": true,
+        "MaxRepairLen": 0,
+        "CC": true,
+        "PairsTotal": 1,
+        "PairsDisjoint": 1,
+        "PairsBrute": 0,
+        "CCFailure": null,
+        "Components": 0,
+        "MaxComponentStates": 0,
+        "FootprintChecked": false
+      },
+      {
+        "Name": "audit",
+        "StateCount": 2,
+        "VarCount": 1,
+        "EventCount": 0,
+        "WFC": true,
+        "MaxRepairLen": 0,
+        "CC": true,
+        "PairsTotal": 0,
+        "PairsDisjoint": 0,
+        "PairsBrute": 0,
+        "CCFailure": null,
+        "Components": 0,
+        "MaxComponentStates": 0,
+        "FootprintChecked": false
+      }
+    ],
+    "Edges": 1
+  },
+  "Tables": [
+    {
+      "Target": "audit",
+      "Sources": [
+        "pay_ship"
+      ],
+      "Shared": [
+        "seen_shipped"
+      ],
+      "Rows": [
+        {
+          "SourceIDs": [
+            0
+          ],
+          "Values": [
+            0
+          ]
+        },
+        {
+          "SourceIDs": [
+            1
+          ],
+          "Values": [
+            0
+          ]
+        },
+        {
+          "SourceIDs": [
+            2
+          ],
+          "Values": [
+            1
+          ]
+        },
+        {
+          "SourceIDs": [
+            3
+          ],
+          "Values": [
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "Monotone": false,
+  "InputPorts": []
+}
