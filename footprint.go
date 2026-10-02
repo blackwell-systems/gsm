@@ -145,6 +145,7 @@ func writesMatch(s, t State, writeMask uint64) bool {
 // by construction. Closure rules are opaque, so they are checked by perturbation
 // (see perturber), which is a test rather than a proof (see the soundness note above).
 func (r *Registry) verifyFootprints(c *component) error {
+	run := r.checked()
 	for _, ei := range c.events {
 		ev := r.events[ei]
 		ws := indexSet(ev.writes)
@@ -159,9 +160,23 @@ func (r *Registry) verifyFootprints(c *component) error {
 						ev.name, r.vars[vi].name)
 				}
 			}
+			// The syntactic check runs no closure, and CC runs only events in a checked pair,
+			// so run the effect on every state of the component here: every event's result is
+			// then checked to be a state of the machine, as the perturbation run below does
+			// for closures. (A combinator rule can leave the domain only through a Var of
+			// another registry, which reads and writes with that registry's layout.)
+			var effErr error
+			r.enumComponent(c, func(s State) {
+				if effErr == nil {
+					_, effErr = run.applyEvent(ev, s)
+				}
+			})
+			if effErr != nil {
+				return effErr
+			}
 			continue
 		}
-		apply := func(s State) (State, error) { return r.applyEvent(ev, s) }
+		apply := func(s State) (State, error) { return run.applyEvent(ev, s) }
 		if err := r.checkTransformFootprint(c, apply, ws, ws, "event", ev.name); err != nil {
 			return err
 		}
@@ -173,7 +188,7 @@ func (r *Registry) verifyFootprints(c *component) error {
 		}
 		fp := indexSet(inv.footprint)
 		// Repair may write only its footprint and depend only on its footprint.
-		repair := func(s State) (State, error) { return r.repairResult(inv, s) }
+		repair := func(s State) (State, error) { return run.repair(inv, s) }
 		if err := r.checkTransformFootprint(c, repair, fp, fp, "invariant repair", inv.name); err != nil {
 			return err
 		}
@@ -190,7 +205,7 @@ func (r *Registry) verifyFootprints(c *component) error {
 // component subspace, and for every change of one or two variables outside the footprint, it
 // confirms fn writes nothing outside writeSet and its writeSet outputs do not
 // depend on the outside variable. fn returns an error for a result that is not a
-// state of the machine (applyEvent, repairResult), which stops the check.
+// state of the machine (checkedRules), which stops the check.
 func (r *Registry) checkTransformFootprint(c *component, fn func(State) (State, error), writeSet, footprint map[int]bool, kind, name string) error {
 	var outErr error
 	wm := r.fieldMask(writeSet)

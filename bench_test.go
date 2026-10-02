@@ -102,8 +102,27 @@ func BenchmarkBuildCompositional_WideCounters32(b *testing.B) { benchComposition
 // runtime (effect, then repairs until every invariant holds), so this is the hot
 // path for machines too large to tabulate. Each step increments one counter; the
 // cap repair fires once every counter has wrapped past 2.
-func BenchmarkLazyApply_WideCounters32(b *testing.B) {
-	m, rep, err := wideCounters(32).BuildCompositional()
+func BenchmarkLazyApply_WideCounters32(b *testing.B) { benchLazyApply(b, wideCounters(32)) }
+
+// tightCounters is wideCounters with Int(0..2) counters: a domain of 3 in a 2-bit field,
+// so every variable needs a range comparison in the runtime domain check (the worst case
+// for it; wideCounters' power-of-two domains need only the mask test).
+func tightCounters(n int) *Registry {
+	r := NewRegistry(fmt.Sprintf("tight_counters_%d", n))
+	for k := 0; k < n; k++ {
+		v := r.Int(fmt.Sprintf("c%d", k), 0, 2)
+		r.Invariant(fmt.Sprintf("cap%d", k)).Watches(v).
+			Holds(func(s State) bool { return s.GetInt(v) <= 1 }).
+			Repair(func(s State) State { return s.SetInt(v, 1) }).Add()
+		r.Event(fmt.Sprintf("inc%d", k)).Writes(v).
+			Apply(func(s State) State { return s.SetInt(v, s.GetInt(v)+1) }).Add()
+	}
+	return r
+}
+
+func benchLazyApply(b *testing.B, r *Registry) {
+	b.Helper()
+	m, rep, err := r.BuildCompositional()
 	if err != nil {
 		b.Fatalf("BuildCompositional: %v\n%s", err, rep)
 	}
@@ -113,5 +132,17 @@ func BenchmarkLazyApply_WideCounters32(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s = m.Apply(s, events[i%len(events)])
+	}
+}
+
+func BenchmarkLazyApply_TightCounters32(b *testing.B) { benchLazyApply(b, tightCounters(32)) }
+func BenchmarkBuildCompositional_TightCounters32(b *testing.B) {
+	r := tightCounters(32)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, rep, err := r.BuildCompositional(); err != nil {
+			b.Fatalf("BuildCompositional: %v\n%s", err, rep)
+		}
 	}
 }

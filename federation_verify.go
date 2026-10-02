@@ -76,24 +76,12 @@ func (f *Federation) verify(subOf map[*Registry]int) error {
 
 // verifyEdge checks a single morphism: M1 validity-preservation, shared-only well-formedness,
 // and source-determinacy, by enumeration over valid source×target states.
-// imageResultError reports a morphism Map or Resolver (what) that returned, for target state
-// dst, something that is not a state of the target registry (notStateOf), or returns nil.
-// what is called only on failure, so callers on a hot path pay nothing to name the closure.
-func imageResultError(what func() string, target string, vars []Var, dst, out State) error {
-	err := notStateOf(vars, out)
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("gsm: %s on target state %s returned %s, which is not a state of %q: %v",
-		what(), dst, out, target, err)
-}
-
-// describe names the morphism's Map, for imageResultError.
+// describe names the morphism's Map, for domainCheck.imageError.
 func (e edgeDef) describe() string {
 	return fmt.Sprintf("morphism %s→%s Map", e.src.name, e.dst.name)
 }
 
-// resolverName names target's Resolver, for imageResultError.
+// resolverName names target's Resolver, for domainCheck.imageError.
 func resolverName(target string) func() string {
 	return func() string { return fmt.Sprintf("resolver for %q", target) }
 }
@@ -122,12 +110,13 @@ func (f *Federation) verifyEdge(e edgeDef) error {
 	for _, v := range e.shared {
 		sharedIdx[v.index] = true
 	}
+	dom := newDomainCheck(e.dst.vars)
 
 	for _, sa := range srcValid {
 		var refShared map[int]uint64 // shared values from the first target, for this source
 		for di, sb := range dstValid {
 			sb2 := e.mapFn(sa, sb)
-			if err := imageResultError(e.describe, e.dst.name, e.dst.vars, sb, sb2); err != nil {
+			if err := dom.imageError(e.describe, e.dst.name, sb, sb2); err != nil {
 				return err
 			}
 			// Well-formedness: Map must overwrite only Shared() variables.
@@ -205,6 +194,7 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 	}
 
 	// Enumerate every source combination and, for each, every valid target state.
+	dom := newDomainCheck(target.vars)
 	return forEachCombo(srcValids, func(cs []State) error {
 		combo := make(map[string]State, len(sources))
 		for k, s := range sources {
@@ -214,7 +204,7 @@ func (f *Federation) verifyResolved(target *Registry, resolver Resolver, edges [
 		var refShared map[int]uint64
 		for di, dst := range dstValid {
 			merged := resolver(dst, combo)
-			if err := imageResultError(resolverName(target.name), target.name, target.vars, dst, merged); err != nil {
+			if err := dom.imageError(resolverName(target.name), target.name, dst, merged); err != nil {
 				return err
 			}
 			// Well-formedness: the resolver may write only shared variables.

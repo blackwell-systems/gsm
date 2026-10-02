@@ -111,7 +111,7 @@ func (m *FedMachine) mapImage(e fedEdge, src, dst State) State {
 // checked here, where it is computed, as Machine.Apply does on a lazy machine.
 func (m *FedMachine) mustBeTarget(j int, what func() string, dst, out State) State {
 	c := m.comps[j]
-	if err := imageResultError(what, c.name, c.vars, dst, out); err != nil {
+	if err := c.dom.imageError(what, c.name, dst, out); err != nil {
 		panic(err.Error())
 	}
 	return State{packed: out.packed, vars: c.vars}

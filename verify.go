@@ -195,6 +195,7 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 		step:     step,
 		nf:       nf,
 		valid:    valid,
+		dom:      newDomainCheck(r.vars),
 		ccPairs:  r.ccPairs(),
 		allPairs: r.allIndependent,
 	}
@@ -209,6 +210,7 @@ func (r *Registry) build(runCC bool) (*Machine, *Report, error) {
 func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool, mkState func(uint64) State, report *Report) ([]uint64, error) {
 	nf := make([]uint64, packedCount)
 	maxRepair := 0
+	run := r.checked()
 	var err error
 
 	for i := 0; i < packedCount; i++ {
@@ -223,7 +225,7 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 		seen[s.packed] = true
 
 		for !r.allInvariantsHold(s) {
-			if s, err = r.applyFirstRepair(s); err != nil {
+			if s, err = run.applyFirstRepair(s); err != nil {
 				return nil, err
 			}
 			depth++
@@ -262,11 +264,12 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 // computeStepTables builds the Step[e][s] = NF(apply(e, s)) tables.
 func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) ([][]uint64, error) {
 	step := make([][]uint64, len(r.events))
+	run := r.checked()
 	for ei, ev := range r.events {
 		step[ei] = make([]uint64, packedCount)
 		for i := 0; i < packedCount; i++ {
 			if valid[i] {
-				after, err := r.applyEvent(ev, mkState(uint64(i)))
+				after, err := run.applyEvent(ev, mkState(uint64(i)))
 				if err != nil {
 					return nil, err
 				}
@@ -341,18 +344,6 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][
 	return nil
 }
 
-// ruleResultError reports a rule (an event's effect or an invariant's repair) that returned,
-// for input state in, something that is not a state of machine (notStateOf), or returns nil.
-// kind is "event" or "invariant"; part names the closure ("effect", "repair").
-func ruleResultError(machine string, vars []Var, kind, name, part string, in, out State) error {
-	err := notStateOf(vars, out)
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("gsm: %s %q %s on state %s returned %s, which is not a state of machine %q: %v",
-		kind, name, part, in, out, machine, err)
-}
-
 // allInvariantsHold checks V_R(s).
 func (r *Registry) allInvariantsHold(s State) bool {
 	for _, inv := range r.invariants {
@@ -363,31 +354,41 @@ func (r *Registry) allInvariantsHold(s State) bool {
 	return true
 }
 
+// checkedRules runs a registry's closures and checks that each result is a state of the
+// machine (domainCheck). Every verification path runs closures through one, made once per
+// run so the domain check is precomputed.
+type checkedRules struct {
+	r   *Registry
+	dom *domainCheck
+}
+
+func (r *Registry) checked() checkedRules { return checkedRules{r, newDomainCheck(r.vars)} }
+
 // applyFirstRepair fires the first violated invariant's repair (priority order). It
-// returns an error if the repair's result is not a state of this machine (notStateOf).
-func (r *Registry) applyFirstRepair(s State) (State, error) {
-	for _, inv := range r.invariants {
+// returns an error if the repair's result is not a state of this machine.
+func (c checkedRules) applyFirstRepair(s State) (State, error) {
+	for _, inv := range c.r.invariants {
 		if !inv.check(s) {
-			return r.repairResult(inv, s)
+			return c.repair(inv, s)
 		}
 	}
 	return s, nil
 }
 
-// repairResult runs inv's repair on s and checks the result is a state of this machine.
-func (r *Registry) repairResult(inv invariantDef, s State) (State, error) {
+// repair runs inv's repair on s and checks the result is a state of this machine.
+func (c checkedRules) repair(inv invariantDef, s State) (State, error) {
 	out := inv.repair(s)
-	return out, ruleResultError(r.name, r.vars, "invariant", inv.name, "repair", s, out)
+	return out, c.dom.ruleError(c.r.name, "invariant", inv.name, "repair", s, out)
 }
 
 // applyEvent applies an event's effect (or no-op if guard fails). It returns an error if
-// the effect's result is not a state of this machine (notStateOf).
-func (r *Registry) applyEvent(ev eventDef, s State) (State, error) {
+// the effect's result is not a state of this machine.
+func (c checkedRules) applyEvent(ev eventDef, s State) (State, error) {
 	if ev.guard != nil && !ev.guard(s) {
 		return s, nil
 	}
 	out := ev.effect(s)
-	return out, ruleResultError(r.name, r.vars, "event", ev.name, "effect", s, out)
+	return out, c.dom.ruleError(c.r.name, "event", ev.name, "effect", s, out)
 }
 
 // isValidEncoding checks that all variable values in a packed ID

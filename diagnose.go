@@ -200,7 +200,7 @@ func (f *Federation) DiagnoseCycle() (*CycleDiagnostic, error) {
 		for i := 0; i < k; i++ {
 			dst := cyc[(i+1)%k]
 			img := edges[i].mapFn(state[cyc[i]], state[dst])
-			if err := imageResultError(edges[i].describe, f.comps[dst].name, f.comps[dst].vars, state[dst], img); err != nil {
+			if err := mach[dst].dom.imageError(edges[i].describe, f.comps[dst].name, state[dst], img); err != nil {
 				return nil, err
 			}
 			next := mach[dst].Normalize(img)

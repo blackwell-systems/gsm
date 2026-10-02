@@ -273,6 +273,7 @@ func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
 	m := &Machine{
 		name:       r.name,
 		vars:       r.vars,
+		dom:        newDomainCheck(r.vars),
 		events:     make(map[string]int),
 		lazy:       true,
 		invariants: r.invariants,
@@ -332,6 +333,7 @@ func (r *Registry) enumComponent(c *component, fn func(State)) {
 func (r *Registry) verifyComponentWFC(c *component, count int) (int, error) {
 	maxDepth := 0
 	var outerErr error
+	run := r.checked()
 	r.enumComponent(c, func(s State) {
 		if outerErr != nil {
 			return
@@ -340,7 +342,7 @@ func (r *Registry) verifyComponentWFC(c *component, count int) (int, error) {
 		depth := 0
 		for !r.allInvariantsHold(s) {
 			var err error
-			if s, err = r.applyFirstRepair(s); err != nil {
+			if s, err = run.applyFirstRepair(s); err != nil {
 				outerErr = err
 				return
 			}
@@ -364,10 +366,11 @@ func (r *Registry) verifyComponentWFC(c *component, count int) (int, error) {
 // localApply stays within the subspace (writes and repairs are footprint-local,
 // verified by verifyFootprints), so this is sound.
 func (r *Registry) verifyComponentCC(c *component, i, j int, report *Report) error {
+	run := r.checked()
 	localApply := func(ev eventDef, s State) (State, error) {
-		after, err := r.applyEvent(ev, s)
+		after, err := run.applyEvent(ev, s)
 		for err == nil && !r.allInvariantsHold(after) {
-			after, err = r.applyFirstRepair(after)
+			after, err = run.applyFirstRepair(after)
 		}
 		return after, err
 	}

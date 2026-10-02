@@ -151,11 +151,12 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (*Synthesis, error) {
 	// Precompute the raw post-event state for every (event, encodable state) — independent of
 	// the candidate compensation. applyEvent rejects a result outside the valid encodings.
 	rawStep := make([][]uint64, len(r.events))
+	run := r.checked()
 	for ei, ev := range r.events {
 		rawStep[ei] = make([]uint64, packedCount)
 		for s := 0; s < packedCount; s++ {
 			if validEnc[s] {
-				after, err := r.applyEvent(ev, mk(s))
+				after, err := run.applyEvent(ev, mk(s))
 				if err != nil {
 					return nil, err
 				}
@@ -446,7 +447,7 @@ func (s *Synthesis) Machine() *Machine {
 		return nil
 	}
 	m := &Machine{name: s.r.name, vars: s.vars, events: make(map[string]int, len(s.events)), step: s.step, nf: s.nf,
-		ccPairs: s.ccPairs, allPairs: s.allPairs}
+		dom: newDomainCheck(s.vars), ccPairs: s.ccPairs, allPairs: s.allPairs}
 	for name, i := range s.events {
 		m.events[name] = i
 	}
