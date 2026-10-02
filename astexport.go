@@ -220,7 +220,8 @@ func (r *Registry) WriteMachineAST(w io.Writer) error {
 // <pairs>): "pairs all" when no pair was declared independent, otherwise
 // "pairs k a1 b1 ... ak bk" with event indices in the order WriteMachineAST
 // emits the events. It is a separate file, not part of WriteMachineAST's output,
-// so PolicyBytes and PolicyDigest do not depend on it. Without it the oracle
+// so PolicyBytes and PolicyDigest do not depend on it (PolicyNames includes it, so
+// PolicyIdentityDigest and certificate digests do). Without it the oracle
 // checks every pair, the stronger property, so a verdict obtained without the
 // pairs file holds for any declaration. It fails if two events share a name, since
 // Independent resolved each name to one of them only.

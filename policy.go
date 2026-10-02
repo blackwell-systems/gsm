@@ -30,9 +30,10 @@ func (r *Registry) PolicyBytes() ([]byte, error) {
 }
 
 // PolicyNames returns the canonical serialization of what the rules are addressed by,
-// which PolicyBytes (the oracle's input) leaves out because the oracle addresses
-// variables and events by position: each variable's name, kind and enum labels, each
-// event's name, and the event pairs CC is checked for (WriteDeclaredPairs). Replay logs,
+// which PolicyBytes (the oracle's input), and so PolicyDigest, leave out because the
+// oracle addresses variables and events by position: each variable's name, kind and enum
+// labels, each event's name, and the event pairs CC is checked for (WriteDeclaredPairs).
+// PolicyIdentityDigest and certificate digests cover it. Replay logs,
 // projections, certificate tables, input ports and Set address these by name, and the
 // declared pairs decide which orderings the CC check covers, so two registries that
 // differ in any of them are different policies even when their rules serialize alike.
@@ -68,16 +69,44 @@ func (r *Registry) PolicyNames() ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// PolicyDigest returns a stable, domain-separated SHA-256 over the format version, the
-// canonical policy bytes and the policy names, as lowercase hex. Two registries produce
-// the same digest exactly when their serialized combinator rules (PolicyBytes) and the
-// names and pairs those rules are addressed by (PolicyNames) are identical, so the digest
-// names a policy independently of who built it or in which layer (a rule written with the
-// sugar surface digests the same as the equivalent primitive combinators). Callers anchor
-// this digest in an audit trail; a verifier recomputes it from PolicyBytes and
-// PolicyNames and checks the anchored value, then runs the external oracle on
-// PolicyBytes.
+// PolicyDigest returns a stable, domain-separated SHA-256 over the format version and
+// the canonical policy bytes, as lowercase hex: SHA-256(PolicyFormatVersion "\n"
+// PolicyBytes). Two registries produce the same digest exactly when their serialized
+// combinator rules are identical, so the digest names a policy independently of who built
+// it or in which layer (a rule written with the sugar surface digests the same as the
+// equivalent primitive combinators). Callers anchor this digest in an audit trail; a
+// verifier recomputes it from PolicyBytes and checks the anchored value, then runs the
+// external oracle on those same bytes.
+//
+// It covers exactly the oracle's input, which addresses variables and events by position,
+// so it does not cover the names the rules are addressed by (PolicyNames): two registries
+// that differ only in a variable, event or enum-label name, a variable's kind, or the
+// declared Independent pairs have the same PolicyDigest. Use PolicyIdentityDigest for a
+// fingerprint that also covers those. Moving the names into the serialized format (and so
+// into PolicyDigest) is planned before 1.0.
 func (r *Registry) PolicyDigest() (string, error) {
+	b, err := r.PolicyBytes()
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	h.Write([]byte(PolicyFormatVersion))
+	h.Write([]byte{'\n'})
+	h.Write(b)
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// PolicyIdentityVersion is the domain-separation tag for PolicyIdentityDigest.
+const PolicyIdentityVersion = "gsm-policy-identity-v1"
+
+// PolicyIdentityDigest returns a stable, domain-separated SHA-256 over the rules and the
+// names they are addressed by, as lowercase hex: SHA-256(PolicyIdentityVersion "\n"
+// PolicyBytes PolicyNames). Unlike PolicyDigest it changes when a variable, event or
+// enum-label name, a variable's kind, or the declared Independent pairs change, so it is
+// the fingerprint to use when those matter (replay logs, projections and ports address
+// by name, and the pairs decide which orderings CC covers). Certificate digests cover the
+// same names.
+func (r *Registry) PolicyIdentityDigest() (string, error) {
 	b, err := r.PolicyBytes()
 	if err != nil {
 		return "", err
@@ -87,7 +116,7 @@ func (r *Registry) PolicyDigest() (string, error) {
 		return "", err
 	}
 	h := sha256.New()
-	h.Write([]byte(PolicyFormatVersion))
+	h.Write([]byte(PolicyIdentityVersion))
 	h.Write([]byte{'\n'})
 	h.Write(b)
 	h.Write(names)
