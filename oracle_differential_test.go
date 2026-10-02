@@ -33,7 +33,8 @@ import (
 )
 
 const (
-	// Size caps keep the extracted checkers (list-based, quadratic lookups) fast.
+	// Size caps keep the differential run short; the checkers themselves handle
+	// gsm's full 2^20 states.
 	diffMaxTableStates = 2048
 	diffMaxBoxStates   = 4096
 )
