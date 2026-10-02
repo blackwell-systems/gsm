@@ -2,7 +2,10 @@
 
 The `oracles` CI job builds the two checkers extracted from the Coq proof
 (`checker`, the table oracle, and `astchecker`, the rules oracle) and runs gsm's
-oracle tests and the differential cross-check against them. Those tests are
+oracle tests and the differential cross-check against them. Both checkers decide
+the property `Build` checks, so the cross-check fails on any disagreement except
+a rules-oracle refusal outside its arithmetic fragment. `GSM_DIFF_RANDOM=<n>`
+sets the number of random combinator machines (default 600 with the oracles). Those tests are
 required there: the job sets `GSM_REQUIRE_ORACLES=1`, so a missing checker fails
 instead of skipping.
 

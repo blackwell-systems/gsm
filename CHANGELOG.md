@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The extracted checkers decide exactly what `Build` checks.** Both oracles previously checked a
+  different property, so the differential test had to excuse whole classes of disagreement. Now
+  they check `Build`'s: repair terminates from every state (the rules oracle used to require it
+  only where an event reaches), only the pairs declared `Independent` are checked (both used to
+  check every pair), and commutation is checked on the valid states plus the zero state (the table
+  oracle used to check invariant-invalid encodings, and the rules oracle skipped an invalid zero
+  state). The differential test now fails on any disagreement except a rules-oracle refusal
+  outside its arithmetic fragment, and the table oracle also checks, and must reject, the tables
+  of every machine `Build` rejects for CC. Proofs: normalization-confluence `TableCheck.v`,
+  `Trace.v` and `checkBuild` in `AstChecker.v`.
+- **`WriteConvergenceTables` writes format version 2**: a `gsm-tables 2` header, the normal-form
+  table, and the declared pairs, so the table oracle can check `Build`'s property. It also no
+  longer panics on a synthesized machine, and fails rather than writing a wrong id if a table
+  entry is not an in-domain encoding.
+
+### Added
+- **`Registry.WriteDeclaredPairs`** writes the pairs CC is checked for, in the format the rules
+  oracle takes as an optional second file. It is not part of `WriteMachineAST`'s output, so
+  `PolicyBytes`, `PolicyDigest` and certificate digests are unchanged.
+
 ### Fixed
 - **The rules oracle used the wrong arithmetic.** `astchecker` (normalization-confluence) evaluated
   rules over the natural numbers, so `Sub` truncated at 0 and a guard such as
@@ -23,8 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hashes (`.github/oracle/`), and runs the whole test suite with `GSM_REQUIRE_ORACLES=1`, so the
   oracle tests fail instead of skipping when a checker is missing.
 - **Differential test of every `Build`.** `oracle_differential_test.go` cross-checks every machine
-  the test suite builds, plus 600 random combinator machines, against both checkers, and fails on
-  any disagreement that is not one of the documented spec differences.
+  the test suite builds, plus 600 random combinator machines (`GSM_DIFF_RANDOM` sets the count),
+  against both checkers, and fails on any disagreement with `Build`.
 
 ### Security
 - **`Build` certified machines that do not converge.** It skipped the Compensation Commutativity
