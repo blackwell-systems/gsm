@@ -194,13 +194,19 @@ func TestSynthesisIsCertifiedByTheTableOracle(t *testing.T) {
 }
 
 func TestSynthesisMachineNeedsTheOracle(t *testing.T) {
+	// The exported fields are the caller's to change; Machine decides from
+	// what SynthesizeWith recorded.
+	forged := &Synthesis{Convergent: true, Assurance: AssuranceOracleTables}
+	if forged.Machine() != nil {
+		t.Fatal("Synthesis.Machine returned a machine SynthesizeWith never certified")
+	}
 	syn, err := unrepaired().SynthesizeWith()
 	if err != nil {
 		t.Fatal(err)
 	}
-	syn.Assurance = AssuranceNone // as if the gate had not run
-	if syn.Machine() != nil {
-		t.Fatal("Synthesis.Machine returned a machine the oracle did not certify")
+	syn.Assurance = AssuranceNone
+	if syn.Machine() == nil {
+		t.Fatal("changing the exported Assurance field removed a certified machine")
 	}
 }
 

@@ -32,6 +32,11 @@ type Synthesis struct {
 	step     [][]uint64
 	invalids []uint64 // packed invalid states (for Repairs())
 	witness  string   // when impossible: why (a critical pair no repair can reconcile)
+
+	// certified is set by SynthesizeWith when the verified table oracle certified
+	// the synthesized tables. Machine decides from it, not from the exported
+	// Convergent and Assurance fields, which a caller can change.
+	certified bool
 }
 
 // SynthOption configures synthesis. See Prefer.
@@ -342,6 +347,7 @@ func (r *Registry) SynthesizeWith(opts ...SynthOption) (_ *Synthesis, err error)
 			return nil, err
 		}
 		out.Assurance = AssuranceOracleTables
+		out.certified = true
 	}
 	return out, nil
 }
@@ -476,10 +482,11 @@ func (r *Registry) impossibilityWitness(rawStep [][]uint64, isValidState []bool,
 // Independent pairs declared on the registry afterwards do not reach it (the registry itself is
 // then re-checked by Build or Synthesize).
 //
-// It returns nil unless the verified table oracle certified the machine's tables
-// (Assurance is AssuranceOracleTables), which SynthesizeWith requires.
+// It returns nil unless SynthesizeWith found a convergent compensation and the verified
+// table oracle certified its tables. It decides from what SynthesizeWith recorded, so
+// changing the exported Convergent or Assurance fields does not change its result.
 func (s *Synthesis) Machine() *Machine {
-	if !s.Convergent || s.Assurance != AssuranceOracleTables {
+	if !s.certified {
 		return nil
 	}
 	return s.machine()
