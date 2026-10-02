@@ -15,7 +15,7 @@ What if distributed systems don't have to coordinate - because they agree on the
 
 The convergence theorem itself is **machine-checked**: an axiom-free Coq/Rocq proof (`Print Assumptions` reports "Closed under the global context") with CI that gates on it. See the [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq) and the [regime field guide](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIMES.md) for when a governed network converges.
 
-And gsm's own verification is **differentially checked** against that proof: `Machine.WriteConvergenceTables` emits a built machine's tables, and a checker extracted from the Coq development re-certifies, independently of this Go code, that they converge. A bug in gsm's Go verification cannot make a non-convergent machine pass the extracted oracle. See [`coq/extraction`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/extraction).
+And gsm's own verification can be **differentially checked** against that proof: `Machine.WriteConvergenceTables` emits a built machine's tables, and a checker extracted from the Coq development re-certifies, independently of this Go code, that they converge. A bug in gsm's Go verification cannot make a non-convergent machine pass the extracted oracle, but the oracle protects only the machines it is run on: it is a separate step, not part of `Build`. See [`coq/extraction`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/extraction) and [What the extracted oracles check](#what-the-extracted-oracles-check).
 
 CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
@@ -23,79 +23,76 @@ Registries also **federate**: connect independently-governed machines with direc
 
 ## Example: Order Fulfillment
 
-Full example from the paper (see `gsm_test.go`):
+Payment and shipment requests arrive at different replicas in different orders. Every replica must end in the same state, and no order may ship unpaid:
 
+<!-- gocheck: run -->
 ```go
 r := gsm.NewRegistry("order_fulfillment")
 
-status := r.Enum("status", "pending", "paid", "shipped", "cancelled")
+// Facts: each event records one fact and reads nothing else.
 paid := r.Bool("paid")
-inventory := r.Int("inventory", 0, 5)
+shipRequested := r.Bool("ship_requested")
+cancelled := r.Bool("cancelled")
 
-// Invariant: can't ship unpaid orders
-r.Invariant("no_ship_unpaid").
-    Watches(status, paid).
-    Holds(func(s gsm.State) bool {
-        return s.Get(status) != "shipped" || s.GetBool(paid)
-    }).
-    Repair(func(s gsm.State) gsm.State {
-        return s.Set(status, "pending")
-    }).
+// Outcome: derived from the facts by compensation, never written by an event.
+status := r.Enum("status", "open", "shipped", "cancelled")
+
+// The business rule: what the status must be, given the facts.
+outcome := func(s gsm.State) string {
+    switch {
+    case s.GetBool(cancelled):
+        return "cancelled" // cancellation wins, in every order
+    case s.GetBool(paid) && s.GetBool(shipRequested):
+        return "shipped" // ship only once paid
+    default:
+        return "open"
+    }
+}
+
+r.Invariant("status_matches_facts").
+    Watches(paid, shipRequested, cancelled, status).
+    Holds(func(s gsm.State) bool { return s.Get(status) == outcome(s) }).
+    Repair(func(s gsm.State) gsm.State { return s.Set(status, outcome(s)) }).
     Add()
 
-// Invariant: inventory can't go negative
-r.Invariant("stock_non_negative").
-    Watches(inventory).
-    Holds(func(s gsm.State) bool {
-        return s.GetInt(inventory) >= 0
-    }).
-    Repair(func(s gsm.State) gsm.State {
-        return s.SetInt(inventory, 0)
-    }).
-    Add()
+r.Event("process_payment").Writes(paid).
+    Apply(func(s gsm.State) gsm.State { return s.SetBool(paid, true) }).Add()
+r.Event("request_shipment").Writes(shipRequested).
+    Apply(func(s gsm.State) gsm.State { return s.SetBool(shipRequested, true) }).Add()
+r.Event("cancel_order").Writes(cancelled).
+    Apply(func(s gsm.State) gsm.State { return s.SetBool(cancelled, true) }).Add()
 
-r.Event("process_payment").
-    Writes(status, paid).
-    Guard(func(s gsm.State) bool {
-        return s.Get(status) == "pending"
-    }).
-    Apply(func(s gsm.State) gsm.State {
-        return s.Set(status, "paid").SetBool(paid, true)
-    }).
-    Add()
-
-r.Event("ship_item").
-    Writes(status, inventory).
-    Guard(func(s gsm.State) bool {
-        return s.Get(status) == "paid" && s.GetInt(inventory) > 0
-    }).
-    Apply(func(s gsm.State) gsm.State {
-        return s.Set(status, "shipped").SetInt(inventory, s.GetInt(inventory)-1)
-    }).
-    Add()
-
-r.Event("restock").
-    Writes(inventory).
-    Apply(func(s gsm.State) gsm.State {
-        return s.SetInt(inventory, s.GetInt(inventory)+1)
-    }).
-    Add()
-
-// Only check independent pairs (restock comes from different source)
-r.Independent("process_payment", "restock")
-r.Independent("ship_item", "restock")
-
-machine, report, err := r.Build() // Verifies convergence
+machine, report, err := r.Build() // verifies that every ordering converges
 if err != nil {
     panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
 }
 
-// Runtime: O(1) table lookup, no compensation logic runs
-s := machine.NewState()
-s = machine.Apply(s, "ship_item")       // Arrives before payment
-s = machine.Apply(s, "process_payment") // Arrives after shipment
-// Compensation fired automatically - converges to valid state
+// Replica A sees the shipment request first; the order stays open until payment.
+a := machine.NewState()
+a = machine.Apply(a, "request_shipment") // status=open
+a = machine.Apply(a, "process_payment")  // status=shipped: compensation derives it
+
+// Replica B sees the same events in the other order.
+b := machine.NewState()
+b = machine.Apply(b, "process_payment")
+b = machine.Apply(b, "request_shipment")
+
+fmt.Println(a.Get(status), b.Get(status), a.ID() == b.ID()) // shipped shipped true
 ```
+
+The shape to copy: **events record facts; invariants derive outcomes.** Each event writes one variable and reads nothing else, so nothing an event does depends on what arrived before it. The order's status is never set by an event: the invariant recomputes it from the facts, and compensation applies it after every event.
+
+**Why not guard the shipment on payment?** The natural first draft ships only when the order is already paid:
+
+<!-- gocheck: check registry -->
+```go
+r.Event("ship").Writes(status).
+    Guard(func(s gsm.State) bool { return s.GetBool(paid) }). // reads another event's write
+    Apply(func(s gsm.State) gsm.State { return s.Set(status, "shipped") }).
+    Add()
+```
+
+A replica that sees `ship` before `pay` drops the shipment (the guard is false), and one that sees `pay` first ships, so the two never agree. `Build` rejects that machine with the two orderings as a counterexample. A guard that reads a variable another event writes is the most common way to lose convergence; record the request as a fact instead and let an invariant decide.
 
 > **New to convergent systems?** See [CONCEPTS.md](CONCEPTS.md) for foundational definitions, theory explanations, and a glossary mapping paper terms to code.
 >
@@ -130,7 +127,7 @@ When you call `registry.Build()`:
 2. **Compute normal forms** - For every state, apply compensation until valid
 3. **Verify WFC** - Compensation terminates and reaches valid states
 4. **Build step table** - For every (event, state) pair, precompute the normal form after applying the event
-5. **Verify CC** - Different event orderings reach the same normal form (with footprint optimization)
+5. **Verify CC** - For every independent event pair and every valid state, both orderings reach the same normal form (two step-table lookups per state; no pair is skipped)
 
 If verification passes, you get an immutable `Machine` with precomputed lookup tables.
 
@@ -141,8 +138,9 @@ If verification fails, you get a detailed report showing:
 
 ### Runtime (O(1) Execution)
 
+<!-- gocheck: check machine -->
 ```go
-machine.Apply(state, "ship_item")
+machine.Apply(state, "request_shipment")
 ```
 
 This does **one table lookup**: `step[event_index][state_id]` returns the precomputed normal form.
@@ -191,6 +189,7 @@ Events can arrive **in any order**. The library verifies that different ordering
 
 By default, gsm checks **all event pairs** for commutativity. For large systems, you can optimize by declaring which pairs are independent:
 
+<!-- gocheck: check registry -->
 ```go
 // Calling Independent() automatically switches to declared-only mode
 r.Independent("deposit", "send_notification")
@@ -199,22 +198,24 @@ r.Independent("withdraw", "send_notification")
 
 **Independent events** can arrive in either order (they're not causally related). Only declared pairs will be checked for commutativity.
 
-**Tip**: Events with disjoint `Writes()` sets and non-overlapping invariant footprints are automatically proved commutative via footprint analysis (no exhaustive checking needed).
+`Build` checks every declared pair exactly, whatever the pair's footprints. Two events that write different variables can still fail to commute: a guard or effect may read a variable the other event writes (see [Why not guard the shipment on payment?](#example-order-fulfillment)). Only `BuildCompositional` skips pairs by footprint, and only after it has checked what each event reads (see [Compositional Verification](#compositional-verification)).
 
 ### Declarative rules (combinators)
 
 Rules can also be written from a fixed, gsm-owned vocabulary instead of Go closures. It still reads as Go, but produces an expression tree gsm can both evaluate and analyze:
 
+<!-- gocheck: check registry -->
 ```go
 a := r.Int("a", 0, 5)
 r.DeclInvariant("a_cap", Le(V(a), Lit(3)), Do(Set(a, Lit(3)))) // holds when a<=3; repair sets a=3
 r.DeclEvent("inc_a", Do(Set(a, Add(V(a), Lit(1)))))            // a := a + 1
 ```
 
-The footprint is **derived** from the tree (the variables it reads and writes), so combinator rules are footprint-conformant by construction: no `Watches`/`Writes` to declare, and nothing to mis-declare. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits.
+The footprint is **derived** from the tree: an invariant's footprint is every variable its predicate and repair mention, and an event's write set is the variables it assigns. Nothing is declared by hand, so nothing can be mis-declared, and `BuildCompositional` checks an event's reads (its guard and the expressions it assigns) against its write set exactly, from the tree. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits.
 
 These combinators are the **analyzable core**: primitives we serialize (`Registry.WriteMachineAST`) and hand to the machine-checked oracle. On top of them sits an ergonomic layer that lowers to the exact same AST, so it adds nothing the verifier must learn:
 
+<!-- gocheck: check registry -->
 ```go
 r.Rule("a_cap").Require(AtMost(a, 3)).RepairWith(SetTo(a, 3)).Add()
 r.On("inc_a").Does(Inc(a)).Add()
@@ -232,6 +233,7 @@ Either spelling can be cross-checked against the verified **rules oracle**: `Wri
 
 ### Using Machines
 
+<!-- gocheck: check machine -->
 ```go
 // Create initial state (all variables at min/first value)
 s := machine.NewState()
@@ -254,6 +256,7 @@ events := machine.Events() // ["increment", "enable", "disable"]
 
 ### Reading State
 
+<!-- gocheck: check machine -->
 ```go
 // Enum variables
 status := s.Get(statusVar)           // returns string
@@ -267,6 +270,7 @@ count := s.GetInt(countVar)          // returns int (adjusted for min offset)
 
 ### Writing State
 
+<!-- gocheck: check machine -->
 ```go
 // Enum (panics if value not in declared set)
 s = s.Set(statusVar, "active")
@@ -282,6 +286,7 @@ s = s.SetInt(countVar, 42)
 
 A single registry governs one machine. Real systems span **multiple** registries with constraints across boundaries. `gsm` composes them into a **federation** connected by directed **morphisms**, and proves the whole network converges - the same build-time guarantee, one level up.
 
+<!-- gocheck: check federation -->
 ```go
 // Two independently-governed registries (events/invariants elided)...
 mfr := gsm.NewRegistry("manufacturer")
@@ -316,9 +321,10 @@ s = m.Apply(s, mfr, "epub") // ...manufacturer acts; morphism repair re-derives 
 
 **Multi-source targets.** When a target has *two* sources, the authority argument doesn't pick a winner — so the target declares a `Resolver` that deterministically merges its sources (priority, AND/OR, most-restrictive, etc.), relaxing the tree requirement to any acyclic DAG:
 
+<!-- gocheck: check federation -->
 ```go
-fed.Morphism(hr, door).Shared(access).Map(...).Add().
-    Morphism(security, door).Shared(access).Map(...).Add().
+fed.Morphism(hr, door).Shared(access).Map(hrToDoor).Add().
+    Morphism(security, door).Shared(access).Map(securityToDoor).Add().
     Resolve(door, func(dst gsm.State, src map[string]gsm.State) gsm.State {
         if src["hr"].GetBool(employed) && src["security"].GetBool(cleared) {
             return dst.Set(access, "granted") // AND: both sources must agree
@@ -335,6 +341,7 @@ Multi-source convergence is the paper's **Federated Convergence with Resolution*
 
 **Compositional construction.** A verified sub-federation embeds into a larger one with `Federation.Embed`: define and verify a subsystem on its own, then reuse it as a unit and connect it with more morphisms. The composed federation runs as the flat convergent machine (a `FedState` holds one `State` per component, so no product state space is materialized). This realizes the paper's compositional-collapse result — a convergent sub-federation collapses to an effective registry — enabling modular, hierarchical verification and black-box reuse of subsystems.
 
+<!-- gocheck: check federation -->
 ```go
 sub := gsm.NewFederation("pricing").Morphism(pricing, catalog)./* ... */Add()
 sub.Build() // verify the subsystem on its own
@@ -347,6 +354,7 @@ m, _, _ := gsm.NewFederation("storefront").
 
 **Certificate-based reuse.** A verified sub-federation can be packaged as a `Certificate` and reused without re-verifying its internals. `sub.Certify()` builds and verifies the subsystem and returns a certificate carrying the verdict, each morphism and resolver in extensional table form (reified from the finite, source-determined maps), and a tamper-complete digest over both the component policies and those tables. `EmbedCertified(sub, cert)` embeds it on that certificate: `Build` checks only the seam (the boundary morphisms) plus the whole-graph acyclicity, skipping the per-component convergence re-enumeration and the internal-morphism re-verification. A consumer that receives a certificate re-checks it independently with `cert.Verify(components)`, which re-derives validity preservation (M1/R2) from the tables rather than the producer's morphism closures, so a composition is confirmed without trusting the producer's code. An outer morphism may read a certified subsystem, or write one of its declared **input ports** (shared variables the sub leaves free): declare them at `Certify(gsm.Port{Registry: r, Var: v})`, and `Build` verifies each inbound boundary morphism at the seam (M1/R2) while still skipping the subsystem's internals. A write to any other (sealed) variable is rejected. See [CERTIFICATE-DESIGN.md](CERTIFICATE-DESIGN.md).
 
+<!-- gocheck: check federation -->
 ```go
 cert, _ := sub.Certify() // verify once; package the verdict + morphism tables + digest
 
@@ -370,6 +378,7 @@ variables, but each invariant and event touches only a few of them.
 - The machine decomposes into independent groups of variables (invariants and events with
   disjoint footprints), each group small on its own.
 
+<!-- gocheck: check registry -->
 ```go
 m, rep, err := r.BuildCompositional()
 // rep.Components          -> number of independent footprint components
@@ -377,16 +386,29 @@ m, rep, err := r.BuildCompositional()
 // rep.FootprintChecked    -> footprint conformance held
 ```
 
-**How it works.** gsm partitions the variables into footprint-connected components (union-find),
-verifies WFC and CC over each component's own subspace, and skips cross-component event pairs
-because disjoint footprints commute by structure. Certification cost is exponential in the
-*largest component*, not the whole machine, so a registry of many independent small invariants
-certifies even when its global state space is astronomically large.
+**How it works.** gsm partitions the variables into footprint-connected components (union-find
+over invariant footprints and event write sets), checks that every rule reads and writes only its
+declared footprint, verifies WFC and CC over each component's own subspace, and skips
+cross-component event pairs, which commute because they read and write disjoint variables.
+Certification cost is exponential in the *largest component*, not the whole machine, so a registry
+of many independent small invariants certifies even when its global state space is astronomically
+large.
+
+**What the footprint check proves.** An event's guard and effect may read only the variables the
+event writes; an invariant's check and repair only its `Watches` set. A rule that reads anything
+else (like the guarded `ship` above) is rejected with a footprint violation naming the variable.
+For combinator rules the check is syntactic and exact. A closure is opaque, so gsm tests it: from
+every state of its component, it changes each outside variable, and each pair of outside
+variables, to every other value and confirms the closure's result does not change. That catches
+dependence on one or two outside variables (such as `paid && inStock`), but not a closure that
+depends only on three or more outside variables jointly. If your rules are closures with
+wide guards, use `Build` (exact, no footprint assumption) or the combinator vocabulary.
 
 **Trade-offs.** The returned `Machine` is *lazy*: it computes `Apply`/`Normalize` at runtime from
 the rules instead of via a precomputed table lookup, and `Export` is unavailable (there are no
 global tables to serialize). Preconditions: every invariant declares its footprint and every
-event its write set (both automatic with the combinator vocabulary), and the zero state is valid.
+event its write set (both automatic with the combinator vocabulary), every event reads only what
+it writes, the zero state is valid, and the machine fits in 64 bits of state.
 
 ## Verification Report
 
@@ -394,33 +416,66 @@ The `Report` returned by `Build()` shows:
 
 ```
 Machine: order_fulfillment
-  Variables: 3
-  States: 48
-  Events: 5
+  Variables: 4
+  States: 24
+  Events: 3
 
   WFC: PASS (max repair depth: 1)
-  CC (Compensation Commutativity): PASS (3 pairs: 3 disjoint, 0 brute-force)
+  CC (Compensation Commutativity): PASS (3 pairs: 0 disjoint, 3 brute-force)
 
   Convergence: GUARANTEED
 ```
 
 **WFC (Well-Founded Compensation)**: Compensation terminates from every state. The report shows the maximum number of repair steps needed.
 
-**CC (Compensation Commutativity)**: Different event orderings converge to the same normal form. The report shows:
-- **Disjoint pairs** - Proved by footprint analysis (no exhaustive check needed)
-- **Brute-force pairs** - Checked by testing all states
+**CC (Compensation Commutativity)**: For every independent pair of events, both orderings reach the same normal form from every valid state (and from the zero state `NewState` returns). The report shows:
+- **Disjoint pairs** - Skipped because the two events lie in different footprint components, after the footprint check (`BuildCompositional` only; always 0 for `Build`)
+- **Brute-force pairs** - Checked exhaustively, state by state
 
-If verification fails, you get a counterexample:
+If verification fails, you get a counterexample. For the guarded-shipment draft above, reduced to two flags:
 
 ```
 CC (Compensation Commutativity): FAIL
-  Events: (grant_read, grant_write)
-  State:  {can_read=false, can_write=false}
-  grant_read→grant_write: {can_read=true, can_write=true}
-  grant_write→grant_read: {can_read=true, can_write=false}
+  Events: (pay, ship)
+  State:  {paid=false, shipped=false}
+  pay→ship: {paid=true, shipped=true}
+  ship→pay: {paid=true, shipped=false}
 ```
 
 This shows the exact state and event pair where CC fails, plus the divergent traces.
+
+A `BuildCompositional` report adds a footprint line. When it rejects a rule for reading outside its footprint, the report names the violation as the cause and shows WFC and CC as not evaluated:
+
+```
+Machine: pay_ship
+  Variables: 2
+  Components: 2
+  Events: 2
+
+  Footprint conformance: FAIL
+    gsm: event "ship" reads variable "paid" outside its declared footprint
+  WFC: not evaluated (footprint violation)
+  CC (Compensation Commutativity): not evaluated (footprint violation)
+```
+
+### What the extracted oracles check
+
+Two checkers extracted from the axiom-free Coq proof can re-certify a machine independently of
+gsm's Go code. Neither runs as part of `Build`; each runs when you invoke it.
+
+- **Table oracle** (`checker`, input from `Machine.WriteConvergenceTables`): checks that every
+  ordered pair of events commutes on every state in the emitted tables, by enumeration, with no
+  footprint shortcut. It trusts that the tables are what the rules compute (gsm produces them from
+  your closures), checks all pairs whether or not you declared them `Independent`, and checks
+  every encodable state, including invalid ones a run never reaches. So it can reject a machine
+  `Build` accepts (a stricter check), but it never accepts tables whose events fail to commute.
+  Only `Build` machines have tables.
+- **Rules oracle** (`astchecker`, input from `Registry.WriteMachineAST`): recomputes every event
+  step from the combinator rules and checks that every ordered pair commutes on every valid
+  state, with no footprint shortcut. Closure rules cannot be exported.
+
+Both reject the guarded-shipment machine above. Neither shares the footprint assumption that
+`Build`'s former shortcut relied on.
 
 ## Compensation Synthesis
 
@@ -428,6 +483,7 @@ You don't have to *design* the compensation. Declare the invariants (what "valid
 the events, **omit `Repair`**, and gsm will **generate** a convergent compensation — or prove
 none exists.
 
+<!-- gocheck: check -->
 ```go
 r := gsm.NewRegistry("order")
 // ... variables, invariants (Holds only — no Repair), events ...
@@ -461,6 +517,7 @@ CRDT is a gsm machine), the ceiling by counterexample (the witnessed critical pa
 synthesis returns the **least-invasive** repair (fewest variables changed). Steer it with a
 policy, or get the provably minimum-cost repair:
 
+<!-- gocheck: check registry -->
 ```go
 // bias toward a policy (ordering):
 syn, _ := r.SynthesizeWith(gsm.Prefer(func(from, to gsm.State) int {
@@ -530,6 +587,7 @@ This library verifies: **does your machine satisfy WFC and CC?**
 
 While verification requires Go, **runtime is portable** to any language. Use `Machine.Export()` to serialize the verified machine to JSON:
 
+<!-- gocheck: check machine -->
 ```go
 machine, _, err := registry.Build()
 if err != nil {
@@ -568,7 +626,7 @@ class Machine:
 # Use it
 m = Machine('order.gsm.json')
 s = 0
-s = m.apply(s, 'ship_item')
+s = m.apply(s, 'request_shipment')
 s = m.apply(s, 'process_payment')
 ```
 
@@ -592,7 +650,8 @@ go test -v
 
 Tests cover:
 - WFC verification (termination, cycles, depth)
-- CC verification (disjoint footprints, brute force, failures)
+- CC verification (exhaustive pairs, compositional footprint components, failures), including a property test against brute-force enumeration of orderings
+- Every Go block in the top-level docs (`TestDocSnippets`: blocks marked `run`, like the order-fulfillment example, are executed, so an example whose machine does not Build fails CI)
 - Event order independence
 - Compensation behavior
 - State encoding/decoding

@@ -137,6 +137,7 @@ cycle/monotonicity check, with no re-enumeration of the subsystem's state space.
 
 Additive to the existing `Federation` / `FedMachine`:
 
+<!-- gocheck: excerpt design sketch from before the API was built; see certificate.go for the real one -->
 ```go
 // Certificate is the serializable verdict for a verified (sub-)federation.
 type Certificate struct { /* identity, verdict, ports, parametric attestation, tags, oracle digests */ }

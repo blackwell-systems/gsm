@@ -51,6 +51,7 @@ Each box is a registry: its own variables, its own events, its own invariants, i
 
 In gsm you build this with `NewFederation`, then add the registries and the arrows:
 
+<!-- gocheck: check federation -->
 ```go
 fed := gsm.NewFederation("pipeline")
 fed.Morphism(inventory, fulfillment)./* ... */Add()
@@ -68,6 +69,7 @@ An arrow is called a **morphism**. Read `src → dst` as: *the source is the aut
 
 A concrete instance, straight from gsm's test suite (`federation_test.go`): a manufacturer registry is authoritative over a supplier's listing status.
 
+<!-- gocheck: check federation -->
 ```go
 // The manufacturer's status fixes the supplier's listing.
 image := map[string]string{"draft": "idle", "active": "listed", "suspended": "stale"}
@@ -160,6 +162,7 @@ If walking the loop leaves the shared values unchanged, the loop is **consistent
 
 Two registries, each with one variable holding 0 or 1. A copies its value to B; B copies its value straight back to A. (This is `TestDiagnoseCycle_IdentitySettles`.)
 
+<!-- gocheck: check federation -->
 ```go
 fed.Morphism(a, b).Shared(fb).Map(func(s, d State) State { return d.SetInt(fb, s.GetInt(fa)) }).Add().
     Morphism(b, a).Shared(fa).Map(func(s, d State) State { return d.SetInt(fa, s.GetInt(fb)) }).Add()
@@ -180,6 +183,7 @@ Nothing moved. `fa=0, fb=0` is a fixed point. Walking the loop returns you exact
 
 Same two registries, but now B copies back the **negation** of A's value. (This is `TestDiagnoseCycle_NegationOrbit`.)
 
+<!-- gocheck: check federation -->
 ```go
 fed.Morphism(a, b).Shared(fb).Map(func(s, d State) State { return d.SetInt(fb, s.GetInt(fa)) }).Add().
     Morphism(b, a).Shared(fa).Map(func(s, d State) State { return d.SetInt(fa, 1-s.GetInt(fb)) }).Add()
@@ -204,6 +208,7 @@ Walking the loop never returns you to a stable point. The composite around the l
 
 gsm has this walk built in. `Federation.DiagnoseCycle` finds a directed cycle in your network, then iterates the loop's repair from the zero seed on a finite space (so it must either settle or repeat), and reports which:
 
+<!-- gocheck: check federation -->
 ```go
 d, err := fed.DiagnoseCycle()
 if d != nil {

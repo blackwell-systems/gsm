@@ -59,6 +59,7 @@ The **state space** is the set of all possible states your system can be in.
 
 In `gsm`, states are defined by **finite-domain variables**:
 
+<!-- gocheck: check registry -->
 ```go
 status := r.Enum("status", "pending", "paid", "shipped")  // 3 values
 paid := r.Bool("paid")                                     // 2 values
@@ -100,6 +101,7 @@ NF = {status=pending, paid=false}
 
 **In code**: The `nf` table precomputes normal forms for every state:
 
+<!-- gocheck: excerpt an entry of the internal normal-form table -->
 ```go
 nf[4] = 0  // State 4 (shipped, unpaid) → State 0 (pending, unpaid)
 ```
@@ -120,6 +122,7 @@ An **invariant** has three parts:
 2. **Check** (via `Holds`): Boolean predicate that must be true
 3. **Repair** (via `Repair`): Function to restore validity
 
+<!-- gocheck: check registry -->
 ```go
 r.Invariant("no_overdraft").
     Watches(balance).             // Footprint: {balance}
@@ -212,6 +215,7 @@ WFC ensures this never happens.
 
 #### Example: WFC Violation
 
+<!-- gocheck: check registry -->
 ```go
 r.Invariant("force_even").
     Watches(x).
@@ -281,27 +285,54 @@ Order 2: pay  → {paid, true}
 Different finals! CC fails.
 ```
 
-To fix: Ensure the `ship` event guards on payment:
+A tempting fix is to guard `ship` on payment. It does not work:
 
+<!-- gocheck: check registry -->
 ```go
-r.Event("ship").
+r.Event("ship").Writes(status).
     Guard(func(s State) bool {
-        return s.GetBool(paid)  // Only ship if paid
+        return s.GetBool(paid) // reads a variable another event writes
     }).
-    ...
+    Apply(func(s State) State { return s.Set(status, "shipped") }).
+    Add()
 ```
 
-Now both orders converge to `{shipped, true}`.
+```
+Order 1: ship → guard false, no-op → {pending, false}
+         pay  → {paid, true}
+         Final: {paid, true}
 
-#### Optimization: Disjoint Footprints
+Order 2: pay  → {paid, true}
+         ship → {shipped, true}
+         Final: {shipped, true}
+```
 
-If two events have **disjoint footprints** (no shared variables, no shared invariant footprints), CC is automatically satisfied without exhaustive checking:
+Still two finals: a guard that reads another event's write makes the event's effect depend on
+what arrived first. The fix that converges is to make each event record a fact that reads nothing
+else (`pay` sets `paid`, `request_ship` sets `ship_requested`) and let an invariant derive the
+status from the facts (`shipped` exactly when paid and requested). Both orders then end in the
+same state, because the status is recomputed from the same facts. The README's
+[order fulfillment example](README.md#example-order-fulfillment) is this machine in full.
 
+#### Disjoint Footprints
+
+Two events that write different variables do **not** automatically commute: the guard above
+reads `paid`, which `pay` writes, so `ship` and `pay` touch disjoint write sets and still diverge.
+Commutation by disjointness needs every event to *read* only its own footprint as well.
+
+- `Build` therefore checks every independent pair exhaustively; it never skips a pair by footprint.
+- `BuildCompositional` skips pairs whose events lie in different footprint components, but only
+  after checking that every rule reads and writes only its declared footprint, and it rejects the
+  guarded `ship` above with a footprint violation naming `paid`.
+
+<!-- gocheck: check registry -->
 ```go
-r.Event("deposit").Writes(balance)      // Footprint: {balance}
-r.Event("send_email").Writes(notified)  // Footprint: {notified}
-
-// Disjoint footprints → automatically commutative
+r.Event("deposit").Writes(balance).    // reads and writes only balance
+    Apply(func(s State) State { return s.SetInt(balance, s.GetInt(balance)+1) }).Add()
+r.Event("send_email").Writes(notified). // reads and writes only notified
+    Apply(func(s State) State { return s.SetBool(notified, true) }).Add()
+// Different components, and neither reads the other's variable: BuildCompositional
+// can skip this pair. Build checks it anyway (it is cheap from the step tables).
 ```
 
 #### In the Report
@@ -312,8 +343,8 @@ CC (Compensation Commutativity): PASS (10 pairs: 7 disjoint, 3 brute-force)
 
 This means:
 - 10 event pairs checked
-- 7 proved by footprint analysis (fast)
-- 3 proved by exhaustive state checking (slower)
+- 7 skipped because the events lie in different footprint components, after the footprint check (`BuildCompositional` only; `Build` always reports 0 disjoint)
+- 3 checked exhaustively, state by state
 
 ---
 
@@ -453,6 +484,7 @@ Rules can be written at two levels, and both lower to the *same* underlying expr
 
 **Sugar layer (for humans):**
 
+<!-- gocheck: check registry -->
 ```go
 r.Rule("a_cap").Require(AtMost(a, 3)).RepairWith(SetTo(a, 3)).Add()
 r.On("inc_a").Does(Inc(a)).Add()
@@ -460,6 +492,7 @@ r.On("inc_a").Does(Inc(a)).Add()
 
 **Primitive layer (analyzable core):**
 
+<!-- gocheck: check registry -->
 ```go
 r.DeclInvariant("a_cap", Le(V(a), Lit(3)), Do(Set(a, Lit(3))))
 r.DeclEvent("inc_a", Do(Set(a, Add(V(a), Lit(1)))))
@@ -501,6 +534,7 @@ This is **compensation commutativity**, not raw operation commutativity (like CR
 
 **False**. Compensation is **precomputed at build time**. The `step` table contains the final result after compensation:
 
+<!-- gocheck: check machine -->
 ```go
 machine.Apply(s, "ship")  // O(1) table lookup: step[ship][s]
 ```
@@ -513,6 +547,7 @@ No repair functions execute at runtime. Everything is baked into lookup tables d
 
 **False**. By default, `gsm` checks all pairs. But you can use `OnlyDeclaredPairs()` to check only specific pairs:
 
+<!-- gocheck: check registry -->
 ```go
 r.OnlyDeclaredPairs()
 r.Independent("deposit", "notify")  // These two can happen in either order
