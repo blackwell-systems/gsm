@@ -489,7 +489,13 @@ func (s *Synthesis) Machine() *Machine {
 	if !s.certified {
 		return nil
 	}
-	return s.machine()
+	m := s.machine()
+	// The example-machine gate records the machines handed out, not the
+	// candidate SynthesizeWith builds to certify.
+	if machineObserver != nil {
+		machineObserver("synthesized", s.r, m)
+	}
+	return m
 }
 
 // machine builds the synthesized machine, certified or not.
@@ -498,9 +504,6 @@ func (s *Synthesis) machine() *Machine {
 		dom: newDomainCheck(s.vars), ccPairs: s.ccPairs, allPairs: s.allPairs}
 	for name, i := range s.events {
 		m.events[name] = i
-	}
-	if machineObserver != nil {
-		machineObserver("synthesized", s.r, m)
 	}
 	return m
 }
