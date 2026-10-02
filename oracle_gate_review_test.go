@@ -26,9 +26,9 @@ func padded() *Registry {
 // two, so ids and encodings differ). From the adversarial review.
 func TestOracleTablesRenumberInDomainStates(t *testing.T) {
 	var seen []oracle.Tables
-	withTableOracle(t, func(tb oracle.Tables) (bool, error) {
-		seen = append(seen, tb)
-		return oracle.CheckTables(tb)
+	withTableOracle(t, func(l oracle.Lookup) (bool, error) {
+		seen = append(seen, materialize(l))
+		return oracle.CheckLookup(l)
 	})
 	m, _, err := padded().Build()
 	if err != nil {
@@ -100,7 +100,7 @@ func TestOracleGateConcurrentBuilds(t *testing.T) {
 // From the adversarial review.
 func TestOracleGateCompositionalWithoutRules(t *testing.T) {
 	calls := 0
-	withTableOracle(t, func(tb oracle.Tables) (bool, error) { calls++; return oracle.CheckTables(tb) })
+	withTableOracle(t, func(l oracle.Lookup) (bool, error) { calls++; return oracle.CheckLookup(l) })
 	r := NewRegistry("empty")
 	r.Int("a", 0, 3)
 	m, rep, err := r.BuildCompositional()

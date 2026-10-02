@@ -11,16 +11,16 @@ import (
 )
 
 // withTableOracle replaces the table oracle for one test.
-func withTableOracle(t *testing.T, f func(oracle.Tables) (bool, error)) {
+func withTableOracle(t *testing.T, f func(oracle.Lookup) (bool, error)) {
 	t.Helper()
 	saved := tableOracle
 	tableOracle = f
 	t.Cleanup(func() { tableOracle = saved })
 }
 
-func rejecting(oracle.Tables) (bool, error) { return false, nil }
+func rejecting(oracle.Lookup) (bool, error) { return false, nil }
 
-func failing(oracle.Tables) (bool, error) {
+func failing(oracle.Lookup) (bool, error) {
 	return false, errors.New("oracle: the checker stopped: boom")
 }
 
@@ -86,9 +86,9 @@ func TestBuildIsCertifiedByTheTableOracle(t *testing.T) {
 // writes for the external checker.
 func TestTheGateChecksTheMachinesTables(t *testing.T) {
 	var seen []oracle.Tables
-	withTableOracle(t, func(tb oracle.Tables) (bool, error) {
-		seen = append(seen, tb)
-		return oracle.CheckTables(tb)
+	withTableOracle(t, func(l oracle.Lookup) (bool, error) {
+		seen = append(seen, materialize(l))
+		return oracle.CheckLookup(l)
 	})
 	r := twoCounters()
 	r.Independent("inca", "incb")
@@ -106,6 +106,21 @@ func TestTheGateChecksTheMachinesTables(t *testing.T) {
 	if got := tablesText(seen[0]); got != string(text) {
 		t.Errorf("the oracle saw\n%s\nbut the machine's tables are\n%s", got, text)
 	}
+}
+
+// materialize reads a Lookup's tables into slices.
+func materialize(l oracle.Lookup) oracle.Tables {
+	tb := oracle.Tables{NF: make([]int, l.N), Step: make([][]int, l.NE), Pairs: l.Pairs, AllPairs: l.AllPairs}
+	for k := range tb.NF {
+		tb.NF[k] = l.NF(k)
+	}
+	for e := range tb.Step {
+		tb.Step[e] = make([]int, l.N)
+		for k := range tb.Step[e] {
+			tb.Step[e][k] = l.Step(e, k)
+		}
+	}
+	return tb
 }
 
 // tablesText renders Tables in WriteConvergenceTables' format.
@@ -147,7 +162,7 @@ func assertFailedClosed(t *testing.T, what string, m *Machine, err error) {
 }
 
 func TestBuildFailsClosedWhenTheOracleRejects(t *testing.T) {
-	for name, f := range map[string]func(oracle.Tables) (bool, error){"rejects": rejecting, "errors": failing} {
+	for name, f := range map[string]func(oracle.Lookup) (bool, error){"rejects": rejecting, "errors": failing} {
 		withTableOracle(t, f)
 		m, rep, err := capCounter().Build()
 		assertFailedClosed(t, "Build, oracle "+name, m, err)
@@ -212,9 +227,9 @@ func TestSynthesisMachineNeedsTheOracle(t *testing.T) {
 
 func TestBuildCompositionalIsCertifiedPerComponent(t *testing.T) {
 	var calls int
-	withTableOracle(t, func(tb oracle.Tables) (bool, error) {
+	withTableOracle(t, func(l oracle.Lookup) (bool, error) {
 		calls++
-		return oracle.CheckTables(tb)
+		return oracle.CheckLookup(l)
 	})
 	r := twoCounters()
 	m, rep, err := r.BuildCompositional()
@@ -241,9 +256,9 @@ func TestBuildCompositionalIsCertifiedPerComponent(t *testing.T) {
 // pairs local to it.
 func TestComponentTables(t *testing.T) {
 	var seen []oracle.Tables
-	withTableOracle(t, func(tb oracle.Tables) (bool, error) {
-		seen = append(seen, tb)
-		return oracle.CheckTables(tb)
+	withTableOracle(t, func(l oracle.Lookup) (bool, error) {
+		seen = append(seen, materialize(l))
+		return oracle.CheckLookup(l)
 	})
 	r := NewRegistry("comp")
 	a := r.Int("a", 0, 3)
