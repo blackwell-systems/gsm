@@ -30,13 +30,13 @@ var makers = map[string]map[string]bool{
 	"Synthesis":  {"Machine": true},
 }
 
-// inputs are what lets one run of a program differ from the gate's single run
-// with no arguments: flags, arguments, the environment, standard input, files
-// and the platform. Every object of a package mapped to nil counts. The clock
-// and randomness, and the host name, are not here (bide's core reads them for
-// its own purposes: timestamps, keys, lease owners); the gate catches a machine
-// that depends on them by running each program twice and comparing the
-// machines (gate.CompareRuns).
+// inputs are identifiers through which a program can read input: flags,
+// arguments, the environment, standard input, files and the platform. Every
+// object of a package mapped to nil counts. It is a list, not a proof (the
+// README names what it misses), and an early warning: the gate's canonical runs
+// (runCanonical) are what fix a program's input. The clock, randomness and the
+// host name are not here: bide's core reads them for timestamps, keys and lease
+// owners.
 var inputs = map[string]map[string]bool{
 	"flag":    nil,
 	"os":      {"Args": true, "Getenv": true, "LookupEnv": true, "Environ": true, "ExpandEnv": true, "Stdin": true, "ReadFile": true, "Open": true, "OpenFile": true, "ReadDir": true, "DirFS": true, "Getwd": true},
