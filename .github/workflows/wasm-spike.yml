@@ -122,11 +122,17 @@ jobs:
     - name: Compare
       run: |
         ls -R v
-        ref=v/verdicts-ubuntu-latest/wasm-cases.tsv
-        wc -l "$ref"
+        # ubuntu-latest also runs the native oracle tests, so it sees more
+        # cases; every other host's lines must all appear in its file (a case
+        # with a different exit code or output would be a line it lacks).
+        sort -u v/verdicts-ubuntu-latest/wasm-cases.tsv > ref.s
+        wc -l ref.s
         rc=0
         for f in v/*/wasm-cases.tsv; do
-          if cmp -s "$ref" "$f"; then echo "same: $f"; else echo "DIFFERENT: $f"; diff "$ref" "$f" | head -20; rc=1; fi
+          sort -u "$f" > h.s
+          extra=$(comm -13 ref.s h.s | wc -l)
+          echo "$f: $(wc -l < h.s) runs, $extra not in ubuntu-latest"
+          if [ "$extra" -ne 0 ]; then comm -13 ref.s h.s | head -20; rc=1; fi
         done
         exit $rc
 
@@ -138,7 +144,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
     - uses: actions/checkout@v4
     - uses: actions/download-artifact@v4
@@ -162,15 +168,15 @@ jobs:
       shell: bash
       run: |
         now() { python3 -c 'import time; print(time.time())'; }
-        t() { local s; s=$(now); "$@" > out.txt 2>&1; local rc=$?; local e; e=$(now); echo "$(python3 -c "print(round($e-$s,1))")s exit=$rc :: $* :: $(head -c 200 out.txt | tr '\n' ' ')"; }
+        t() { local s; s=$(now); local rc=0; "$@" > out.txt 2>&1 || rc=$?; local e; e=$(now); echo "$(python3 -c "print(round($e-$s,1))")s exit=$rc :: $* :: $(head -c 200 out.txt | tr '\n' ' ')"; }
         {
           for f in big.tables big-scrambled.tables; do
             if [ "${{ matrix.os }}" = ubuntu-latest ]; then
               t art/native/checker_fast $f
               t art/native/checker $f
             fi
-            t ./runner checker_fast $f
+            RUNNER_TIMEOUT=50m t ./runner checker_fast $f
           done
-          RUNNER_TIMEOUT=25m t ./runner checker big.tables
+          if [ "${{ matrix.os }}" = ubuntu-latest ]; then RUNNER_TIMEOUT=25m t ./runner checker big.tables; fi
         } | tee timings.txt
         { echo '### worst case (${{ matrix.os }})'; echo '```'; cat timings.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

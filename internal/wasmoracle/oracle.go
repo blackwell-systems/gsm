@@ -50,6 +50,8 @@ func Digest(name string) string {
 type Result struct {
 	Exit           int
 	Stdout, Stderr []byte
+	// MemBytes is the size of the module's linear memory when it exited.
+	MemBytes uint64
 }
 
 type engine struct {
@@ -116,11 +118,17 @@ func Run(ctx context.Context, name string, files ...[]byte) (Result, error) {
 	mc := wazero.NewModuleConfig().WithName("").WithArgs(args...).
 		WithStdout(&stdout).WithStderr(&stderr).
 		WithFSConfig(wazero.NewFSConfig().WithFSMount(mfs, "/in"))
+	var mem uint64
+	mc = mc.WithStartFunctions()
 	mod, err := e.rt.InstantiateModule(ctx, cm, mc)
-	if mod != nil {
+	if err == nil {
+		_, err = mod.ExportedFunction("_start").Call(ctx)
+		if m := mod.Memory(); m != nil {
+			mem = uint64(m.Size())
+		}
 		_ = mod.Close(ctx)
 	}
-	res := Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
+	res := Result{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), MemBytes: mem}
 	if err == nil {
 		return res, nil
 	}

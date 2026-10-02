@@ -49,6 +49,6 @@ func main() {
 		}
 		os.Exit(99)
 	}
-	fmt.Fprintf(os.Stderr, "wasm %s: compile %v, run %v, exit %d\n", os.Args[1], compile.Round(time.Millisecond), run.Round(time.Millisecond), res.Exit)
+	fmt.Fprintf(os.Stderr, "wasm %s: compile %v, run %v, exit %d, linear memory %d MiB\n", os.Args[1], compile.Round(time.Millisecond), run.Round(time.Millisecond), res.Exit, res.MemBytes>>20)
 	os.Exit(res.Exit)
 }
