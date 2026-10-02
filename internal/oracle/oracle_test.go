@@ -145,24 +145,26 @@ func bitTables(k int) Tables {
 	return Tables{NF: identity(n), Step: step, AllPairs: true}
 }
 
-// The checker reads the tables in place: at gsm's largest machines (2^20
-// states, 20 events) it must not copy them. Held as the checker's lists they
-// would take about 480 MB (24 B per entry); the tables themselves are 160 MB.
+// The checker reads the tables in place: it must not copy them. Held as the
+// checker's lists they would take 24 B per entry: on 2^16 states and 16
+// events (sized so the test stays fast under -race, as CI runs it), the list
+// oracle allocated about 230 MiB; at gsm's largest machines (2^20 states, 20
+// events) it allocated 4569 MiB.
 func TestCheckTablesDoesNotCopyTheTables(t *testing.T) {
 	if testing.Short() {
-		t.Skip("2^20 states")
+		t.Skip("2^16 states")
 	}
-	tb := bitTables(20)
+	tb := bitTables(16)
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 	ok, err := CheckTables(tb)
 	runtime.ReadMemStats(&after)
 	if err != nil || !ok {
-		t.Fatalf("CheckTables(bitTables(20)) = %v, %v; want true, nil", ok, err)
+		t.Fatalf("CheckTables(bitTables(16)) = %v, %v; want true, nil", ok, err)
 	}
 	t.Logf("CheckTables allocated %d MiB", (after.TotalAlloc-before.TotalAlloc)>>20)
-	const budget = 64 << 20
+	const budget = 8 << 20
 	if got := after.TotalAlloc - before.TotalAlloc; got > budget {
 		t.Fatalf("CheckTables allocated %d MiB; want at most %d MiB", got>>20, budget>>20)
 	}
