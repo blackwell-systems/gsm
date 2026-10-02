@@ -211,3 +211,57 @@ func TestMachineAST_InvalidZeroState(t *testing.T) {
 		}
 	}
 }
+
+// Findings of the stage-1 adversarial review: machines Build handles that the
+// differential test could not compare.
+
+// TestWriteMachineAST_RefusesForeignVar: a Var from another registry with the
+// same name and index is read with that registry's minimum and domain, but the
+// rules format names variables by index only, so it would be exported as this
+// registry's variable: a different machine.
+func TestWriteMachineAST_RefusesForeignVar(t *testing.T) {
+	other := gsm.NewRegistry("other")
+	xo := other.Int("x", 0, 3)
+	r := gsm.NewRegistry("foreign-var")
+	x := r.Int("x", 5, 8)
+	r.DeclEvent("e1", gsm.Do(gsm.Set(xo, gsm.Lit(6))))
+	r.DeclEvent("e2", gsm.Do(gsm.Set(x, gsm.Lit(6))))
+	var b bytes.Buffer
+	if err := r.WriteMachineAST(&b); err == nil {
+		t.Fatalf("WriteMachineAST must refuse a variable from another registry, wrote:\n%s", b.String())
+	}
+}
+
+// TestMachineAST_OutOfRangeIntegers: a literal or minimum beyond 2^31-1 is
+// outside the rules oracle's certified fragment. It must refuse to certify
+// (exit 1, "outside the certified fragment"), not reject the input (exit 2).
+func TestMachineAST_OutOfRangeIntegers(t *testing.T) {
+	lit := gsm.NewRegistry("big-literal")
+	x := lit.Int("x", 0, 3)
+	lit.DeclEvent("e1", gsm.Do(gsm.Set(x, gsm.Lit(3000000000))))
+	min := gsm.NewRegistry("big-minimum")
+	y := min.Int("y", 3000000000, 3000000001)
+	min.DeclEvent("e1", gsm.Do(gsm.Set(y, gsm.V(y))))
+	for _, r := range []*gsm.Registry{lit, min} {
+		if _, rep, err := r.Build(); err != nil {
+			t.Fatalf("build: %v\n%s", err, rep)
+		}
+		code, out := runASTOracle(t, exportAST(t, r), nil)
+		if code != 1 || !strings.Contains(out, "outside the certified fragment") {
+			t.Fatalf("rules oracle must refuse as outside the fragment (exit 1), got %d:\n%s", code, out)
+		}
+	}
+}
+
+// TestWriteMachineAST_EmptyDo: an event with an empty effect is a combinator
+// rule and must export.
+func TestWriteMachineAST_EmptyDo(t *testing.T) {
+	r := gsm.NewRegistry("empty-do")
+	x := r.Bool("x")
+	r.DeclEvent("noop", gsm.Do())
+	r.DeclEvent("set", gsm.Do(gsm.Set(x, gsm.Lit(1))))
+	machine := exportAST(t, r)
+	if code, out := runASTOracle(t, machine, nil); code != 0 {
+		t.Fatalf("rules oracle must accept (exit 0), got %d:\n%s\nmachine:\n%s", code, out, machine)
+	}
+}
