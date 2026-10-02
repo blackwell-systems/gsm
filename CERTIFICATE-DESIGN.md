@@ -137,9 +137,12 @@ certificate asserts is re-derived when it is used:
 
 - `EmbedCertified` re-checks the internal morphisms from the tables (M1/R2, port freeness,
   acyclicity) and rebuilds every certified component with `Build`, which re-checks WFC and CC.
-- `Certificate.Verify` does the same from the consumer's own copies of the component registries.
+- `Certificate.Verify` does the same from the consumer's own copies of the component registries,
+  after recomputing the digest from them.
 
-The recorded verdict (`Certificate.Report`) is informational. This is what makes a verifier fix
+The recorded verdict (`Certificate.Report`) is informational. These re-checks are gsm's Go code:
+they remove trust in stored results, not in the Go verifier. An extracted federation oracle and a
+runtime gate that runs extracted checkers on every success path are planned separately. This is what makes a verifier fix
 safe without a version bump: a certificate issued by an older, weaker verifier is re-checked by the
 current one on load. For example, a v0.11.0 certificate for the naive pay/ship component (certified
 then through Build's unchecked disjointness shortcut) still matches its digest, and both

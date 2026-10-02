@@ -398,9 +398,11 @@ Neither oracle uses a footprint shortcut: both check every ordered pair of event
 both reject the guarded pay/ship machine that `Build`'s former shortcut certified. They differ from
 `Build` in scope: they check all pairs whether or not they were declared `Independent`, and the
 table oracle checks every encodable state in the tables (including invalid states no run reaches),
-so either can reject a machine `Build` correctly accepts. Neither runs as part of `Build`: the
-guarantee they add holds for the machines they are actually run on. Only `Build` machines have
-tables, and only combinator rules serialize.
+so either can reject a machine `Build` correctly accepts. Neither runs as part of `Build` or any
+other entry point: the guarantee they add holds for the machines they are actually run on. gsm's
+test suite runs them on its oracle test machines only when the env vars point at built binaries,
+and gsm's CI does not build them. A runtime gate that runs an extracted checker on every success
+path is planned. Only `Build` machines have tables, and only combinator rules serialize.
 
 If an oracle rejects a machine `Build` accepted, and the failing pair is one `Build` checks on a
 state in `Build`'s domain, one of them has a bug, and the extracted, proof-derived one is the

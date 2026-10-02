@@ -15,7 +15,7 @@ What if distributed systems don't have to coordinate - because they agree on the
 
 The convergence theorem itself is **machine-checked**: an axiom-free Coq/Rocq proof (`Print Assumptions` reports "Closed under the global context") with CI that gates on it. See the [mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq) and the [regime field guide](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIMES.md) for when a governed network converges.
 
-And gsm's own verification can be **differentially checked** against that proof: `Machine.WriteConvergenceTables` emits a built machine's tables, and a checker extracted from the Coq development re-certifies, independently of this Go code, that they converge. A bug in gsm's Go verification cannot make a non-convergent machine pass the extracted oracle, but the oracle protects only the machines it is run on: it is a separate step, not part of `Build`. See [`coq/extraction`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/extraction) and [What the extracted oracles check](#what-the-extracted-oracles-check).
+And gsm's own verification can be **differentially checked** against that proof: `Machine.WriteConvergenceTables` emits a built machine's tables, and a checker extracted from the Coq development re-certifies, independently of this Go code, that they converge. A bug in gsm's Go verification cannot make a non-convergent machine pass the extracted oracle, but the oracle protects only the machines it is run on. Today that means machines someone exports and checks by hand, and the oracle tests in gsm's own test suite when they are pointed at built checker binaries. `Build` does not run the oracle, so a user's machine is protected by gsm's Go verifier alone; a runtime gate that runs an extracted checker on every success path is planned. See [`coq/extraction`](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq/extraction) and [What the extracted oracles check](#what-the-extracted-oracles-check).
 
 CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
@@ -461,7 +461,13 @@ Machine: pay_ship
 ### What the extracted oracles check
 
 Two checkers extracted from the axiom-free Coq proof can re-certify a machine independently of
-gsm's Go code. Neither runs as part of `Build`; each runs when you invoke it.
+gsm's Go code. Neither runs as part of `Build` or any other gsm entry point: each runs only when
+someone invokes it on an exported machine. gsm's test suite invokes them on its oracle test
+machines (`oracle_test.go`, `astoracle_test.go`) when `GSM_CONVERGENCE_CHECKER` /
+`GSM_AST_CHECKER` point at the built binaries; gsm's CI does not build them, so CI skips those
+tests. A runtime gate that runs an extracted checker on every success path is planned (it needs
+the checker specs aligned with `Build`'s declared pairs and valid-state domain, and a way to run
+extracted code in-process).
 
 - **Table oracle** (`checker`, input from `Machine.WriteConvergenceTables`): checks that every
   ordered pair of events commutes on every state in the emitted tables, by enumeration, with no
@@ -476,6 +482,16 @@ gsm's Go code. Neither runs as part of `Build`; each runs when you invoke it.
 
 Both reject the guarded-shipment machine above. Neither shares the footprint assumption that
 `Build`'s former shortcut relied on.
+
+**What gsm recomputes itself.** Independently of the oracles, gsm does not trust a stored
+verdict. `Certificate.Verify` recomputes the certificate digest from the consumer's registries,
+re-derives validity preservation (M1/R2), input-port freeness, and acyclicity from the
+certificate's morphism tables, and rebuilds every component with `Build` (WFC and CC). When
+`Build` runs on a federation containing `EmbedCertified` subsystems, it recomputes the digest,
+re-derives M1/R2, port freeness, and acyclicity from the tables for the internal morphisms, and
+rebuilds every certified component with `Build`; it skips only re-verifying the internal
+morphisms from their closures. The certificate's recorded `Report` is never used for a decision.
+All of this is gsm's Go code: it removes trust in stored results, not in the Go verifier.
 
 ## Compensation Synthesis
 
