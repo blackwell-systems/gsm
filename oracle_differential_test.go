@@ -39,6 +39,7 @@ const (
 )
 
 type diffCase struct {
+	reg       *Registry // for the wasm spike's Build timing (wasm_spike_test.go)
 	name      string
 	goOK      bool
 	goErr     string
@@ -65,7 +66,7 @@ var (
 func init() { buildObserver = recordBuild }
 
 func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
-	c := &diffCase{name: r.name, goOK: err == nil, allPairs: r.allIndependent}
+	c := &diffCase{reg: r, name: r.name, goOK: err == nil, allPairs: r.allIndependent}
 	if err != nil {
 		c.goErr = err.Error()
 	}
@@ -220,10 +221,22 @@ func firstLine(s string) string {
 	return s
 }
 
+// wasmSpikeHook, when set (wasm_spike_test.go, -tags wasmspike), runs after the
+// differential cross-check on the same cases.
+var wasmSpikeHook func(cases []*diffCase) int
+
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if dcode := runDifferential(); dcode != 0 && code == 0 {
 		code = dcode
+	}
+	if wasmSpikeHook != nil {
+		diffMu.Lock()
+		cases := append([]*diffCase(nil), diffCases...)
+		diffMu.Unlock()
+		if wcode := wasmSpikeHook(cases); wcode != 0 && code == 0 {
+			code = wcode
+		}
 	}
 	os.Exit(code)
 }
