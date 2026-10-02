@@ -169,3 +169,38 @@ func TestDuplicateEventName_CertificateAfterTheFact(t *testing.T) {
 	_, _, err = outer.Build()
 	wantDupErr(t, err, "src")
 }
+
+// TestDuplicateVariableName_ProjectionLosesAVariable: a morphism that shares two
+// target variables named "x" produces a projection keyed by name, so one value is
+// dropped and the distributed merge disagrees with the federated normal form.
+func TestDuplicateVariableName_ProjectionLosesAVariable(t *testing.T) {
+	src := gsm.NewRegistry("src")
+	a := src.Bool("a")
+	src.On("raise_a").Does(gsm.Raise(a)).Add()
+	dst := gsm.NewRegistry("dst")
+	x1 := dst.Bool("x")
+	x2 := dst.Bool("x")
+	f := gsm.NewFederation("fed").
+		Morphism(src, dst).Shared(x1, x2).
+		Map(func(s, d gsm.State) gsm.State {
+			return d.SetBool(x1, s.GetBool(a)).SetBool(x2, false)
+		}).Add()
+	m, _, err := f.Build()
+	if err == nil {
+		fs := m.Apply(m.NewState(), src, "raise_a")
+		p, perr := m.SharedProjection(m.Of(fs, src), src, dst)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		merged, merr := m.Component(dst).MergeProjection(m.Component(dst).NewState(), p)
+		if merr != nil {
+			t.Fatal(merr)
+		}
+		t.Fatalf("Build accepted a target with two variables named %q; the projection %v carries one "+
+			"value for both, so the distributed merge gives %s while the federated state is %s",
+			"x", p.Shared, merged, m.Of(fs, dst))
+	}
+	if want := `gsm: registry "dst": duplicate variable name "x"`; err.Error() != want {
+		t.Fatalf("got %q, want %q", err, want)
+	}
+}
