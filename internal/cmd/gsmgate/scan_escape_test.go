@@ -138,3 +138,43 @@ func TestScanTransitiveInputs(t *testing.T) {
 		t.Errorf("clean should pass:\n%s", got)
 	}
 }
+
+// A dependency that imports gsm only in files another platform or a build tag
+// selects still makes the main package that imports it depend on gsm: the main
+// rule must hold on every platform, not only the one the scan runs on.
+func TestScanPlatformOnlyGSM(t *testing.T) {
+	gsm := gsmDir(t)
+	cases := map[string]map[string]string{
+		// a plan9-only file imports gsm itself
+		"direct": {
+			"dep.go":       "package osdep\nfunc F() {}\n",
+			"dep_plan9.go": "package osdep\n" + imp + "func init() { gsm.NewRegistry(\"p\") }\n",
+		},
+		// a file under a custom build tag imports gsm itself
+		"tag": {
+			"dep.go":         "package osdep\nfunc F() {}\n",
+			"dep_special.go": "//go:build special\n\npackage osdep\n" + imp + "func init() { gsm.NewRegistry(\"s\") }\n",
+		},
+		// a windows-only file imports a package that imports gsm
+		"transitive": {
+			"dep.go":         "package osdep\nfunc F() {}\n",
+			"dep_windows.go": "package osdep\nimport \"example.com/osdep/inner\"\nfunc init() { inner.G() }\n",
+			"inner/inner.go": "package inner\n" + imp + "func G() { gsm.NewRegistry(\"i\") }\n",
+		},
+	}
+	for name, dep := range cases {
+		t.Run(name, func(t *testing.T) {
+			depDir := t.TempDir()
+			dep["go.mod"] = "module example.com/osdep\n\ngo 1.22\n\nrequire github.com/blackwell-systems/gsm v0.0.0\n\nreplace github.com/blackwell-systems/gsm => " + gsm + "\n"
+			writeTree(t, depDir, dep)
+			root := t.TempDir()
+			writeTree(t, root, map[string]string{
+				"go.mod":            "module example.com/fx\n\ngo 1.22\n\nrequire (\n\texample.com/osdep v0.0.0\n\tgithub.com/blackwell-systems/gsm v0.0.0\n)\n\nreplace example.com/osdep => " + depDir + "\n\nreplace github.com/blackwell-systems/gsm => " + gsm + "\n",
+				"cmd/ships/main.go": "package main\nimport \"example.com/osdep\"\nfunc main() { osdep.F() }\n",
+			})
+			if got := scanRoot(t, root, ""); !strings.Contains(got, "cmd/ships is a main package that depends on gsm") {
+				t.Fatalf("want cmd/ships flagged, got:\n%s", got)
+			}
+		})
+	}
+}
