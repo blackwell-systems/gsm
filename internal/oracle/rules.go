@@ -65,22 +65,22 @@ type RulesResult struct {
 
 // CheckRules runs the rules oracle. An error means no verdict (the input does
 // not parse, or the generated code stopped).
-func CheckRules(machine, pairs string) (res RulesResult, err error) {
+func CheckRules(machine, pairs string) (RulesResult, error) {
 	var p rulesParser
 	var m *I_machine
 	var ne int
 	if err := catch(func() { m, ne = p.machine(parseAll(tokenize(machine))) }); err != nil {
-		return res, fmt.Errorf("oracle: rules: %v", err)
+		return RulesResult{}, fmt.Errorf("oracle: rules: %v", err)
 	}
 	var ps *I_option[*I_list[*I_prod[int64, int64]]]
 	if err := catch(func() { ps = p.pairs(pairs, ne) }); err != nil {
-		return res, fmt.Errorf("oracle: pairs: %v", err)
+		return RulesResult{}, fmt.Errorf("oracle: pairs: %v", err)
 	}
 	if p.outOfFragment {
 		return RulesResult{RulesOutsideFragment, "a literal, minimum or maximum exceeds |2147483647|"}, nil
 	}
 	var verdict RulesResult
-	if _, err = run(func() bool {
+	if _, err := run(func() bool {
 		switch {
 		case !F_bounded(m):
 			verdict = RulesResult{RulesOutsideFragment, "some expression can exceed |2147483647|"}
@@ -205,8 +205,8 @@ func decimal(s string, maxDigits int) int {
 
 func intOf(s string) int64 {
 	decimal(s, 10)
-	v, _ := strconv.ParseInt(s, 10, 64)
-	if v > maxAbs || v < -maxAbs {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v > maxAbs || v < -maxAbs {
 		failf("integer out of range (|n| <= 2147483647): %s", s)
 	}
 	return v
@@ -230,8 +230,8 @@ func (p *rulesParser) valueOf(s string) int64 {
 		p.outOfFragment = true
 		return 0
 	}
-	v, _ := strconv.ParseInt(s, 10, 64)
-	if v > maxAbs || v < -maxAbs {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || v > maxAbs || v < -maxAbs {
 		p.outOfFragment = true
 		return 0
 	}
