@@ -490,11 +490,31 @@ again. `BuildCompositional` runs every rule again to build the component tables,
 can make the two checks see different tables. `Report.Assurance` (and `Synthesis.Assurance`) records what
 certified the machine:
 
+- `AssuranceOracleTablesAndRules` (`Build`): the table oracle certified the tables, and the rules
+  oracle certified the machine from its combinator rules (below).
 - `AssuranceOracleTables`: gsm's verification and the table oracle both certified the machine's
-  tables.
+  tables; the rules oracle did not run, and `Report.RulesOracleSkipped` says why.
 - `AssuranceOracleComponents` (`BuildCompositional`): the oracle certified every component's
   tables. That cross-component pairs commute rests on gsm's footprint check, which the oracle does
   not see.
+
+**The rules oracle in the gate (`Build`).** After the table oracle, `Build` also runs the rules
+oracle, `checkBuild` from the proof (`AstChecker.v`), generated as Go the same way. It reads the
+machine's combinator rules (exactly what `WriteMachineAST` and `WriteDeclaredPairs` write), not its
+tables: it re-derives every step by evaluating the expression trees, so it does not trust gsm's
+tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` says which did not:
+- every rule is a combinator (`DeclInvariant`, `DeclEvent`, `DeclEventGuarded`), so the machine
+  has rules to read;
+- the number of states times the number of checked pairs (every pair when none is declared; at
+  least 1) is at most `RulesOracleMaxStatePairs` (2^21). The rules oracle costs about 3 µs per state
+  and pair; at the cap, `Build` takes about 6 s;
+- the machine is inside the rules oracle's fragment: expressions stay within |2^31-1|, and no
+  write stores a negative value into a two-valued variable (the oracle has no verdict otherwise).
+
+If it runs and does not certify the machine (repair does not terminate, or a declared pair does
+not commute), or gives no verdict, `Build` fails closed like the table oracle. `SynthesizeWith`
+and `BuildCompositional` run the table oracle only: synthesized repairs are not rules, and a
+component is not a registry.
 
 **`Federation.Build` and certificates.** These rebuild every component with `Build`, so each
 component's tables are oracle-gated. The federation-level checks are gsm's Go code and are not
@@ -530,8 +550,8 @@ binaries, from a pinned, hash-checked proof commit (`.github/oracle/`). It cross
 machine the test suite passes to `Build` against them: the documented examples, the
 property-tested machines, and 600 random combinator machines. There the oracle tests are required,
 not skipped, and any disagreement with `Build` fails the run. Locally they run when
-`GSM_CONVERGENCE_CHECKER` / `GSM_AST_CHECKER` point at built binaries. The rules oracle runs only
-there and on exported machines, not in-process.
+`GSM_CONVERGENCE_CHECKER` / `GSM_AST_CHECKER` point at built binaries. The rules oracle also runs
+in-process, in `Build` (above).
 
 Both checkers decide the property `Build` checks, so they agree with `Build` on every machine,
 except that the rules oracle refuses some arithmetic it does not model (below). That property:
@@ -651,6 +671,15 @@ Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather tha
 | 1,024 states, 10 events, 45 pairs | 2.2 ms | 3.0 ms |
 | 2²⁰ states, 20 events, 10 declared pairs (oracle alone) | | ~0.3 s |
 | 2²⁰ states, 20 events, every pair (190) | 0.76 s | 5.6 s (peak RSS about 330 MB, against 240 MB without the gate) |
+
+The rules oracle adds its own cost on combinator machines within its cap (Build with both oracles):
+
+| Combinator machine | States x pairs | Build |
+|---------|------------------|---------------|
+| 2¹² states, 12 events, every pair (66) | 270,336 | 0.5 s |
+| 2²⁰ states, 20 events, 1 declared pair | 2²⁰ | 4.0 s |
+| 2²⁰ states, 20 events, 2 declared pairs | 2²¹ (the cap) | 5.9 s |
+| 2²⁰ states, 20 events, every pair | above the cap: table oracle only | 6.0 s |
 
 For a large machine, declaring only the pairs that need to commute (`Independent`) keeps the gate fast.
 

@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The rules oracle in the gate.** After the table oracle certifies a machine, `Build` also runs the
+  rules oracle (`checkBuild` from the normalization-confluence proof, generated as Go and vendored
+  in `internal/oracle` with the table oracle; `oracle.CheckRules`) on the machine's combinator rules,
+  exactly what `WriteMachineAST` and `WriteDeclaredPairs` write. It re-derives every step from the
+  expression trees, so it does not trust gsm's tables.
+  - It runs on machines whose rules are all combinators, whose states times checked pairs (every
+    pair when none is declared) is at most `RulesOracleMaxStatePairs` (2^21, about 6 s for `Build`
+    at the cap), and that are inside its fragment. Otherwise the table oracle alone certifies the
+    machine and the new `Report.RulesOracleSkipped` says why.
+  - `Report.Assurance` is the new `AssuranceOracleTablesAndRules` when both ran;
+    `AssuranceOracleTables` now means the table oracle only.
+  - A rejection (repair does not terminate, or a declared pair does not commute), or no verdict,
+    fails `Build` closed, with the error in `Report.OracleDisagreement`.
+  - `SynthesizeWith` and `BuildCompositional` run the table oracle only.
+  - Cost: about 3 µs per state and pair; a 4,096-state combinator machine with every pair (66)
+    declared takes about 0.5 s to `Build`.
+  - Output change: the report's oracle-failure header is now `Verified oracle: did not certify`,
+    and a certified report that skipped the rules oracle ends with a `Rules oracle: not run:` line.
 - **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`
   (and so `BuildOrSynthesize` and `Synthesis.Machine`) and `BuildCompositional` (per footprint
   component) now give the tables gsm's verification produced to the table oracle.

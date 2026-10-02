@@ -118,6 +118,35 @@ func TestBuildSkipsTheRulesOracleAboveItsCap(t *testing.T) {
 			t.Errorf("cap %d: RulesOracleSkipped = %q does not name the cap", cap, rep.RulesOracleSkipped)
 		}
 	}
+	// Pairs count: three events give three pairs (8 x 3 = 24), and declaring
+	// one pair independent leaves one (8 x 1).
+	three := func(declare bool) *Registry {
+		r := combCapped()
+		r.DeclEvent("raiseb2", Raise(r.vars[1]))
+		if declare {
+			r.Independent("inca", "raiseb")
+		}
+		return r
+	}
+	for _, c := range []struct {
+		declare bool
+		cap     int
+		want    Assurance
+	}{
+		{false, 23, AssuranceOracleTables},
+		{false, 24, AssuranceOracleTablesAndRules},
+		{true, 7, AssuranceOracleTables},
+		{true, 8, AssuranceOracleTablesAndRules},
+	} {
+		withRulesCap(t, c.cap)
+		m, rep, err := three(c.declare).Build()
+		if err != nil || m == nil {
+			t.Fatalf("three events, declare %v, cap %d: Build: %v\n%s", c.declare, c.cap, err, rep)
+		}
+		if rep.Assurance != c.want {
+			t.Errorf("three events, declare %v, cap %d: Assurance = %v, want %v", c.declare, c.cap, rep.Assurance, c.want)
+		}
+	}
 	// With no events there are no pairs: the cost is the states.
 	withRulesCap(t, 3)
 	r := NewRegistry("no_events")
