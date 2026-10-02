@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -127,5 +128,42 @@ func TestGeneratedFileMatchesProvenance(t *testing.T) {
 	}
 	if got := fmt.Sprintf("%x", sha256.Sum256(src)); got != want {
 		t.Fatalf("oracle_gen.go has sha256 %s, PROVENANCE pins %s: it was edited, or regenerated without updating PROVENANCE", got, want)
+	}
+}
+
+// bitTables: 2^k states and k events, event e setting bit e, so every pair
+// commutes and the checker does all of its work.
+func bitTables(k int) Tables {
+	n := 1 << k
+	step := make([][]int, k)
+	for e := range step {
+		step[e] = make([]int, n)
+		for s := range step[e] {
+			step[e][s] = s | 1<<e
+		}
+	}
+	return Tables{NF: identity(n), Step: step, AllPairs: true}
+}
+
+// The checker reads the tables in place: at gsm's largest machines (2^20
+// states, 20 events) it must not copy them. Held as the checker's lists they
+// would take about 480 MB (24 B per entry); the tables themselves are 160 MB.
+func TestCheckTablesDoesNotCopyTheTables(t *testing.T) {
+	if testing.Short() {
+		t.Skip("2^20 states")
+	}
+	tb := bitTables(20)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	ok, err := CheckTables(tb)
+	runtime.ReadMemStats(&after)
+	if err != nil || !ok {
+		t.Fatalf("CheckTables(bitTables(20)) = %v, %v; want true, nil", ok, err)
+	}
+	t.Logf("CheckTables allocated %d MiB", (after.TotalAlloc-before.TotalAlloc)>>20)
+	const budget = 64 << 20
+	if got := after.TotalAlloc - before.TotalAlloc; got > budget {
+		t.Fatalf("CheckTables allocated %d MiB; want at most %d MiB", got>>20, budget>>20)
 	}
 }
