@@ -1,6 +1,9 @@
 package gsm
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // CoordinationPoint names a morphism edge whose target shared component should be placed under
 // external coordination (a single writer, a lock, or a consensus round) so that the network's
@@ -83,12 +86,28 @@ func (f *Federation) CoordinationPlan() []CoordinationPoint {
 // usual. When the plan is a CoordinationPlan (a feedback edge set), the residual is acyclic and
 // converges, so this turns a rejected cyclic federation into an accepted one that converges given the
 // named coordination. An empty plan is exactly Build.
+//
+// Each point must name a morphism of the federation (by Src and Dst), and its Shared must be
+// exactly that morphism's shared variable names (in any order), as CoordinationPlan returns
+// them; otherwise BuildCoordinated returns an error rather than coordinate something other
+// than what the caller named.
 func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *FedReport, error) {
 	remove := map[int]bool{}
 	for _, cp := range plan {
 		found := false
 		for ei, e := range f.edges {
 			if e.src.name == cp.Src && e.dst.name == cp.Dst {
+				// The point names what is coordinated: it must be exactly the variables this
+				// morphism controls, or the caller is coordinating something else.
+				names := make([]string, len(e.shared))
+				for k, v := range e.shared {
+					names[k] = v.name
+				}
+				if !sameNameSet(names, cp.Shared) {
+					return nil, &FedReport{Name: f.name, Edges: len(f.edges)},
+						fmt.Errorf("gsm: coordination point %s: morphism %s→%s shares %v, not %v",
+							cp, cp.Src, cp.Dst, sortedNames(names), sortedNames(cp.Shared))
+				}
 				remove[ei] = true
 				found = true
 			}
@@ -104,6 +123,35 @@ func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *F
 		return f.Build()
 	}
 	return f.withoutEdges(remove).Build()
+}
+
+// sortedNames returns a sorted copy of names.
+func sortedNames(names []string) []string {
+	out := append([]string{}, names...)
+	sort.Strings(out)
+	return out
+}
+
+// sameNameSet reports whether a and b hold the same names (as sets, so order and
+// repetition do not matter).
+func sameNameSet(a, b []string) bool {
+	set := func(xs []string) map[string]bool {
+		m := make(map[string]bool, len(xs))
+		for _, x := range xs {
+			m[x] = true
+		}
+		return m
+	}
+	sa, sb := set(a), set(b)
+	if len(sa) != len(sb) {
+		return false
+	}
+	for x := range sa {
+		if !sb[x] {
+			return false
+		}
+	}
+	return true
 }
 
 // clone returns a copy of the federation's wiring (components, morphisms, resolvers, cycle

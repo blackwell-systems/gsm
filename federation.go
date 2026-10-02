@@ -143,7 +143,9 @@ type MorphismBuilder struct {
 
 // Shared designates which of the target's variables form its shared component — the part
 // the morphism controls. The remaining target variables are local (unconstrained by this
-// morphism) and converge via the target's own compensation.
+// morphism) and converge via the target's own compensation. Each Var must be the target
+// registry's own (as returned by its Bool, Enum or Int); Federation.Build rejects one of
+// another registry, even with the same name or index.
 func (mb *MorphismBuilder) Shared(dstVars ...Var) *MorphismBuilder {
 	mb.e.shared = append(mb.e.shared, dstVars...)
 	return mb
@@ -282,6 +284,9 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 		if err := r.checkNames(); err != nil {
 			return nil, &FedReport{Name: f.name, Edges: len(f.edges)}, err
 		}
+	}
+	if err := f.checkSharedVars(); err != nil {
+		return nil, &FedReport{Name: f.name, Edges: len(f.edges)}, err
 	}
 	m := &FedMachine{
 		name:   f.name,

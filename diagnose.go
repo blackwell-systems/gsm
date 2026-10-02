@@ -135,6 +135,9 @@ func (f *Federation) DiagnoseCycle() (*CycleDiagnostic, error) {
 
 // diagnoseCycle is DiagnoseCycle on f itself; DiagnoseCycle calls it on a frozen copy.
 func (f *Federation) diagnoseCycle() (*CycleDiagnostic, error) {
+	if err := f.checkSharedVars(); err != nil {
+		return nil, err
+	}
 	cyc := f.findCycle()
 	if cyc == nil {
 		return nil, nil

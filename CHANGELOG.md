@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   certificates issued earlier no longer match and must be re-issued with `Certify`. Per the
   development versioning policy the tag (`gsm-fedcert-v3`) is unchanged. The test certificate
   `testdata/payship-cert-v0.11.0.json` has its `Digest` recomputed (its other fields are as
-  v0.11.0 issued them). `CERTIFICATE-DESIGN.md` states what the digest covers: a morphism or
+  v0.11.0 issued them). The digest also quotes every name it frames (component, table target,
+  sources and shared variables, input ports), which unquoted could collide (a port `a.b`/`c`
+  digested like `a`/`b.c`), and digests the declared pairs as a set, so the same pairs declared
+  in another order, direction or more than once digest alike. `CERTIFICATE-DESIGN.md` states what the digest covers: a morphism or
   resolver closure is bound only through its table, at one representative target.
 - **`PolicyDigest` is unchanged and does not cover names.** It stays SHA-256(`gsm-policy-v1` "\n"
   `PolicyBytes`), the oracle's input, which external audit layers recompute. That input addresses
@@ -61,6 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Behaviour change: an enum may not repeat a label.** `Set`, `TrySet` and the label sugar resolve
   a label to its first index, so a repeated label was unreachable. `Build` and every other path
   that checks names return `gsm: registry "r": enum "e" has duplicate label "l"`.
+- **Behaviour change: a morphism's `Shared()` variables must be its target's.** They were never
+  checked, so a `Var` of another registry at the same index made `Federation.Build` panic, or one
+  with the same name and another range was taken for the target's. `Federation.Build` and
+  `DiagnoseCycle` now return `morphism a→b: Shared() variable "v" is not a variable of registry
+  "b"`.
+- **Behaviour change: `BuildCoordinated` checks a point's `Shared`.** It must be exactly the named
+  morphism's shared variable names (in any order), as `CoordinationPlan` returns them.
 - **Behaviour change: `Certify` checks an input port's variable by value.** It used the variable's
   index only, so a `Var` of another registry declared the variable at that index of this one as a
   port (or an index past the end passed). A port's variable must now be this registry's variable
