@@ -135,7 +135,7 @@ func diffTables(m *Machine) ([]byte, int) {
 	}
 	defer removeDir(dir)
 	p := filepath.Join(dir, "m.tables")
-	if err := m.WriteConvergenceTables(p); err != nil {
+	if err = m.WriteConvergenceTables(p); err != nil {
 		return nil, n
 	}
 	b, err := os.ReadFile(p)
@@ -331,19 +331,19 @@ func runDifferential() int {
 			defer func() { <-sem }()
 			r := diffResult{c: c, astExit: -1, tableExit: -1}
 			if c.ast != nil && c.boxStates > 0 && c.boxStates <= diffMaxBoxStates {
-				x, out, err := runChecker(abin, c.ast, fmt.Sprintf("%d.machine", i), dir)
-				if err != nil {
+				x, out, cerr := runChecker(abin, c.ast, fmt.Sprintf("%d.machine", i), dir)
+				if cerr != nil {
 					errMu.Lock()
-					runErr = err
+					runErr = cerr
 					errMu.Unlock()
 				}
 				r.astExit, r.astOut, r.astClass = x, out, classifyAST(c, x, out)
 			}
 			if c.tables != nil {
-				x, out, err := runChecker(tbin, c.tables, fmt.Sprintf("%d.tables", i), dir)
-				if err != nil {
+				x, out, cerr := runChecker(tbin, c.tables, fmt.Sprintf("%d.tables", i), dir)
+				if cerr != nil {
 					errMu.Lock()
-					runErr = err
+					runErr = cerr
 					errMu.Unlock()
 				}
 				r.tableExit, r.tableOut, r.tableClass = x, out, classifyTable(c, x)
