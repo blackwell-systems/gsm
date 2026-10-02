@@ -51,6 +51,12 @@ type Report struct {
 	// table oracle did not certify the tables (it rejected them, or could not check
 	// them); it holds the error. There is no machine: the build fails closed.
 	OracleDisagreement string
+
+	// RulesOracleSkipped is non-empty when Build certified the machine with the
+	// table oracle alone; it says why the rules oracle did not run (no
+	// combinator rules, above RulesOracleMaxStatePairs, or outside the rules
+	// oracle's fragment).
+	RulesOracleSkipped string
 }
 
 // compensationError is Build's error when the compensation as written is missing or does
