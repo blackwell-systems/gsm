@@ -7,207 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **The rules oracle in the gate.** After the table oracle certifies a machine, `Build` also runs the
-  rules oracle (`checkBuild` from the normalization-confluence proof, generated as Go and vendored
-  in `internal/oracle` with the table oracle; `oracle.CheckRules`) on the machine's combinator rules,
-  exactly what `WriteMachineAST` and `WriteDeclaredPairs` write. It re-derives every step from the
-  expression trees, so it does not trust gsm's tables.
-  - It runs on machines whose rules are all combinators, whose work is at most
-    `RulesOracleMaxWork` (2^29), and that are inside its fragment. The work (`oracle.RulesCost`)
-    is an upper bound on the steps `checkBuild` takes in the generated Go, counted from the
-    expression trees, the checked pairs (every pair when none is declared) and the repair depth:
-    per state, normalizing it, and for each checked pair both events' guards, effects and
-    normalizations, twice. Otherwise the table oracle alone certifies the machine and the new
-    `Report.RulesOracleSkipped` says why, with the work.
-  - `Report.Assurance` is the new `AssuranceOracleTablesAndRules` when both ran;
-    `AssuranceOracleTables` now means the table oracle only.
-  - A rejection (repair does not terminate, or a declared pair does not commute), or no verdict,
-    fails `Build` closed, with the error in `Report.OracleDisagreement`.
-  - `SynthesizeWith` and `BuildCompositional` run the table oracle only.
-  - Cost (generated Go, Apple M-series, `TestRulesOracleCostPerStep`): at most about 4 ns per
-    step (4.04 ns on a wide Int domain; 0.7 to 3.2 ns elsewhere). Memory is mostly the box, about
-    states x (variables + 1) list cells: from about 100 bytes per state at 2 variables to about
-    220 at 20, plus a few MB. Within the cap that is at most about 2.2 s and under about 170 MB
-    (the most measured within it: 160 MB, at 2^20 states of 10 four-valued Ints).
-  - Output change: the report's oracle-failure header is now `Verified oracle: did not certify`,
-    and a certified report that skipped the rules oracle ends with a `Rules oracle: not run:` line.
-- **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`
-  (and so `BuildOrSynthesize` and `Synthesis.Machine`) and `BuildCompositional` (per footprint
-  component) now give the tables gsm's verification produced to the table oracle.
-  - **The oracle.** It is `check_fn` from the normalization-confluence proof (the table oracle
-    over accessor functions, proven equal to `check_tables` and to the list oracle `check_fast`;
-    its guarantee, `check_fn_converges`, is stated on the accessors), generated as Go
-    from the Rocq extraction and vendored in `internal/oracle` (no OCaml, no subprocess, no
-    dependencies). `internal/oracle/PROVENANCE` pins the proof commit, the prover image and the
-    hashes. CI regenerates the file from them and requires the same bytes.
-  - **Failing closed.** If the oracle does not certify the tables, the call returns an error and
-    no machine, and `Report.OracleDisagreement` holds the oracle's error. With deterministic
-    rules, a disagreement points at a bug in gsm's verification or in the oracle's generator. An
-    impure rule, which gives different results when `BuildCompositional` runs it again, can cause
-    one too.
-  - **`Federation.Build` and `Certificate.Verify`.** They rebuild components with `Build`, so
-    every component's tables are gated. The morphism checks (M1, acyclicity, monotone-cycle
-    iteration) and certificate re-derivation are gsm's Go code and are not oracle-gated.
-  - **In place.** The oracle reads the machine's tables through accessors (`oracle.Lookup`,
-    `oracle.CheckLookup`) and copies nothing: the gate adds about 12 MB (the renumbering of the
-    in-domain states) at 2^20 states. With 20 events and every pair declared, `Build` with the
-    gate takes about 5.6 s (0.76 s without) and three builds peak at about 330 MB RSS (240 MB
-    without).
-  - **Limits.** Running out of memory or goroutine stack kills the process rather than returning
-    an error.
-  - **Output change: `Report.String` ends with an `Assurance:` line.**
-    - A certified report prints it after `Convergence: GUARANTEED`.
-    - Every report that is not certified now ends with `Assurance: not certified`. This covers a
-      failed WFC or CC as well as an oracle rejection (which prints `Convergence: NOT CERTIFIED
-      (no machine)`).
-    - Code that pins or parses report text sees the new line.
-  - **`Synthesis.Machine` decides from what `SynthesizeWith` recorded.** Changing the exported
-    `Convergent` or `Assurance` fields does not make it return a machine.
-  - **`Report.Assurance`** (and `Synthesis.Assurance`) record what certified a machine:
-    `AssuranceOracleTables`, or `AssuranceOracleComponents` for `BuildCompositional`, where
-    cross-component independence still rests on gsm's footprint check.
+## [0.12.0] - YYYY-MM-DD
 
-### Changed
-- **The table oracle is faster with many events and declared pairs.** Pinned to
-  normalization-confluence#12: `check_fast` computes the same boolean (`check_fast_eq` is
-  unchanged), reading each step target's column once per state instead of once per declared
-  pair. Verdicts are unchanged; the extracted binaries' hashes change.
-- **The rules oracle now checks gsm's largest machines.** The pinned `astchecker` died with
-  `Stack_overflow` under OCaml 4.14 on 2^20-state machines: it multiplied domain sizes and
-  converted every variable read to Z through unary arithmetic, and enumerated the valuations
-  with non-tail recursion. normalization-confluence#11 replaces each with a proven-equal form
-  (or, for the enumeration, one proven to have the same members), with no new extraction
-  directives; verdicts are unchanged. Pinned to its merge commit.
-- **Behaviour change: certificate digests bind names and declared pairs.** Certificate digests
-  covered each component's rules in the oracle's positional format only, so two subsystems whose
-  components differed only in an event name, a variable name or kind, an enum label, or the
-  declared `Independent` pairs had the same digest, although replay, projections, certificate
-  tables, input ports, `Set` and the CC check address those. The new `Registry.PolicyNames`
-  serializes them, and certificate digests now cover it. Every certificate digest changes:
-  certificates issued earlier no longer match and must be re-issued with `Certify`. Per the
-  development versioning policy the tag (`gsm-fedcert-v3`) is unchanged. The test certificate
-  `testdata/payship-cert-v0.11.0.json` has its `Digest` recomputed (its other fields are as
-  v0.11.0 issued them). The digest also quotes every name it frames (component, table target,
-  sources and shared variables, input ports), which unquoted could collide (a port `a.b`/`c`
-  digested like `a`/`b.c`), and digests the declared pairs as a set, so the same pairs declared
-  in another order, direction or more than once digest alike. `CERTIFICATE-DESIGN.md` states what the digest covers: a morphism or
-  resolver closure is bound only through its table, at one representative target.
-- **`PolicyDigest` is unchanged and does not cover names.** It stays SHA-256(`gsm-policy-v1` "\n"
-  `PolicyBytes`), the oracle's input, which external audit layers recompute. That input addresses
-  variables and events by position, so registries that differ only in names, kinds, labels or
-  declared pairs share a `PolicyDigest`. The new `Registry.PolicyIdentityDigest` (tag
-  `gsm-policy-identity-v1`) covers `PolicyBytes` and `PolicyNames` together. Moving the names into
-  the serialized format, and so into `PolicyDigest`, is planned before 1.0.
-- **The table oracle now certifies gsm's largest machines.** The pinned `checker` (built with
-  OCaml 4.14.2 in the pinned image) died with `Stack_overflow` on 2^20-state tables, gsm's maximum
-  size, so those machines failed the oracle cross-check with an input error. The oracle is now
-  pinned to `check_fast` (normalization-confluence `TableFast.v`), proven equal to `check_tables`
-  and axiom-free. Its stack depth does not grow with the number of states, events or declared
-  pairs. On 2^20 states with 10 declared pairs it takes about 5 s (OCaml 4.14.2); the previous
-  checker took about 60 s there when built with OCaml 5, and never completed with the pinned 4.14.2
-  build. `TestConvergenceTables_LargestMachine` (20 flags, 2 events) now requires the oracle to
-  certify a 2^20-state machine.
-- **The extracted checkers decide exactly what `Build` checks.** Both oracles previously checked a
-  different property, so the differential test had to excuse whole classes of disagreement. Now
-  they check `Build`'s: repair terminates from every state (the rules oracle used to require it
-  only where an event reaches), only the pairs declared `Independent` are checked (both used to
-  check every pair), and commutation is checked on the valid states plus the zero state (the table
-  oracle used to check invariant-invalid encodings, and the rules oracle skipped an invalid zero
-  state). The differential test now fails on any disagreement except a rules-oracle refusal
-  outside its arithmetic fragment, and the table oracle also checks, and must reject, the tables
-  of every machine `Build` rejects for CC. Proofs: normalization-confluence `TableCheck.v`,
-  `Trace.v` and `checkBuild` in `AstChecker.v`.
-- **`WriteConvergenceTables` writes format version 2**: a `gsm-tables 2` header, the normal-form
-  table, and the declared pairs, so the table oracle can check `Build`'s property. It also no
-  longer panics on a synthesized machine, and fails rather than writing a wrong id if a table
-  entry is not an in-domain encoding.
+A soundness release. `Build` in v0.11.0 and earlier certified some machines that do not converge
+(it skipped the CC check for pairs whose invariant footprints were disjoint, and never checked what
+a guard or effect reads). It now checks every pair exactly, and every machine `Build`,
+`SynthesizeWith` and `BuildCompositional` return has had its tables certified, in-process, by the
+table oracle generated as Go from the Rocq proof (normalization-confluence); `Build` also runs the
+proof's rules oracle when the machine is within its work cap. If an oracle does not certify, the
+call returns an error and no machine. Around this, registries, closures, federations and
+certificates now reject inputs that let a check and the runtime see different machines (duplicate
+names, out-of-domain results, foreign registries, declarations made while a check runs).
 
-- **`WriteMachineAST` refuses a variable from another registry.** The rules format names a variable
-  by index only, so a `Var` from another registry with the same name and index (which gsm reads
-  with that registry's minimum and domain) was exported as this registry's variable, a different
-  machine.
-- **`Do()` with no assignments is a combinator rule.** It returned a nil `Transform`, so an event
-  declared with an empty effect could not be exported.
+Machines built with v0.11.0 or earlier should be rebuilt. Certificate digests changed, so
+certificates must be re-issued. See "Upgrading from v0.11.0".
 
-### Added
-- **Example-machine gate in CI.** Every machine gsm's examples make (each `Example` function and
-  the README run block) is checked by both extracted checkers in the oracle job, against a catalog
-  of every machine and its expected verdict (`.github/oracle/machines.txt`). The job fails if a
-  checker rejects a listed machine, disagrees with `Build`, or an example makes a machine the
-  catalog does not list; a test fails if an example is missing from the catalog. A program built
-  with `-tags gsmgate` and run with `GSM_GATE_DIR` set records every machine it makes (each `Build`
-  result, synthesized and compositional machine) for `internal/cmd/gsmgate`, which projects using
-  gsm can run on their own machines. Without the tag nothing changes. The checker binaries are
-  named in `pins.env`, so a faster checker replaces one by pin.
-- **`Registry.WriteDeclaredPairs`** writes the pairs CC is checked for, in the format the rules
-  oracle takes as an optional second file. It is not part of `WriteMachineAST`'s output, so
-  `PolicyBytes`, `PolicyDigest` and certificate digests are unchanged.
+### Upgrading from v0.11.0
 
-### Fixed
-- **The example-machine gate recorded synthesis candidates.** `SynthesizeWith` builds a candidate
-  machine to have the table oracle certify it, and the `gsmgate` hook sat where that candidate is
-  built, so a gate run recorded it as well as the machine `Synthesis.Machine` hands out (twice for
-  `BuildOrSynthesize`), and recorded a candidate the oracle refused. The hook is now in
-  `Synthesis.Machine`, after its certified check: the gate records only machines a program receives.
-- **Behaviour change: `FedMachine.Of` and `FedMachine.Apply` panic for a registry outside the
-  federation.** They used the lookup's zero value and acted on component 0. They now panic naming
-  the registry, as `Apply` does for an unknown event (`ApplyNamed` already returned an error).
-- **Behaviour change: `BuildCoordinated` rejects a coordination point that names no morphism.** It
-  ignored such a point and built the federation without the coordination the caller asked for.
-- **Behaviour change: an enum may not repeat a label.** `Set`, `TrySet` and the label sugar resolve
-  a label to its first index, so a repeated label was unreachable. `Build` and every other path
-  that checks names return `gsm: registry "r": enum "e" has duplicate label "l"`.
-- **Behaviour change: a morphism's `Shared()` variables must be its target's.** They were never
-  checked, so a `Var` of another registry at the same index made `Federation.Build` panic, or one
-  with the same name and another range was taken for the target's. `Federation.Build` and
-  `DiagnoseCycle` now return `morphism a→b: Shared() variable "v" is not a variable of registry
-  "b"`.
-- **Behaviour change: `BuildCoordinated` matches a point's `Shared`.** A point removes the
-  morphisms matching its `Src`, `Dst` and shared variable set (in any order), as
-  `CoordinationPlan` returns them; one that matches no morphism on all three is an error.
-- **Behaviour change: `Certify` checks an input port's variable by value.** It used the variable's
-  index only, so a `Var` of another registry declared the variable at that index of this one as a
-  port (or an index past the end passed). A port's variable must now be this registry's variable
-  (same name, kind, layout, range and labels).
-- **`DiagnoseCycle` analyzes the federation as called.** Like `Federation.Build`, it works on a
-  frozen copy and rejects a component that a morphism closure changed while it ran (it returned
-  a diagnostic about a different registry, with no error).
-- **A declared combinator rule could be rewritten through the caller's slice.** `Do(as...)`
-  returned the caller's slice and `DeclEvent`, `DeclEventGuarded` and `DeclInvariant` kept it, and
-  `And(ps...)`/`Or(ps...)` kept theirs, while write sets and footprints were computed once. Changing
-  an element afterwards changed the rule without changing anything the build checks, so a
-  `BuildCompositional` machine's `Apply` could run a rewritten, unverified rule (an event writing
-  outside its declared write set, order-dependent), and the policy digest changed after the build.
-  The declarations and `And`/`Or` now copy what they are given. `Enum` also copies its labels.
-- **`Federation.Build` and `Certify` could act on declarations no check saw.** Both build the
-  components, then run morphism closures (verification, and for `Certify` table extraction). A
-  closure that declared on a component there left the registry and the `FedMachine`'s machine for
-  it differing silently, and `Certify` digested the declaration. A closure that added a morphism
-  to the federation reached the later passes (the monotonicity check) but not the machine, and
-  `Certify` put its unverified table into the certificate. Both now work on a copy of the
-  federation's wiring taken when they are called, so a morphism, component, or resolver added to
-  the federation while they run is ignored (not verified, and not in the machine or certificate),
-  and they reject a component registry changed while they run (`gsm: registry "r" was changed
-  while it was being verified ...`). **Behaviour change:** a federation whose closures declare on
-  a component while it is built or certified is now rejected.
-- **The rules oracle used the wrong arithmetic.** `astchecker` (normalization-confluence) evaluated
-  rules over the natural numbers, so `Sub` truncated at 0 and a guard such as
-  `Lt(Sub(V(a), V(b)), Lit(0))` was never true. It certified machines that `Build` correctly
-  rejects. It now evaluates with gsm's signed arithmetic, and refuses to certify expressions that
-  could exceed 2^31-1 in magnitude or writes that could store a negative value into a two-valued,
-  minimum-0 variable (a `Bool` stores `value != 0`). `WriteMachineAST` now exports negative
-  minimums and literals; its output is otherwise unchanged, so `PolicyDigest` and certificate
-  digests are unchanged for every policy that exported before.
+No exported identifier is removed and no signature changes (the API changes are additions). What
+can start failing at run time, and what to do:
 
-### Added
-- **The oracle cross-check is required in CI.** A new `oracles` job builds both extracted checkers
-  from a pinned proof commit in a digest-pinned Rocq image, checks them against pinned SHA-256
-  hashes (`.github/oracle/`), and runs the whole test suite with `GSM_REQUIRE_ORACLES=1`, so the
-  oracle tests fail instead of skipping when a checker is missing.
-- **Differential test of every `Build`.** `oracle_differential_test.go` cross-checks every machine
-  the test suite builds, plus 600 random combinator machines (`GSM_DIFF_RANDOM` sets the count),
-  against both checkers, and fails on any disagreement with `Build`.
+- **Rebuild every machine.** `Build` now checks every event pair exactly. A machine that built
+  under v0.11.0 and now fails was never convergent; the report gives the counterexample. Fix the
+  rules, or let `BuildOrSynthesize` synthesize a convergent repair.
+- **Re-issue every certificate with `Certify`.** Certificate digests now bind names (events,
+  variables and their kinds, enum labels, input ports) and the declared `Independent` pairs, so
+  every digest changed and a certificate issued by v0.11.0 or earlier fails `Certificate.Verify`
+  and `EmbedCertified` with `digest does not match`. The certificate version tag
+  (`gsm-fedcert-v3`) is unchanged: gsm keeps one development certificate version until 1.0 and
+  relies on re-checking on load, not on version bumps. `Certificate.Verify` also requires each
+  component map key to be its registry's name.
+- **Names must be unique.** A registry that declares two events, or two variables, with the same
+  name is rejected (`duplicate event name`, `duplicate variable name`), and so is an enum that
+  repeats a label (`duplicate label`). Rename them.
+- **Closure results must be states of the machine.** Effects, repairs, morphism `Map`s and
+  `Resolver`s that return a state built from another registry's variables, a value outside a
+  variable's range, or bits outside the encoding are rejected with an error naming the rule and
+  the state; an effect's out-of-range value is no longer clamped. Build results from the input
+  state with `Set`, `SetBool`, `SetInt` or the combinators. Lazy `BuildCompositional` machines and
+  `FedMachine` panic on such a result at `Apply` time, and a lazy machine's `Apply` and
+  `Normalize` panic on an input that is not one of its states.
+- **`Machine.MergeProjection` errors on out-of-domain input.** Its signature is unchanged (it
+  already returned an error), but it now returns one, and leaves the state unchanged, for a value
+  outside its variable's range or bit field (it used to truncate) and for a state that is not a
+  state of the machine. Check the error.
+- **`BuildOrSynthesize` falls back to synthesis only when the compensation failed** (an invariant
+  has no `Repair`, or WFC or CC fails). Other `Build` errors are returned as they are.
+- **Federations.** A morphism's `Shared()` variables must be its target's; `BuildCoordinated`
+  points must match a morphism by `Src`, `Dst` and shared set; `Certify` input ports must be this
+  registry's variables (by value); `FedMachine.Of` and `Apply` panic for a registry outside the
+  federation; and a closure that declares on a component while `Federation.Build` or `Certify`
+  runs gets the federation rejected. `Build`, `BuildCompositional` and `Synthesize` likewise
+  reject a registry a rule closure changed while it was being verified.
+- **`BuildCompositional` rejects machines wider than 64 bits** instead of freezing the extra
+  variables at 0.
+- **Report text changed.** Code that pins or parses `Report.String` output sees:
+  - an `Assurance:` line at the end of every report (`Assurance: not certified` when not
+    certified);
+  - `Verified oracle: did not certify` and `Convergence: NOT CERTIFIED (no machine)` when an
+    oracle does not certify;
+  - a `Rules oracle: not run: <reason>` line on a certified report that skipped the rules oracle;
+  - `Rule results: FAIL` (new `Report.DomainViolation`) and `Footprint conformance: FAIL` (new
+    `Report.FootprintViolation`, with WFC and CC "not evaluated") instead of a WFC failure;
+  - `Components: N` instead of `States: 0` for compositional reports;
+  - `Report.PairsDisjoint` always 0 for `Build`.
+- **`WriteConvergenceTables` writes format version 2** (`gsm-tables 2` header, normal-form table,
+  declared pairs). External readers of the format 1 file must be updated.
+- **`Build` costs more.** The table oracle re-checks every machine; the rules oracle runs when its
+  work is at most `RulesOracleMaxWork` (2^29). `BuildOrSynthesize`, synthesis and
+  `BuildCompositional` run the table oracle. Measured on an Apple M1 Pro with Go 1.26 (the last
+  column is `main` before the gate, from #15):
+
+  | `Build` of | Oracles run | v0.12.0 | Without the gate |
+  |---|---|---|---|
+  | 24 states, 3 pairs (closure rules) | table | 0.34 ms | 0.32 ms |
+  | 1,024 states, 10 events, 45 pairs (closure rules) | table | 3.0 ms | 2.2 ms |
+  | 2^19 states, 1 event (combinators) | table and rules | 0.67 s | |
+  | 2^12 states, 20 events, every pair (combinators) | table and rules | 1.5 s | |
+  | 2^20 states, 20 events, every pair (closure rules) | table | 5.6 s; peak RSS about 330 MB over three builds | 0.76 s; 240 MB |
+
+  Within its cap the rules oracle adds at most about 2.2 s and under about 170 MB. Declaring only
+  the pairs that must commute (`Independent`) keeps the gate fast. Running out of memory or
+  goroutine stack kills the process rather than returning an error: plan memory for the largest
+  machines you build. Test suites that build many combinator machines run slower, notably under
+  `-race`.
+- **Audit layers.** `PolicyDigest` is unchanged (it covers `PolicyBytes` only, by position). Use
+  the new `Registry.PolicyIdentityDigest` to bind names and declared pairs too.
+
+### Behaviour changes
+
+Every change below can make code that worked with v0.11.0 behave differently. Details are in the
+sections that follow.
+
+- **Verification.** `Build` checks every event pair exactly (no footprint shortcut), over the
+  valid states plus the zero state. `BuildCompositional`'s footprint check tries every value of
+  each outside variable and of each pair of them, and refuses machines wider than 64 bits.
+- **The oracle gate.** `Build`, `SynthesizeWith` (so `BuildOrSynthesize` and `Synthesis.Machine`)
+  and `BuildCompositional` return a machine only after the table oracle certifies its tables;
+  `Build` also runs the rules oracle within `RulesOracleMaxWork`. Otherwise they fail closed.
+  `Synthesis.Machine` decides from what `SynthesizeWith` recorded, not from the exported fields.
+- **Names.** Duplicate event names, duplicate variable names and repeated enum labels are
+  rejected.
+- **Closure results.** Results that are not states of the machine are rejected (no clamping);
+  lazy machines and `FedMachine` panic on them, and lazy `Apply` and `Normalize` panic on such an
+  input.
+- **Mid-run changes.** A registry changed by a rule closure while it is verified is rejected;
+  `Federation.Build`, `Certify` and `DiagnoseCycle` work on the federation as called and reject a
+  component changed while they run. Declared rules, `And`/`Or` and `Enum` copy the caller's
+  slices. `Synthesis.Machine` uses the registry as synthesized.
+- **API.** `Machine.MergeProjection` returns an error for out-of-domain values.
+  `BuildOrSynthesize` falls back to synthesis only on compensation failures.
+- **Federations and certificates.** Certificate digests bind names and declared pairs (every
+  digest changed). `Certificate.Verify` and `EmbedCertified` rebuild every component with `Build`;
+  `Verify` requires each key to be its registry's name. A morphism's `Shared()` variables must be
+  its target's; `BuildCoordinated` rejects a point that matches no morphism by `Src`, `Dst` and
+  shared set; `Certify` checks input ports by value; `FedMachine.Of` and `Apply` panic for a
+  registry outside the federation.
+- **Output.** `Report.String` lines change (see above); `WriteConvergenceTables` writes format 2.
 
 ### Security
 - **Duplicate event names let `Build` certify a machine that diverges.** A registry could declare
@@ -292,12 +208,158 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EmbedCertified` did not re-check component convergence, so a certificate issued by v0.11.0 for a
   non-convergent component would still be accepted after the fix above. Both now rebuild every
   component with `Build`, and `EmbedCertified` re-checks internal morphisms from the certificate's
-  tables. Certificates issued by v0.11.0 are re-verified on load by the fixed checker; the
+  tables. A certificate whose digest matches is re-verified on load by the fixed checker; the
   certificate version is unchanged (see "Versioning and trust policy" in CERTIFICATE-DESIGN.md).
+  Certificates issued by v0.11.0 no longer match their digest (see "certificate digests bind
+  names" under Changed) and must be re-issued.
 - **`BuildCompositional` accepted machines wider than 64 bits.** `State` is one `uint64`; variables
   past bit 64 were frozen at 0 yet the machine was certified. It now returns an error.
 
+### Added
+- **The rules oracle in the gate.** After the table oracle certifies a machine, `Build` also runs the
+  rules oracle (`checkBuild` from the normalization-confluence proof, generated as Go and vendored
+  in `internal/oracle` with the table oracle; `oracle.CheckRules`) on the machine's combinator rules,
+  exactly what `WriteMachineAST` and `WriteDeclaredPairs` write. It re-derives every step from the
+  expression trees, so it does not trust gsm's tables.
+  - It runs on machines whose rules are all combinators, whose work is at most
+    `RulesOracleMaxWork` (2^29), and that are inside its fragment. The work (`oracle.RulesCost`)
+    is an upper bound on the steps `checkBuild` takes in the generated Go, counted from the
+    expression trees, the checked pairs (every pair when none is declared) and the repair depth:
+    per state, normalizing it, and for each checked pair both events' guards, effects and
+    normalizations, twice. Otherwise the table oracle alone certifies the machine and the new
+    `Report.RulesOracleSkipped` says why, with the work.
+  - `Report.Assurance` is the new `AssuranceOracleTablesAndRules` when both ran;
+    `AssuranceOracleTables` now means the table oracle only.
+  - A rejection (repair does not terminate, or a declared pair does not commute), or no verdict,
+    fails `Build` closed, with the error in `Report.OracleDisagreement`.
+  - `SynthesizeWith` and `BuildCompositional` run the table oracle only.
+  - Cost (generated Go, Apple M-series, `TestRulesOracleCostPerStep`): at most about 4 ns per
+    step (4.04 ns on a wide Int domain; 0.7 to 3.2 ns elsewhere). Memory is mostly the box, about
+    states x (variables + 1) list cells: from about 100 bytes per state at 2 variables to about
+    220 at 20, plus a few MB. Within the cap that is at most about 2.2 s and under about 170 MB
+    (the most measured within it: 160 MB, at 2^20 states of 10 four-valued Ints).
+  - Output change: the report's oracle-failure header is now `Verified oracle: did not certify`,
+    and a certified report that skipped the rules oracle ends with a `Rules oracle: not run:` line.
+- **The oracle gate: the proof re-checks every machine, in-process.** `Build`, `SynthesizeWith`
+  (and so `BuildOrSynthesize` and `Synthesis.Machine`) and `BuildCompositional` (per footprint
+  component) now give the tables gsm's verification produced to the table oracle.
+  - **The oracle.** It is `check_fn` from the normalization-confluence proof (the table oracle
+    over accessor functions, proven equal to `check_tables` and to the list oracle `check_fast`;
+    its guarantee, `check_fn_converges`, is stated on the accessors), generated as Go
+    from the Rocq extraction and vendored in `internal/oracle` (no OCaml, no subprocess, no
+    dependencies). `internal/oracle/PROVENANCE` pins the proof commit, the prover image and the
+    hashes. CI regenerates the file from them and requires the same bytes.
+  - **Failing closed.** If the oracle does not certify the tables, the call returns an error and
+    no machine, and `Report.OracleDisagreement` holds the oracle's error. With deterministic
+    rules, a disagreement points at a bug in gsm's verification or in the oracle's generator. An
+    impure rule, which gives different results when `BuildCompositional` runs it again, can cause
+    one too.
+  - **`Federation.Build` and `Certificate.Verify`.** They rebuild components with `Build`, so
+    every component's tables are gated. The morphism checks (M1, acyclicity, monotone-cycle
+    iteration) and certificate re-derivation are gsm's Go code and are not oracle-gated.
+  - **In place.** The oracle reads the machine's tables through accessors (`oracle.Lookup`,
+    `oracle.CheckLookup`) and copies nothing: the gate adds about 12 MB (the renumbering of the
+    in-domain states) at 2^20 states. With 20 events and every pair declared, `Build` with the
+    gate takes about 5.6 s (0.76 s without) and three builds peak at about 330 MB RSS (240 MB
+    without).
+  - **Limits.** Running out of memory or goroutine stack kills the process rather than returning
+    an error.
+  - **Output change: `Report.String` ends with an `Assurance:` line.**
+    - A certified report prints it after `Convergence: GUARANTEED`.
+    - Every report that is not certified now ends with `Assurance: not certified`. This covers a
+      failed WFC or CC as well as an oracle rejection (which prints `Convergence: NOT CERTIFIED
+      (no machine)`).
+    - Code that pins or parses report text sees the new line.
+  - **`Synthesis.Machine` decides from what `SynthesizeWith` recorded.** Changing the exported
+    `Convergent` or `Assurance` fields does not make it return a machine.
+  - **`Report.Assurance`** (and `Synthesis.Assurance`) record what certified a machine:
+    `AssuranceOracleTables`, or `AssuranceOracleComponents` for `BuildCompositional`, where
+    cross-component independence still rests on gsm's footprint check.
+- **Example-machine gate in CI.** Every machine gsm's examples make (each `Example` function and
+  the README run block) is checked by both extracted checkers in the oracle job, against a catalog
+  of every machine and its expected verdict (`.github/oracle/machines.txt`). The job fails if a
+  checker rejects a listed machine, disagrees with `Build`, or an example makes a machine the
+  catalog does not list; a test fails if an example is missing from the catalog. A program built
+  with `-tags gsmgate` and run with `GSM_GATE_DIR` set records every machine it makes (each `Build`
+  result, synthesized and compositional machine) for `internal/cmd/gsmgate`, which projects using
+  gsm can run on their own machines. Without the tag nothing changes. The checker binaries are
+  named in `pins.env`, so a faster checker replaces one by pin.
+- **`Registry.WriteDeclaredPairs`** writes the pairs CC is checked for, in the format the rules
+  oracle takes as an optional second file. It is not part of `WriteMachineAST`'s output, so
+  `PolicyBytes` and `PolicyDigest` are unchanged.
+- **The oracle cross-check is required in CI.** A new `oracles` job builds both extracted checkers
+  from a pinned proof commit in a digest-pinned Rocq image, checks them against pinned SHA-256
+  hashes (`.github/oracle/`), and runs the whole test suite with `GSM_REQUIRE_ORACLES=1`, so the
+  oracle tests fail instead of skipping when a checker is missing.
+- **Differential test of every `Build`.** `oracle_differential_test.go` cross-checks every machine
+  the test suite builds, plus 600 random combinator machines (`GSM_DIFF_RANDOM` sets the count),
+  against both checkers, and fails on any disagreement with `Build`.
+- `TestDocSnippets`: every Go block in the top-level docs type-checks, and README examples marked
+  `run` execute (so an example whose machine does not `Build` fails CI).
+- A property test and fuzz target comparing `Build` and `BuildCompositional` against brute-force
+  enumeration of event orderings on random machines whose guards read other events' writes.
+- Benchmarks for `Build` and `BuildCompositional`.
+
 ### Changed
+- **The table oracle is faster with many events and declared pairs.** Pinned to
+  normalization-confluence#12: `check_fast` computes the same boolean (`check_fast_eq` is
+  unchanged), reading each step target's column once per state instead of once per declared
+  pair. Verdicts are unchanged; the extracted binaries' hashes change.
+- **The rules oracle now checks gsm's largest machines.** The pinned `astchecker` died with
+  `Stack_overflow` under OCaml 4.14 on 2^20-state machines: it multiplied domain sizes and
+  converted every variable read to Z through unary arithmetic, and enumerated the valuations
+  with non-tail recursion. normalization-confluence#11 replaces each with a proven-equal form
+  (or, for the enumeration, one proven to have the same members), with no new extraction
+  directives; verdicts are unchanged. Pinned to its merge commit.
+- **Behaviour change: certificate digests bind names and declared pairs.** Certificate digests
+  covered each component's rules in the oracle's positional format only, so two subsystems whose
+  components differed only in an event name, a variable name or kind, an enum label, or the
+  declared `Independent` pairs had the same digest, although replay, projections, certificate
+  tables, input ports, `Set` and the CC check address those. The new `Registry.PolicyNames`
+  serializes them, and certificate digests now cover it. Every certificate digest changes:
+  certificates issued earlier no longer match and must be re-issued with `Certify`. Per the
+  development versioning policy the tag (`gsm-fedcert-v3`) is unchanged. The test certificate
+  `testdata/payship-cert-v0.11.0.json` has its `Digest` recomputed (its other fields are as
+  v0.11.0 issued them). The digest also quotes every name it frames (component, table target,
+  sources and shared variables, input ports), which unquoted could collide (a port `a.b`/`c`
+  digested like `a`/`b.c`), and digests the declared pairs as a set, so the same pairs declared
+  in another order, direction or more than once digest alike. `CERTIFICATE-DESIGN.md` states what the digest covers: a morphism or
+  resolver closure is bound only through its table, at one representative target.
+- **`PolicyDigest` is unchanged and does not cover names.** It stays SHA-256(`gsm-policy-v1` "\n"
+  `PolicyBytes`), the oracle's input, which external audit layers recompute. That input addresses
+  variables and events by position, so registries that differ only in names, kinds, labels or
+  declared pairs share a `PolicyDigest`. The new `Registry.PolicyIdentityDigest` (tag
+  `gsm-policy-identity-v1`) covers `PolicyBytes` and `PolicyNames` together. Moving the names into
+  the serialized format, and so into `PolicyDigest`, is planned before 1.0.
+- **The table oracle now certifies gsm's largest machines.** The pinned `checker` (built with
+  OCaml 4.14.2 in the pinned image) died with `Stack_overflow` on 2^20-state tables, gsm's maximum
+  size, so those machines failed the oracle cross-check with an input error. The oracle is now
+  pinned to `check_fast` (normalization-confluence `TableFast.v`), proven equal to `check_tables`
+  and axiom-free. Its stack depth does not grow with the number of states, events or declared
+  pairs. On 2^20 states with 10 declared pairs it takes about 5 s (OCaml 4.14.2); the previous
+  checker took about 60 s there when built with OCaml 5, and never completed with the pinned 4.14.2
+  build. `TestConvergenceTables_LargestMachine` (20 flags, 2 events) now requires the oracle to
+  certify a 2^20-state machine.
+- **The extracted checkers decide exactly what `Build` checks.** Both oracles previously checked a
+  different property, so the differential test had to excuse whole classes of disagreement. Now
+  they check `Build`'s: repair terminates from every state (the rules oracle used to require it
+  only where an event reaches), only the pairs declared `Independent` are checked (both used to
+  check every pair), and commutation is checked on the valid states plus the zero state (the table
+  oracle used to check invariant-invalid encodings, and the rules oracle skipped an invalid zero
+  state). The differential test now fails on any disagreement except a rules-oracle refusal
+  outside its arithmetic fragment, and the table oracle also checks, and must reject, the tables
+  of every machine `Build` rejects for CC. Proofs: normalization-confluence `TableCheck.v`,
+  `Trace.v` and `checkBuild` in `AstChecker.v`.
+- **`WriteConvergenceTables` writes format version 2**: a `gsm-tables 2` header, the normal-form
+  table, and the declared pairs, so the table oracle can check `Build`'s property. It also no
+  longer panics on a synthesized machine, and fails rather than writing a wrong id if a table
+  entry is not an in-domain encoding.
+- **`WriteMachineAST` refuses a variable from another registry.** The rules format names a variable
+  by index only, so a `Var` from another registry with the same name and index (which gsm reads
+  with that registry's minimum and domain) was exported as this registry's variable, a different
+  machine.
+- **`Do()` with no assignments is a combinator rule.** It returned a nil `Transform`, so an event
+  declared with an empty effect could not be exported.
 - **Behaviour change:** `Machine.MergeProjection` returns an error, and leaves the state
   unchanged, for a projection value outside its variable's domain (out of range, or wider than
   the variable's bit field, which it used to truncate silently) and for a state that is not a
@@ -325,19 +387,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anyway.
 
 ### Fixed
+- **The example-machine gate recorded synthesis candidates.** `SynthesizeWith` builds a candidate
+  machine to have the table oracle certify it, and the `gsmgate` hook sat where that candidate is
+  built, so a gate run recorded it as well as the machine `Synthesis.Machine` hands out (twice for
+  `BuildOrSynthesize`), and recorded a candidate the oracle refused. The hook is now in
+  `Synthesis.Machine`, after its certified check: the gate records only machines a program receives.
+- **Behaviour change: `FedMachine.Of` and `FedMachine.Apply` panic for a registry outside the
+  federation.** They used the lookup's zero value and acted on component 0. They now panic naming
+  the registry, as `Apply` does for an unknown event (`ApplyNamed` already returned an error).
+- **Behaviour change: `BuildCoordinated` rejects a coordination point that names no morphism.** It
+  ignored such a point and built the federation without the coordination the caller asked for.
+- **Behaviour change: an enum may not repeat a label.** `Set`, `TrySet` and the label sugar resolve
+  a label to its first index, so a repeated label was unreachable. `Build` and every other path
+  that checks names return `gsm: registry "r": enum "e" has duplicate label "l"`.
+- **Behaviour change: a morphism's `Shared()` variables must be its target's.** They were never
+  checked, so a `Var` of another registry at the same index made `Federation.Build` panic, or one
+  with the same name and another range was taken for the target's. `Federation.Build` and
+  `DiagnoseCycle` now return `morphism a→b: Shared() variable "v" is not a variable of registry
+  "b"`.
+- **Behaviour change: `BuildCoordinated` matches a point's `Shared`.** A point removes the
+  morphisms matching its `Src`, `Dst` and shared variable set (in any order), as
+  `CoordinationPlan` returns them; one that matches no morphism on all three is an error.
+- **Behaviour change: `Certify` checks an input port's variable by value.** It used the variable's
+  index only, so a `Var` of another registry declared the variable at that index of this one as a
+  port (or an index past the end passed). A port's variable must now be this registry's variable
+  (same name, kind, layout, range and labels).
+- **`DiagnoseCycle` analyzes the federation as called.** Like `Federation.Build`, it works on a
+  frozen copy and rejects a component that a morphism closure changed while it ran (it returned
+  a diagnostic about a different registry, with no error).
+- **A declared combinator rule could be rewritten through the caller's slice.** `Do(as...)`
+  returned the caller's slice and `DeclEvent`, `DeclEventGuarded` and `DeclInvariant` kept it, and
+  `And(ps...)`/`Or(ps...)` kept theirs, while write sets and footprints were computed once. Changing
+  an element afterwards changed the rule without changing anything the build checks, so a
+  `BuildCompositional` machine's `Apply` could run a rewritten, unverified rule (an event writing
+  outside its declared write set, order-dependent), and the policy digest changed after the build.
+  The declarations and `And`/`Or` now copy what they are given. `Enum` also copies its labels.
+- **`Federation.Build` and `Certify` could act on declarations no check saw.** Both build the
+  components, then run morphism closures (verification, and for `Certify` table extraction). A
+  closure that declared on a component there left the registry and the `FedMachine`'s machine for
+  it differing silently, and `Certify` digested the declaration. A closure that added a morphism
+  to the federation reached the later passes (the monotonicity check) but not the machine, and
+  `Certify` put its unverified table into the certificate. Both now work on a copy of the
+  federation's wiring taken when they are called, so a morphism, component, or resolver added to
+  the federation while they run is ignored (not verified, and not in the machine or certificate),
+  and they reject a component registry changed while they run (`gsm: registry "r" was changed
+  while it was being verified ...`). **Behaviour change:** a federation whose closures declare on
+  a component while it is built or certified is now rejected.
+- **The rules oracle used the wrong arithmetic.** `astchecker` (normalization-confluence) evaluated
+  rules over the natural numbers, so `Sub` truncated at 0 and a guard such as
+  `Lt(Sub(V(a), V(b)), Lit(0))` was never true. It certified machines that `Build` correctly
+  rejects. It now evaluates with gsm's signed arithmetic, and refuses to certify expressions that
+  could exceed 2^31-1 in magnitude or writes that could store a negative value into a two-valued,
+  minimum-0 variable (a `Bool` stores `value != 0`). `WriteMachineAST` now exports negative
+  minimums and literals; its output is otherwise unchanged, so `PolicyDigest` is unchanged for
+  every policy that exported before.
 - The README's flagship example did not build (`Build` correctly rejects it), so pasting it
   panicked. It is replaced by a convergent order-fulfillment machine that shows the pattern (events
   record facts; an invariant derives the outcome) and explains why the guarded draft fails.
   CONCEPTS.md taught the same guard as a fix for a CC failure; it now shows why it diverges.
 - Docs that described `Build`'s footprint shortcut, CC2 as holding "structurally", or combinator
   rules as needing no read check are corrected (README, THEORY, ARCHITECTURE, CONCEPTS).
-
-### Added
-- `TestDocSnippets`: every Go block in the top-level docs type-checks, and README examples marked
-  `run` execute (so an example whose machine does not `Build` fails CI).
-- A property test and fuzz target comparing `Build` and `BuildCompositional` against brute-force
-  enumeration of event orderings on random machines whose guards read other events' writes.
-- Benchmarks for `Build` and `BuildCompositional`.
 
 ## [0.11.0] - 2026-09-26
 
@@ -580,9 +689,22 @@ Federated registry networks: gsm now composes multiple registries connected by d
 - Full test suite covering WFC, CC, compensation, and failures
 - Documentation with usage examples, API reference, and design rationale
 
-[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/blackwell-systems/gsm/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/blackwell-systems/gsm/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/blackwell-systems/gsm/compare/v0.9.2...v0.10.0
+[0.9.2]: https://github.com/blackwell-systems/gsm/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/blackwell-systems/gsm/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/blackwell-systems/gsm/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/blackwell-systems/gsm/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/blackwell-systems/gsm/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/blackwell-systems/gsm/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/blackwell-systems/gsm/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/blackwell-systems/gsm/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/blackwell-systems/gsm/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/blackwell-systems/gsm/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/blackwell-systems/gsm/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/blackwell-systems/gsm/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/blackwell-systems/gsm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/blackwell-systems/gsm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/blackwell-systems/gsm/compare/v0.1.2...v0.1.3
