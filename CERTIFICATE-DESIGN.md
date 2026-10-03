@@ -169,9 +169,11 @@ in-process table oracle (generated from the proof) also re-certifies every compo
 extracted federation oracle, for the morphisms, is planned separately. This is what makes a verifier fix
 safe without a version bump: a certificate issued by an older, weaker verifier is re-checked by the
 current one on load. For example, a v0.11.0 certificate for the naive pay/ship component (certified
-then through Build's unchecked disjointness shortcut) still matches its digest, and both
-`EmbedCertified` and `Verify` refuse it because the CC re-check finds the divergence
-(`certificate_recheck_test.go`, with the v0.11.0 certificate as test data).
+then through Build's unchecked disjointness shortcut), with its digest recomputed under the current
+digest, is refused by both `EmbedCertified` and `Verify` because the CC re-check finds the
+divergence (`certificate_recheck_test.go`, with that certificate as test data). A certificate as
+v0.11.0 issued it no longer matches its digest at all, since the digest now also binds names and
+declared pairs, and is refused for that; it must be re-issued with `Certify`.
 
 What re-checking costs: `EmbedCertified` builds each certified component's step tables anyway (the
 runtime needs them), so the CC re-check adds two table lookups per state per event pair. What it

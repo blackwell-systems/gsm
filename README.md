@@ -579,7 +579,8 @@ declared-independent events reach the same state from those states.
   from `Registry.WriteDeclaredPairs`): recomputes every event step from the combinator rules and
   checks the same property, with no footprint shortcut. Without the pairs file it checks every
   pair, which is stronger, so its verdict then holds for any declaration. The pairs are a separate
-  file so that `PolicyBytes` and every digest stay as they were. Closure rules cannot be exported.
+  file so that `PolicyBytes` and `PolicyDigest` stay as they were (certificate digests and
+  `PolicyIdentityDigest` do cover the declared pairs). Closure rules cannot be exported.
   Its arithmetic is gsm's
   (signed integers, signed comparisons, clamped writes). It refuses to certify two things it does
   not model: an expression that could exceed 2^31-1 in magnitude (Go's `int` wraps there on
