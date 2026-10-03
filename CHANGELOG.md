@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.0] - YYYY-MM-DD
+## [0.12.0] - 2026-10-03
 
 A soundness release. `Build` in v0.11.0 and earlier certified some machines that do not converge
 (it skipped the CC check for pairs whose invariant footprints were disjoint, and never checked what
