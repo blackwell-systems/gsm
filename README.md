@@ -199,7 +199,17 @@ r.Independent("deposit", "send_notification")
 r.Independent("withdraw", "send_notification")
 ```
 
-**Independent events** can arrive in either order (they're not causally related). Only declared pairs will be checked for commutativity.
+**Independent events** can arrive in either order (they're not causally related). Declared pairs are certified: `Build` fails if one does not commute.
+
+**Every undeclared pair must be delivered in causal order.** Declared-only mode is sound only if each pair you did not declare reaches every replica in one fixed order (normalization-confluence `coq/Trace.v` `run_tequiv`, `coq/CausalReplay.v` `causal_tequiv`). gsm cannot see your delivery order, so `Build` still checks every undeclared pair on its step tables (two lookups per state, no closure calls) and does not fail on them, but lists each one that does not commute in `Report.CausalOrderRequired`, with a witness state. The report then reads:
+
+```
+  Undeclared pairs: 5 checked, 3 do not commute: each must be causally ordered (not independent), delivered in the same order at every replica
+    (close, deposit) from {open=true, bal=0, notified=false}: close→deposit gives ..., deposit→close gives ...
+  Convergence: GUARANTEED under causal delivery of the 3 undeclared pair(s) above
+```
+
+If your runtime can reorder a listed pair, declare it `Independent` (and fix the rules until it commutes) instead. An empty list means every pair commutes and the declarations cost nothing.
 
 `Build` checks every declared pair exactly, whatever the pair's footprints. Two events that write different variables can still fail to commute: a guard or effect may read a variable the other event writes (see [Why not guard the shipment on payment?](#example-order-fulfillment)). Only `BuildCompositional` skips pairs by footprint, and only after it has checked what each event reads (see [Compositional Verification](#compositional-verification)).
 
@@ -338,11 +348,11 @@ fed.Morphism(hr, door).Shared(access).Map(hrToDoor).Add().
     })
 ```
 
-Multi-source convergence is the paper's **Federated Convergence with Resolution** theorem (§8), which holds whenever the resolver is a function of its sources alone (**R1**) and preserves target validity (**R2**, the multi-source generalization of M1). gsm certifies exactly those hypotheses: it **exhaustively verifies at build time** that, for *this* federation, the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same verify-the-preconditions contract it applies to single-registry WFC/CC. A resolver that could diverge (violates R2), reads local state (violates R1), or writes non-shared variables is rejected; a multi-source target *without* a resolver is rejected.
+Multi-source convergence is the paper's **Federated Convergence with Resolution** theorem (§8), which holds whenever the resolver is a function of its sources alone (**R1**) and preserves target validity (**R2**, the multi-source generalization of M1). gsm certifies exactly those hypotheses: it **exhaustively verifies at build time** that, for *this* federation, the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same verify-the-preconditions contract it applies to single-registry WFC/CC. A resolver that could diverge (violates R2), reads local state (violates R1), or writes non-shared variables is rejected; a multi-source target *without* a resolver is rejected. A target has exactly one resolver: a second `Resolve` for the same target, or an embedded sub-federation that brings a resolver for a target that already has one, panics rather than replacing the first.
 
 > Single-source authority is the special case of a resolver with one source. Both are backed by the paper's proofs (Federated Convergence, and its multi-source generalization); gsm's build-time checks establish the theorems' preconditions.
 
-**Monotone cycles.** Acyclicity is only needed to tame *non-monotone* repair (the divergence counterexample is negation, which is antitone). With `Federation.AllowMonotoneCycles()`, cyclic networks are allowed when every morphism/resolver is **monotone** (verified by enumeration); `Build` then computes the normal form by Kleene iteration to the least fixed point, which converges order-independently even on arbitrary cyclic graphs (the paper's *Monotone Convergence Despite Cycles*, via Knaster–Tarski + chaotic iteration). State-based CRDTs are the compensation-free special case of this monotone regime; that CRDTs (op- and state-based) are a *strict* sub-fragment of normalization confluence is machine-checked in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (see [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)). Non-monotone cycles are still rejected. When a cycle is rejected, `Build`'s error names the offending loop, and `Federation.DiagnoseCycle` iterates the loop's repair to report whether it settles or oscillates (the loop-composite fixed-point witness), so you can see exactly which constraint cycle cannot converge. To *accept* such a network rather than reject it, `Federation.CoordinationPlan` returns a set of morphism edges (shared variables) to place under an external single writer or consensus, and `Federation.BuildCoordinated(plan)` builds the federation given that coordination: the coordinated edges become external inputs and the acyclic residual converges coordination-free. This is a localized mixed-consistency partition (consensus only on the obstructing edges); the plan is a correct feedback edge set of size at most the number of independent cycles, not necessarily the minimum, which is the group feedback edge set problem (NP-hard in general).
+**Monotone cycles.** Acyclicity is only needed to tame *non-monotone* repair (the divergence counterexample is negation, which is antitone). With `Federation.AllowMonotoneCycles()`, cyclic networks are allowed when every morphism/resolver is **monotone** (verified by enumeration); `Build` then computes the normal form by Kleene iteration to the least fixed point, which converges order-independently even on arbitrary cyclic graphs (the paper's *Monotone Convergence Despite Cycles*, via Knaster–Tarski + chaotic iteration). State-based CRDTs are the compensation-free special case of this monotone regime; that CRDTs (op- and state-based) are a *strict* sub-fragment of normalization confluence is machine-checked in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (see [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)). Non-monotone cycles are still rejected. The opt-in belongs to the federation it is called on: embedding a sub-federation that opted in (with `Embed` or `EmbedCertified`) does not opt the parent in, so a parent with a cycle must call `AllowMonotoneCycles` itself (`Build`'s cycle error names the opted-in sub). When a cycle is rejected, `Build`'s error names the offending loop, and `Federation.DiagnoseCycle` iterates the loop's repair to report whether it settles or oscillates (the loop-composite fixed-point witness), so you can see exactly which constraint cycle cannot converge. To *accept* such a network rather than reject it, `Federation.CoordinationPlan` returns a set of morphism edges (shared variables) to place under an external single writer or consensus, and `Federation.BuildCoordinated(plan)` builds the federation given that coordination: the coordinated edges become external inputs and the acyclic residual converges coordination-free. This is a localized mixed-consistency partition (consensus only on the obstructing edges); the plan is a correct feedback edge set of size at most the number of independent cycles, not necessarily the minimum, which is the group feedback edge set problem (NP-hard in general). A sharper plan, which coordinates only the cycles whose holonomy is non-trivial and accepts consistent cycles (such as lossless round-trips) without coordination, is designed in [HOLONOMY-COORDINATION-DESIGN.md](HOLONOMY-COORDINATION-DESIGN.md).
 
 **Compositional construction.** A verified sub-federation embeds into a larger one with `Federation.Embed`: define and verify a subsystem on its own, then reuse it as a unit and connect it with more morphisms. The composed federation runs as the flat convergent machine (a `FedState` holds one `State` per component, so no product state space is materialized). This realizes the paper's compositional-collapse result — a convergent sub-federation collapses to an effective registry — enabling modular, hierarchical verification and black-box reuse of subsystems.
 
@@ -357,7 +367,7 @@ m, _, _ := gsm.NewFederation("storefront").
     Build()
 ```
 
-**Certificate-based reuse.** A verified sub-federation can be packaged as a `Certificate` and reused without re-verifying its internals. `sub.Certify()` builds and verifies the subsystem and returns a certificate carrying the verdict, each morphism and resolver in extensional table form (reified from the finite, source-determined maps), and a digest over the component rules, the names and declared pairs they are addressed by, and those tables (it binds each morphism closure only through its table, which records the images at one representative target). `EmbedCertified(sub, cert)` embeds it on that certificate: `Build` re-checks the internal morphisms from the certificate's tables instead of re-verifying their closures, checks the seam (the boundary morphisms) and the whole-graph acyclicity, and rebuilds each certified component with `Build`, which re-checks its convergence. A consumer that receives a certificate re-checks it independently with `cert.Verify(components)`, which re-derives validity preservation (M1/R2) from the tables rather than the producer's morphism closures and re-checks every component's convergence, so a composition is confirmed without trusting the producer's code or its recorded verdict. An outer morphism may read a certified subsystem, or write one of its declared **input ports** (shared variables the sub leaves free): declare them at `Certify(gsm.Port{Registry: r, Var: v})`, and `Build` verifies each inbound boundary morphism at the seam (M1/R2). A write to any other (sealed) variable is rejected. See [CERTIFICATE-DESIGN.md](CERTIFICATE-DESIGN.md).
+**Certificate-based reuse.** A verified sub-federation can be packaged as a `Certificate` and reused, pinned to what was certified. `sub.Certify()` builds and verifies the subsystem and returns a certificate carrying its build report, each morphism and resolver in extensional table form (reified from the finite, source-determined maps), and a digest over the component rules, the names and declared pairs they are addressed by, and those tables (it binds each morphism closure only through its table, which records the images at one representative target; the digest is an integrity binding, not authentication). `EmbedCertified(sub, cert)` embeds it on that certificate: `Build` re-checks the internal morphisms from the certificate's tables, re-runs the live internal closures over every valid source and target state so they cannot differ from the tables there (a closure that writes a non-shared variable is refused, as plain `Build` refuses it), checks the seam (the boundary morphisms) and the whole-graph acyclicity, and rebuilds each certified component with `Build`, which re-checks its convergence. A consumer that receives a certificate re-checks it independently with `cert.Verify(components)`, which re-derives validity preservation (M1/R2), table completeness (one row per valid source state, valid source ids) and, for a cyclic `Monotone` certificate, monotonicity from the tables rather than the producer's morphism closures and re-checks every component's convergence, so a composition is confirmed without trusting the producer's code or its recorded report. An outer morphism may read a certified subsystem, or write one of its declared **input ports** (shared variables the sub leaves free): declare them at `Certify(gsm.Port{Registry: r, Var: v})`, and `Build` verifies each inbound boundary morphism at the seam (M1/R2). A write to any other (sealed) variable is rejected. See [CERTIFICATE-DESIGN.md](CERTIFICATE-DESIGN.md).
 
 <!-- gocheck: check federation -->
 ```go
@@ -390,6 +400,9 @@ m, rep, err := r.BuildCompositional()
 // rep.Components          -> number of independent footprint components
 // rep.MaxComponentStates  -> size of the largest component's subspace (the real cost)
 // rep.FootprintChecked    -> footprint conformance held
+
+// Rules written as Go closures need an explicit opt-in (see below):
+m, rep, err = r.BuildCompositional(gsm.TrustClosureFootprints())
 ```
 
 **How it works.** gsm partitions the variables into footprint-connected components (union-find
@@ -407,15 +420,27 @@ For combinator rules the check is syntactic and exact. A closure is opaque, so g
 every state of its component, it changes each outside variable, and each pair of outside
 variables, to every other value and confirms the closure's result does not change. That catches
 dependence on one or two outside variables (such as `paid && inStock`), but not a closure that
-depends only on three or more outside variables jointly. If your rules are closures with
-wide guards, use `Build` (exact, no footprint assumption) or the combinator vocabulary.
+depends only on three or more outside variables jointly. Because of that gap, `BuildCompositional`
+accepts closure rules only when you pass `gsm.TrustClosureFootprints()`, acknowledging that each
+closure reads and writes only its declared footprint and is deterministic. Without the option, a
+registry with any closure rule (`Holds`/`Repair`/`Apply`/`Guard`) is rejected with an error naming
+the first one. With it, `Report.Assurance` is `AssuranceOracleComponentsTested`, whose text says
+the footprint check for closures is a perturbation test, not exact. If your rules are closures
+with wide guards, use `Build` (exact, no footprint assumption) or the combinator vocabulary, which
+`BuildCompositional` accepts with no option.
 
 **Trade-offs.** The returned `Machine` is *lazy*: it computes `Apply`/`Normalize` at runtime from
 the rules instead of via a precomputed table lookup, and `Export` is unavailable (there are no
 global tables to serialize). Each closure result is checked to be a state of the machine as it is
-computed, and `Apply` panics if one is not. Preconditions: every invariant declares its footprint and every
-event its write set (both automatic with the combinator vocabulary), every event reads only what
-it writes, the zero state is valid, and the machine fits in 64 bits of state.
+computed, and `Apply` panics if one is not. `Apply` and `Normalize` also panic, with an
+explanation, if the repairs take more steps than the build verified any repair chain can (the sum
+of each component's deepest chain): that only happens when a rule breaks its footprint or is not
+deterministic, and the repairs could otherwise cycle forever. Preconditions: every invariant
+declares its footprint and every event its write set (both automatic with the combinator
+vocabulary), every event reads only what it writes, the zero state is valid, every variable's
+range fits its bit field, and the machine fits in 64 bits of state. A closure whose footprint test
+would take more than 2^28 closure calls (wide variables outside its footprint) is rejected up
+front.
 
 ## Verification Report
 
@@ -496,7 +521,10 @@ certified the machine:
   tables; the rules oracle did not run, and `Report.RulesOracleSkipped` says why.
 - `AssuranceOracleComponents` (`BuildCompositional`): the oracle certified every component's
   tables. That cross-component pairs commute rests on gsm's footprint check, which the oracle does
-  not see.
+  not see; with combinator rules that check is exact.
+- `AssuranceOracleComponentsTested` (`BuildCompositional` with `TrustClosureFootprints`, on a
+  machine with closure rules): as above, but the footprint check for closures is a perturbation
+  test, not exact.
 
 **The rules oracle in the gate (`Build`).** After the table oracle, `Build` also runs the rules
 oracle, `checkBuild` from the proof (`AstChecker.v`), generated as Go the same way. It reads the
@@ -533,6 +561,9 @@ oracle-gated:
 - the acyclicity and topological order;
 - the Kleene iteration of monotone cycles;
 - a certificate's digest and morphism tables.
+
+`FedReport.Assurance` says this for each built federation, and `FedReport.Checks` lists the
+federation-level checks that ran; `FedReport.String()` prints both above the component reports.
 
 This matches CERTIFICATE-DESIGN.md: an extracted federation oracle is planned separately.
 
@@ -593,12 +624,12 @@ Both reject the guarded-shipment machine above. Neither shares the footprint ass
 
 **What gsm recomputes itself.** Independently of the oracles, gsm does not trust a stored
 verdict. `Certificate.Verify` recomputes the certificate digest from the consumer's registries,
-re-derives validity preservation (M1/R2), input-port freeness, and acyclicity from the
-certificate's morphism tables, and rebuilds every component with `Build` (WFC and CC). When
-`Build` runs on a federation containing `EmbedCertified` subsystems, it recomputes the digest,
-re-derives M1/R2, port freeness, and acyclicity from the tables for the internal morphisms, and
-rebuilds every certified component with `Build`; it skips only re-verifying the internal
-morphisms from their closures. The certificate's recorded `Report` is never used for a decision.
+re-derives validity preservation (M1/R2), table completeness, input-port freeness, and
+acyclicity (or monotonicity, for a cyclic `Monotone` certificate) from the certificate's morphism
+tables, and rebuilds every component with `Build` (WFC and CC). When `Build` runs on a federation
+containing `EmbedCertified` subsystems, it recomputes the digest, re-derives the same conditions
+from the tables for the internal morphisms, re-verifies the live internal closures over every
+valid source and target state, and rebuilds every certified component with `Build`. The certificate's recorded `Report` is never used for a decision.
 All of this is gsm's Go code: it removes trust in stored results, not in the Go verifier.
 
 ## Compensation Synthesis
@@ -656,6 +687,12 @@ syn, _ := r.SynthesizeWith(gsm.Prefer(cost), gsm.Optimal())
 Synthesis is the inverse of `Build`: `Build` **verifies** a compensation you wrote;
 `Synthesize` **generates** one (or proves impossibility). It's a natural fit for tooling or
 LLM-authored policy — describe the rules, get a convergent machine with a proof.
+
+`BuildOrSynthesize` builds the rules as written and falls back to synthesis only when the
+compensation is what failed. When it returns a synthesized machine, that machine does not run your
+invariants' `Repair` functions: the returned `*Synthesis` is non-nil, `Synthesis.Substituted` is
+true, `Synthesis.BuildError` holds the `Build` error that triggered the fallback, and
+`Synthesis.String()` opens with `REPAIR SYNTHESIZED`.
 
 ## Performance
 
@@ -758,6 +795,9 @@ The exported JSON contains:
 - Event names (ordered)
 - Normal form table: `nf[stateID] → normalized stateID`
 - Step table: `step[eventID][stateID] → normalized result stateID`
+- Verification metadata, including (format version 2) the event pairs CC was checked for
+  (`verification.pairs`, by event name) and whether that is every pair (`verification.all_pairs`).
+  Pairs outside that set are not guaranteed to commute. Version 2 only adds fields to version 1.
 
 ### Runtime Implementation (Python Example)
 

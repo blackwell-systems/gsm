@@ -35,6 +35,9 @@ type Machine struct {
 	lazy       bool
 	invariants []invariantDef
 	eventDefs  []eventDef
+	// repairBound is the most repair steps Normalize may take on a lazy machine: the
+	// sum of each component's deepest verified repair chain (see lazyRepairBoundError).
+	repairBound int
 }
 
 // Name returns the machine's name.
@@ -46,8 +49,18 @@ func (m *Machine) NewState() State {
 }
 
 // Apply processes an event, returning the unique normal form.
-// This is a single table lookup — O(1).
-// Panics if the event name is unknown.
+// This is a table lookup, O(1). Panics if the event name is unknown.
+//
+// An input that violates an invariant (a state restored from storage, or built by hand
+// with Set, SetBool or SetInt) is normalized first: Apply(s, e) is Apply(Normalize(s), e).
+// Order independence was verified from valid states (and from NewState's zero state, which
+// Apply takes as it is), so an unnormalized start would otherwise let two orders of the
+// same events disagree. On a table machine this costs one extra lookup.
+//
+// Delivery: the guarantee is that every order of one multiset of events reaches the same
+// state, so each event must be applied exactly once. An event listed in
+// Report.NotIdempotent changes the result when applied twice; suppress its redeliveries
+// (an at-least-once queue, a retry) before Apply.
 //
 // The input must be a state of this machine (see EffectFunc): one from NewState, Apply,
 // Normalize or MergeProjection, or a state of a structurally identical machine. A table
@@ -71,10 +84,20 @@ func (m *Machine) Apply(s State, event string) State {
 	}
 	if m.lazy {
 		m.mustBeInput("Apply", s)
+		if s.packed != 0 && !m.allHold(s) {
+			s = m.lazyNormalize(s)
+		}
 		return m.lazyApply(m.eventDefs[ei], s)
 	}
+	// Start from the normal form, which is in the verified domain. The zero state is
+	// in the domain as it is (verifyCC checks from it), and an encoding outside the
+	// machine has nf[s] == s, so both keep their table entry.
+	p := s.packed
+	if p != 0 && p < uint64(len(m.nf)) {
+		p = m.nf[p]
+	}
 	return State{
-		packed: m.step[ei][s.packed],
+		packed: m.step[ei][p],
 		vars:   m.vars,
 	}
 }
@@ -82,7 +105,11 @@ func (m *Machine) Apply(s State, event string) State {
 // Normalize returns the normal form of a state.
 // If the state is already valid, returns it unchanged. The input must be a state of this
 // machine, as for Apply. On a lazy machine it checks the input, runs the repairs, and
-// panics on an input or a result outside the machine, as Apply does.
+// panics on an input or a result outside the machine, as Apply does. It also panics,
+// rather than looping forever, when the repairs take more steps than BuildCompositional
+// verified any repair chain can (the sum of each component's deepest chain), which
+// happens only when a rule breaks its declared footprint or is not deterministic; Apply
+// normalizes the same way.
 func (m *Machine) Normalize(s State) State {
 	if m.lazy {
 		m.mustBeInput("Normalize", s)
@@ -136,10 +163,15 @@ func (m *Machine) mustBeState(kind, name, part string, in, out State) State {
 }
 
 func (m *Machine) lazyNormalize(s State) State {
-	for !m.allHold(s) {
+	in, last := s, ""
+	for steps := 0; !m.allHold(s); steps++ {
+		if steps == m.repairBound {
+			panic(m.lazyRepairBoundError(in, s, last, m.repairBound))
+		}
 		for _, inv := range m.invariants {
 			if !inv.check(s) {
 				s = m.mustBeState("invariant", inv.name, "repair", s, inv.repair(s))
+				last = inv.name
 				break
 			}
 		}
@@ -159,7 +191,9 @@ func (m *Machine) lazyApply(ev eventDef, s State) State {
 // received from a parent registry, returning the merged state. A distributed target node
 // uses it to incorporate its parent's shared component without holding the parent's state or
 // the federated machine. (Merging shared variables preserves local validity by the M1
-// guarantee, so no re-normalization is required.)
+// guarantee, so no re-normalization is required, provided p is the morphism image of a valid
+// source state, as SharedProjection computes it.) It does not check order: a stale projection
+// merged after a newer one wins. Use MergeProjectionAfter when the transport can reorder.
 //
 // It returns s unchanged and an error if s is not a state of this machine (see EffectFunc),
 // if the projection names a variable this machine does not have, or if a value is outside
@@ -235,6 +269,12 @@ type verifyInfo struct {
 	StateCount   int    `json:"state_count"`
 	EventCount   int    `json:"event_count"`
 	VerifiedAt   string `json:"verified_at,omitempty"`
+
+	// Version 2: the event pairs CC was checked for, by event name, and whether that is
+	// every pair. Pairs outside this set were declared Independent away and are not
+	// guaranteed to commute. Absent from version 1 files.
+	AllPairs bool        `json:"all_pairs"`
+	Pairs    [][2]string `json:"pairs"`
 }
 
 // Export writes the verified machine to a portable JSON format.
@@ -246,7 +286,9 @@ type verifyInfo struct {
 //   - Event names (ordered)
 //   - Normal form table: nf[stateID] → normalized stateID
 //   - Step table: step[eventID][stateID] → normalized result stateID
-//   - Verification metadata (WFC/CC results, state count, etc.)
+//   - Verification metadata (WFC/CC results, state count, etc.), including (since format
+//     version 2) the event pairs CC was checked for ("pairs", by event name) and whether that
+//     is every pair ("all_pairs"); version 2 only adds fields to version 1
 //
 // Runtime libraries only need to:
 //  1. Load the JSON
@@ -288,7 +330,7 @@ func (m *Machine) Export(path string) error {
 
 	export := exportFormat{
 		Name:       m.name,
-		Version:    1,
+		Version:    2,
 		Vars:       vars,
 		Events:     eventNames,
 		NF:         m.nf,
@@ -299,7 +341,12 @@ func (m *Machine) Export(path string) error {
 			CC:         true,
 			StateCount: len(m.nf),
 			EventCount: len(eventNames),
+			AllPairs:   m.allPairs,
+			Pairs:      make([][2]string, len(m.ccPairs)),
 		},
+	}
+	for i, p := range m.ccPairs {
+		export.Verification.Pairs[i] = [2]string{eventNames[p[0]], eventNames[p[1]]}
 	}
 
 	data, err := json.MarshalIndent(export, "", "  ")

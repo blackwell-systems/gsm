@@ -19,11 +19,16 @@ import (
 // declared pairs its rules are addressed by (PolicyNames), the extracted morphism tables (see
 // MorphismTable), the declared input ports, and the cycle opt-in. It is tamper-complete over those
 // declarations: it changes if a component rule, a variable, event or enum-label name, a declared
-// Independent pair, the wiring, a recorded morphism image, or the port declaration changes. A
-// morphism or resolver closure is bound only through its table, which records its images at one
-// representative target, so a closure that differs only at other targets digests the same (it is
-// caught at runtime by the FedMachine's image check). A consumer can re-check the federated
-// conditions from the tables, independently of the producer's morphism closures, via Verify.
+// Independent pair, the wiring, a recorded morphism image, or the port declaration changes. The
+// digest binds a morphism or resolver closure only through its table, which records its images at
+// one representative target, so a closure that differs only at other targets digests the same.
+// EmbedCertified does not rely on the digest for that: at Build it re-runs the live sub's
+// closures over every valid source and target state (write mask, validity, source-determinacy),
+// which ties each closure to its table on the whole verified domain, and the FedMachine checks
+// every image at runtime (in the target's domain, and writing only Shared() variables). A
+// consumer can re-check the federated conditions from the tables, independently of the
+// producer's morphism closures, via Verify. The digest is an unkeyed SHA-256 over public data: it
+// binds the tables to the components (integrity), it does not authenticate who produced them.
 //
 // Ports (assume-guarantee, Theorem 2' of the categorical note): a certified subsystem may declare
 // input ports at Certify time (Certify(ports...)). An input port is a shared variable that no
@@ -33,9 +38,10 @@ import (
 // domain because Build already verifies every component and source state exhaustively. A shared
 // variable not declared an input port stays sealed, and an inbound morphism to it is rejected.
 //
-// Verify re-derives validity preservation and acyclicity, matches the digest, confirms declared
-// input ports are free (no table writes them), and rebuilds every component with Build to re-check
-// its convergence. The strongest form,
+// Verify re-derives validity preservation, table completeness, and acyclicity (or, for a cyclic
+// Monotone certificate, monotonicity), matches the digest, confirms declared input ports are free
+// (no table writes them), and rebuilds every component with Build to re-check its convergence.
+// The strongest form,
 // an axiom-free-Coq-extracted oracle that re-checks the federated conditions the way astchecker
 // re-checks single-registry rules, is future work (it needs the federation conditions mechanized in
 // Coq first).
@@ -180,14 +186,16 @@ func sortPortRefs(refs []PortRef) {
 }
 
 // EmbedCertified composes a sub-federation into this one on the strength of its certificate: like
-// Embed, but Build does not re-verify the subsystem's internal morphisms from their closures; it
-// re-checks them from the certificate's tables (M1/R2, ports, acyclicity), verifies the seam
-// (morphisms crossing the boundary) and the whole-graph acyclicity/monotonicity, and rebuilds each
-// certified component with Build, which re-checks its WFC and CC. The certificate's recorded
-// verdict is never trusted. The certificate's digest
-// must match the sub at Build. An outer morphism may read the subsystem (subsystem as source) or
+// Embed, but Build also pins the subsystem to its certificate. It re-checks the certificate's
+// tables (M1/R2, completeness, ports, acyclicity or monotonicity), re-verifies the live sub's
+// internal morphism and resolver closures over every valid source and target state so they
+// cannot differ from the tables anywhere on that domain, verifies the seam (morphisms crossing
+// the boundary) and the whole-graph acyclicity/monotonicity, and rebuilds each certified
+// component with Build, which re-checks its WFC and CC. The certificate's recorded Report is
+// never trusted. The certificate's digest must match the sub at Build. An outer morphism may read the subsystem (subsystem as source) or
 // write one of the subsystem's declared input ports; an inbound morphism to any other (sealed)
-// variable is rejected. Use Embed for the full-re-verification form.
+// variable is rejected. Use Embed for the full-re-verification form. As with Embed, the sub's
+// AllowMonotoneCycles does not carry over to f, and a second resolver for a target panics.
 func (f *Federation) EmbedCertified(sub *Federation, cert *Certificate) *Federation {
 	ce := &certifiedEmbed{comps: make(map[*Registry]bool, len(sub.comps)), cert: cert, sub: sub}
 	for _, r := range sub.comps {
@@ -195,12 +203,8 @@ func (f *Federation) EmbedCertified(sub *Federation, cert *Certificate) *Federat
 		ce.comps[r] = true
 	}
 	f.edges = append(f.edges, sub.edges...)
-	for r, res := range sub.resolvers {
-		f.resolvers[r] = res
-	}
-	if sub.allowCycles {
-		f.allowCycles = true
-	}
+	f.embedResolvers(sub, "EmbedCertified")
+	f.noteMonotoneSub(sub)
 	f.certified = append(f.certified, ce)
 	return f
 }
@@ -256,6 +260,10 @@ func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
 		if err := ce.cert.recheckTables(byName); err != nil {
 			return err
 		}
+		if err := ce.sub.bindClosures(); err != nil {
+			return fmt.Errorf("gsm: certified sub-federation %q: an internal morphism closure does not match "+
+				"its certificate: %w", ce.sub.name, err)
+		}
 	}
 	// Seam rule: an inbound morphism (target inside a certified sub, source outside it) is allowed
 	// only if every variable it writes is a declared input port; a write to a sealed variable is
@@ -275,6 +283,36 @@ func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
 					"declared input port; declare it via Certify(gsm.Port{...}) or embed with Embed for full re-verification",
 					e.src.name, e.dst.name, v.name, ce.sub.name)
 			}
+		}
+	}
+	return nil
+}
+
+// bindClosures re-verifies the live sub's internal morphism and resolver closures over every
+// valid source (combination) and every valid target state: each must write only its Shared()
+// variables, keep the target valid, and be source-determined. The digest already matched the
+// tables, which record each closure's images at the representative target; source-determinacy
+// at every valid target then makes the closure agree with its table everywhere on the verified
+// domain, so a closure that matches the certificate at one target and differs elsewhere is
+// refused here instead of being trusted. The cost is that of verifying the sub with Embed.
+func (f *Federation) bindClosures() error {
+	inEdges := make(map[*Registry][]edgeDef)
+	for _, e := range f.edges {
+		inEdges[e.dst] = append(inEdges[e.dst], e)
+	}
+	for _, target := range f.comps {
+		edges := inEdges[target]
+		if len(edges) == 0 {
+			continue
+		}
+		if resolver, ok := f.resolvers[target]; ok {
+			if err := f.verifyResolved(target, resolver, edges); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := f.verifyEdge(edges[0]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -478,17 +516,19 @@ func extractResolverTable(target *Registry, resolver Resolver, edges []edgeDef) 
 //     must equal the certificate's digest;
 //   - validity preservation (M1 for single-source, R2 for resolvers): for every table row, writing
 //     the recorded shared values into every valid target state must keep the target valid;
+//   - completeness: every table has exactly one row per valid source state (or combination), every
+//     source id is a valid state of its source, and no target has two tables;
 //   - input-port freeness: no morphism table writes a declared input port (so the port is genuinely
 //     free for an outer morphism to drive);
 //   - acyclicity: unless the certificate is marked Monotone, the morphism graph must be acyclic;
+//     a cyclic Monotone certificate must have monotone tables (re-derived from the rows);
 //   - component convergence: every provided component is rebuilt with Build, which re-checks WFC
 //     and CC exhaustively. The certificate's recorded verdict (Report) is never trusted: a
 //     certificate issued by an earlier, weaker verifier for a component that does not converge is
 //     refused here even though its digest still matches.
 //
 // The component invariants are evaluated from the provided registries (part of the shared, digest
-// covered definition); only the morphism closures are replaced by the tables. The monotonicity of a
-// cyclic (Monotone) certificate is not re-derived here and is left to the component-level oracle.
+// covered definition); only the morphism closures are replaced by the tables.
 func (c *Certificate) Verify(comps map[string]*Registry) error {
 	// The digest names each component by its registry name and the tables name
 	// their targets the same way, so a key must be its registry's name; otherwise
@@ -539,8 +579,9 @@ func (c *Certificate) recheckComponents(comps map[string]*Registry) error {
 }
 
 // recheckTables re-derives the federated conditions from the certificate's tables: input-port
-// freeness, validity preservation (M1/R2) against the provided target registries, and acyclicity
-// unless Monotone. It trusts nothing the producer computed except the tables themselves, which the
+// freeness, validity preservation (M1/R2) against the provided target registries, completeness
+// (one row per valid source state or combination), and acyclicity unless Monotone, in which case
+// a cycle requires monotone tables. It trusts nothing the producer computed except the tables themselves, which the
 // digest binds to the live subsystem.
 func (c *Certificate) recheckTables(comps map[string]*Registry) error {
 	// Input ports must be free: no morphism table may write a declared input port.
@@ -592,10 +633,113 @@ func (c *Certificate) recheckTables(comps map[string]*Registry) error {
 				}
 			}
 		}
+		if err := c.checkTableRows(t, comps); err != nil {
+			return err
+		}
 	}
 
-	if !c.Monotone && tablesHaveCycle(c.Tables) {
-		return fmt.Errorf("gsm: certificate %q morphism graph has a cycle but is not marked monotone", c.Name)
+	// One table per target: a target written by several sources has one resolver table, so a
+	// second table for the same target is a writer the certificate's conditions never covered.
+	seenTarget := make(map[string]bool, len(c.Tables))
+	for _, t := range c.Tables {
+		if seenTarget[t.Target] {
+			return fmt.Errorf("gsm: certificate %q has more than one table for target %q", c.Name, t.Target)
+		}
+		seenTarget[t.Target] = true
+	}
+
+	if tablesHaveCycle(c.Tables) {
+		if !c.Monotone {
+			return fmt.Errorf("gsm: certificate %q morphism graph has a cycle but is not marked monotone", c.Name)
+		}
+		// A cyclic network converges only under monotone repair (Federation.Build checks it
+		// with verifyMonotone); re-derive it from the tables rather than trust the flag.
+		if err := c.recheckMonotone(comps); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkTableRows checks that t is a complete extensional table: every source names a provided
+// registry, every row has one id per source, each id is a valid state of its source, no source
+// (combination) appears twice, and every valid source (combination) has a row. M1/R2 "from the
+// tables" means nothing for a source state the table leaves out, and the digest alone cannot
+// tell a truncated table from a faithful one (anyone can recompute it).
+func (c *Certificate) checkTableRows(t MorphismTable, comps map[string]*Registry) error {
+	valid := make([]map[uint64]bool, len(t.Sources))
+	want := 1
+	for i, name := range t.Sources {
+		src, ok := comps[name]
+		if !ok {
+			return fmt.Errorf("gsm: certificate table for %q names source registry %q not present in the provided components",
+				t.Target, name)
+		}
+		vs := src.validStates()
+		valid[i] = make(map[uint64]bool, len(vs))
+		for _, s := range vs {
+			valid[i][s.packed] = true
+		}
+		if want > 0 && len(vs) > 0 && want > maxStateSpace/len(vs) {
+			return fmt.Errorf("gsm: certificate table for %q: source space exceeds %d combinations", t.Target, maxStateSpace)
+		}
+		want *= len(vs)
+	}
+	if len(t.Sources) == 0 {
+		want = 0
+	}
+	seen := make(map[string]bool, len(t.Rows))
+	for _, row := range t.Rows {
+		if len(row.SourceIDs) != len(t.Sources) {
+			return fmt.Errorf("gsm: certificate table for %q has a row with %d source ids for %d sources",
+				t.Target, len(row.SourceIDs), len(t.Sources))
+		}
+		for i, id := range row.SourceIDs {
+			if !valid[i][id] {
+				return fmt.Errorf("gsm: certificate table for %q has a row with source id %d, which is not a valid state of %q",
+					t.Target, id, t.Sources[i])
+			}
+		}
+		key := fmt.Sprint(row.SourceIDs)
+		if seen[key] {
+			return fmt.Errorf("gsm: certificate table for %q has two rows for source ids %v", t.Target, row.SourceIDs)
+		}
+		seen[key] = true
+	}
+	if len(t.Rows) != want {
+		return fmt.Errorf("gsm: certificate table for %q has %d rows but its sources have %d valid states (combinations); "+
+			"a table must have one row per valid source state", t.Target, len(t.Rows), want)
+	}
+	return nil
+}
+
+// recheckMonotone re-derives, from the tables, the monotonicity hypothesis of the Monotone
+// Convergence Despite Cycles theorem: for every two rows whose source states are ordered
+// componentwise (P ⊑ P'), the recorded shared values must be ordered too. It is the table form
+// of verifyMonotone, under the same combination bound. Rows are complete (checkTableRows), so
+// this covers every pair of valid source combinations.
+func (c *Certificate) recheckMonotone(comps map[string]*Registry) error {
+	for _, t := range c.Tables {
+		if len(t.Rows) > monotoneGuard {
+			return fmt.Errorf("gsm: certificate %q: monotonicity re-check for %q: source space exceeds %d combinations",
+				c.Name, t.Target, monotoneGuard)
+		}
+		points := make([][]State, len(t.Rows))
+		for k, row := range t.Rows {
+			points[k] = make([]State, len(t.Sources))
+			for i, name := range t.Sources {
+				points[k][i] = State{packed: row.SourceIDs[i], vars: comps[name].vars}
+			}
+		}
+		for a := range t.Rows {
+			for b := range t.Rows {
+				if pointsLE(points[a], points[b]) && !rawLE(t.Rows[a].Values, t.Rows[b].Values) {
+					return fmt.Errorf("gsm: certificate %q: the table for %q is not monotone (source ids %v ⊑ %v but "+
+						"values %v ⋢ %v); a cyclic certificate requires monotone morphisms/resolvers",
+						c.Name, t.Target, t.Rows[a].SourceIDs, t.Rows[b].SourceIDs, t.Rows[a].Values, t.Rows[b].Values)
+				}
+			}
+		}
 	}
 	return nil
 }

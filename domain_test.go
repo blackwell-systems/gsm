@@ -180,7 +180,7 @@ func TestBuildCompositional_RejectsOutOfDomainResults(t *testing.T) {
 			r := c.mkReg(t)
 			var err error
 			var m *Machine
-			if msg := catchPanic(func() { m, _, err = r.BuildCompositional() }); msg != "" {
+			if msg := catchPanic(func() { m, _, err = r.BuildCompositional(TrustClosureFootprints()) }); msg != "" {
 				t.Fatalf("BuildCompositional panicked instead of returning an error: %s", msg)
 			}
 			if err == nil {
@@ -237,7 +237,7 @@ func TestBuild_AcceptsStructurallyIdenticalState(t *testing.T) {
 	}
 
 	// The same through the lazy runtime, which checks at Apply time.
-	lm, _, err := capped("identical_schema_lazy", fromTwin, fromTwin).BuildCompositional()
+	lm, _, err := capped("identical_schema_lazy", fromTwin, fromTwin).BuildCompositional(TrustClosureFootprints())
 	if err != nil {
 		t.Fatalf("BuildCompositional rejected a state with an identical schema: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestLazyApply_PanicsOnOutOfDomainResult(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			leak := false
-			m, _, err := c.mk(&leak).BuildCompositional()
+			m, _, err := c.mk(&leak).BuildCompositional(TrustClosureFootprints())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -501,7 +501,7 @@ func TestCombinatorForeignVar_Rejected(t *testing.T) {
 			build func() error
 		}{
 			{"Build", func() error { _, _, err := r.Build(); return err }},
-			{"BuildCompositional", func() error { _, _, err := r.BuildCompositional(); return err }},
+			{"BuildCompositional", func() error { _, _, err := r.BuildCompositional(TrustClosureFootprints()); return err }},
 		} {
 			var err error
 			if msg := catchPanic(func() { err = b.build() }); msg != "" {
@@ -530,7 +530,7 @@ func TestBuildCompositional_ChecksPerturbedResults(t *testing.T) {
 		return s.SetInt(n, 1)
 	}).Add()
 	r.Event("flip").Writes(o).Apply(func(s State) State { return s.SetBool(o, true) }).Add()
-	_, _, err := r.BuildCompositional()
+	_, _, err := r.BuildCompositional(TrustClosureFootprints())
 	if err == nil || !strings.Contains(err.Error(), "not a state of machine") || !strings.Contains(err.Error(), "o=true") {
 		t.Fatalf("want an out-of-domain error from the perturbed state {o=true}, got: %v", err)
 	}
@@ -612,7 +612,7 @@ func TestDeclareDuringVerification_ReportedOverDomainError(t *testing.T) {
 	}
 	for path, run := range map[string]func(r *Registry) error{
 		"Build":              func(r *Registry) error { _, _, err := r.Build(); return err },
-		"BuildCompositional": func(r *Registry) error { _, _, err := r.BuildCompositional(); return err },
+		"BuildCompositional": func(r *Registry) error { _, _, err := r.BuildCompositional(TrustClosureFootprints()); return err },
 		"Synthesize":         func(r *Registry) error { _, err := r.Synthesize(); return err },
 	} {
 		t.Run(path, func(t *testing.T) {

@@ -8,8 +8,9 @@ certificate path is an opt-in optimization that does not change what gsm can ver
 can safely skip.
 
 Implemented (`certificate.go`): `Certificate`, `Federation.Certify`, `Federation.EmbedCertified`
-(re-checks internal edges from the tables instead of their closures, and rebuilds each component
-with `Build`, so component convergence is re-checked rather than trusted),
+(re-checks internal edges from the tables, re-runs the live sub's internal closures over every
+valid source and target state so they cannot differ from the tables there, and rebuilds each
+component with `Build`, so component convergence is re-checked rather than trusted),
 morphism/resolver table extraction, a digest that is tamper-complete over the declarations
 (component rules, names and declared pairs, plus those tables; see "Versioning and trust policy"), and `Certificate.Verify`, a standalone differential re-checker that re-derives the federated
 conditions from the tables rather than the producer's closures. Input ports are implemented
@@ -111,8 +112,8 @@ boundary:
 - **(iv) Digest match.** The embedded subsystem's `PolicyDigest()` equals the certificate's identity.
 
 If all pass, `Build` uses the certificate's tables for the internal morphisms instead of re-verifying
-their closures. (As built, it still rebuilds each component and re-checks its convergence; see
-"Versioning and trust policy".) If any fail, it falls back to full re-verification (current behavior), so the
+their closures. (As built, it still rebuilds each component and re-checks its convergence, and it
+re-verifies the internal closures against the tables; see "Versioning and trust policy".) If any fail, it falls back to full re-verification (current behavior), so the
 certificate path is never less sound than today, only faster when it applies.
 
 ## Resolver tags
@@ -137,15 +138,27 @@ declared pairs the rules are addressed by (`PolicyNames`: variable names and kin
 event names, the Independent pairs), the morphism tables, the input ports and the cycle opt-in, so
 it changes when any of those declarations changes. Every name it frames is quoted, so no name can
 carry the framing of another, and the declared pairs are digested as a set. The certificate's own `Name`
-is not covered: it labels messages only, and nothing is decided by it. A morphism or resolver closure is bound only
-through its table, which records its images at one representative target: a closure that differs
-only at other targets digests the same, and is caught at runtime by the FedMachine's image check.
+is not covered: it labels messages only, and nothing is decided by it. The digest binds a morphism or resolver
+closure only through its table, which records its images at one representative target: a closure
+that differs only at other targets digests the same. `EmbedCertified` therefore does not rely on
+the digest for the closures: it re-runs them over every valid source and target state (writes only
+to `Shared()` variables, validity, source-determinacy), which, with the digest-matched table at the
+representative target, ties each closure to its table on the whole verified domain. At runtime the
+FedMachine also refuses any image outside the target's domain or that writes a non-shared variable.
+The digest is an unkeyed SHA-256 over public data: it is an integrity binding, not authentication,
+since anyone can recompute it for altered tables. That is why every condition below is re-derived
+from the tables rather than trusted from the digest.
 The digest began binding names and pairs during this development version; certificates issued
 before that no longer match and must be re-issued with `Certify` (the version tag is unchanged, per
 this policy). Everything the certificate asserts is re-derived when it is used:
 
-- `EmbedCertified` re-checks the internal morphisms from the tables (M1/R2, port freeness,
-  acyclicity) and rebuilds every certified component with `Build`, which re-checks WFC and CC.
+- `EmbedCertified` re-checks the internal morphisms from the tables (M1/R2, completeness, port
+  freeness, acyclicity or monotonicity), re-verifies the live internal closures as above, and
+  rebuilds every certified component with `Build`, which re-checks WFC and CC.
+- Table re-checks include completeness: each table must have exactly one row per valid source
+  state (or source combination), every source id must be a valid state of its source, and a target
+  has at most one table. A cyclic certificate marked `Monotone` must have monotone tables (for
+  source rows P ⊑ P', values ⊑), re-derived from the rows; the flag alone is not trusted.
 - `Certificate.Verify` does the same from the consumer's own copies of the component registries,
   after recomputing the digest from them. The copies are keyed by registry name, and each key must
   be its registry's name: the digest and the tables name components that way, so a mismatched key
@@ -176,8 +189,12 @@ v0.11.0 issued it no longer matches its digest at all, since the digest now also
 declared pairs, and is refused for that; it must be re-issued with `Certify`.
 
 What re-checking costs: `EmbedCertified` builds each certified component's step tables anyway (the
-runtime needs them), so the CC re-check adds two table lookups per state per event pair. What it
-still saves is re-verifying the internal morphisms from their closures.
+runtime needs them), so the CC re-check adds two table lookups per state per event pair. Binding
+the internal closures costs what `Embed` spends verifying them (valid sources times valid targets
+per morphism), the same order as the M1/R2 table re-check. So `EmbedCertified` no longer saves
+verification time over `Embed`; what it adds is the pin: the subsystem must match the certificate
+(digest), its non-port shared variables are sealed against outer writers, and the federated
+conditions are re-derived from tables a consumer can check without the producer's closures.
 
 ## Soundness condition
 
@@ -185,7 +202,10 @@ Reusing a certificate without re-verifying internals is sound exactly when the s
 the certificate is parametric over its declared input ports. This is the compositional-collapse
 result of the federated paper (§8) together with its assume-guarantee refinement (the input/output
 port contract). The check is entirely at the boundary: interface conditions plus a graph-level
-cycle/monotonicity check, with no re-enumeration of the subsystem's state space.
+cycle/monotonicity check, with no re-enumeration of the subsystem's state space. The implementation
+nevertheless re-enumerates the internal morphisms (from the tables, and the live closures against
+them), because a Go closure can be changed after certification in ways the digest cannot see; the
+boundary-only form needs the closures to be bound by something stronger than their tables.
 
 ## Proposed API shape (sketch)
 

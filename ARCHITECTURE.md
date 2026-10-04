@@ -267,7 +267,7 @@ The `Export()` method serializes verification tables to JSON for multi-language 
 ```json
 {
   "name": "order_system",
-  "version": 1,
+  "version": 2,
   "vars": [
     {"name": "status", "kind": "enum", "domain": 3, "labels": ["pending", "paid", "shipped"]},
     {"name": "paid", "kind": "bool", "domain": 2}
@@ -278,9 +278,18 @@ The `Export()` method serializes verification tables to JSON for multi-language 
     [3, 3, 3, 3, 3, 5],  // pay
     [0, 1, 5, 5, 0, 5]   // ship
   ],
+  "verification": {
+    "wfc": true, "cc": true, "max_repair_depth": 0, "state_count": 6, "event_count": 2,
+    "all_pairs": true,
+    "pairs": [["pay", "ship"]]
+  },
   "exported_at": "2026-02-18T07:00:00Z"
 }
 ```
+
+`verification.pairs` (added in format version 2) lists the event pairs CC was checked for, by event
+name, and `verification.all_pairs` says whether that is every pair. A pair left out (declared away
+with `Independent`) is not guaranteed to commute.
 
 Runtimes in Python, JavaScript, Rust, etc. can load this JSON and implement O(1) event application with the same
 convergence guarantees.
