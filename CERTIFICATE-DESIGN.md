@@ -19,8 +19,12 @@ conditions from the tables rather than the producer's closures. Input ports are 
 (`Certify(Port{...})`): a subsystem may declare free shared variables an outer morphism drives once
 embedded, the inbound boundary morphism is verified at the seam (M1/R2), and the port declaration is
 folded into the digest (the assume-guarantee / Theorem 2' case). Outstanding: the strongest trust
-form (an axiom-free-Coq-extracted federation oracle, matching how `astchecker` re-checks
-single-registry rules) waits on mechanizing the federation conditions in Coq.
+form, an extracted federation oracle (matching how `astchecker` re-checks single-registry rules).
+The federation theory itself is now mechanized axiom-free in normalization-confluence
+(order independence of the acyclic normal form in `FederationOrder.v`, event interleavings C1/C2
+in `FederationEvents.v` and `FederationEventsConverse.v`, monotone cycles in `Federation.v`,
+`Chaotic.v` and `FederationEventsCycles.v`); what remains is a checker over certificate tables
+extracted from them, wired in as a gate.
 
 ## Problem
 
@@ -116,8 +120,9 @@ boundary:
 If all pass, `Build` uses the certificate's tables for the internal morphisms instead of re-verifying
 their closures, and the machine runs those tables (see "Certified execution"). (As built, it still
 rebuilds each component and re-checks its convergence, and it re-verifies the internal closures
-against the tables; see "Versioning and trust policy".) If any fail, it falls back to full re-verification (current behavior), so the
-certificate path is never less sound than today, only faster when it applies.
+against the tables; see "Versioning and trust policy".) If any fail, `Build` returns an error and no machine (an earlier draft of this note proposed
+falling back to full re-verification; as built, a mismatch is refused, and `Embed` is the way to
+re-verify a changed subsystem), so the certificate path is never less sound than `Embed`.
 
 ## Resolver tags
 
@@ -263,7 +268,7 @@ be pure already; now the purity is not even observable.
 The closure binding (`bindClosures`) is kept although the runtime no longer depends on it. It is
 an early, specific diagnostic for the usual mistake (a sub whose closures were edited after
 certification), and it is what lets the build-time checks that still evaluate closures (the
-cross-registry order check, the monotone-cycle checks) and the paths above that still run them
+cross-registry and repaired order checks C1 and C2, the monotone-cycle checks) and the paths above that still run them
 speak for the tables. Its cost is unchanged.
 
 Memory: the compiled form stores one `uint64` per table row (per valid source state, or source
@@ -313,7 +318,7 @@ re-verified.
 
 ## Non-goals
 
-- Not a change to what gsm can verify: same WFC/CC/M1/R2/monotonicity contract, same oracles.
+- Not a change to what gsm can verify: same WFC/CC/M1/R2/C1/C2/monotonicity contract, same oracles.
 - Not a replacement for `Embed`: the default remains full re-verification, which stays correct.
 - No new modeling vocabulary in the user-facing API beyond the port declaration and the certificate
   artifact.

@@ -131,9 +131,24 @@ an event whose guard reads a variable that repair changes behaves differently be
 normalization. It is not needed for the runtime guarantee, because the runtime only ever applies
 events to normal forms: every `Step` entry is a normal form, so a run that starts from a valid state
 (or from `NewState`, which the CC1 domain includes) stays on valid states, where CC1 is checked.
-A run started from an arbitrary invalid state the caller builds by hand is outside the guarantee.
+A state the caller builds by hand (or restores from storage) that violates an invariant is
+normalized by `Apply` before the event is applied (`Apply(s, e) == Apply(Normalize(s), e)`), so a
+run from it also stays in the checked domain.
 
 **CC passes if:** All independent event pairs commute on every valid state (and on `NewState`).
+
+### Phase 4: Reported Obligations
+
+Some conditions the convergence guarantee depends on are about the deployment, not the rules, so
+`Build` does not fail on them; it measures them while building and from the step tables, and names
+them in the `Report`:
+
+- **Undeclared pairs** (`Report.CausalOrderRequired`, `Report.PairsUndeclared`). In declared-only
+  mode (`Independent`), every undeclared pair is still checked; each one that does not commute is
+  listed with a witness, and must be delivered in causal order.
+- **Duplicates** (`Report.NotIdempotent`). Events whose second application changes the state; their
+  redeliveries must be suppressed before `Apply`.
+- **Saturation** (`Report.Saturations`). Rules whose write was clamped into a variable's range.
 
 ## Runtime Execution
 
@@ -156,16 +171,18 @@ type Machine struct {
 ```go
 func (m *Machine) Apply(s State, event string) State {
     ei := m.events[event]           // O(1) map lookup
-    newID := m.step[ei][s.packed]   // O(1) array index
-    return State{packed: newID, vars: m.vars}
+    p := s.packed
+    if p != 0 {
+        p = m.nf[p]                 // O(1): normalize a hand-built invalid input first
+    }
+    return State{packed: m.step[ei][p], vars: m.vars}
 }
 ```
 
 **Why O(1):**
-- No conditionals on state values
 - No invariant checking
 - No compensation logic
-- Single array index: `step[eventIdx][stateID]`
+- Two array reads: `nf[stateID]` (the identity on valid states) and `step[eventIdx][stateID]`
 
 ### Example: Order System
 
@@ -355,8 +372,10 @@ never interact, and it suffices to verify each component over the subspace of it
    rules are checked syntactically (exact). Closures are checked by perturbation: from every state
    of the component, every value of each outside variable and of each pair of outside variables.
    That catches dependence on one or two outside variables but not a joint dependence on three or
-   more, so for closures the check is a test, not a proof. A violation rejects the machine and the
-   report names it (WFC and CC are shown as not evaluated).
+   more, so for closures the check is a test, not a proof, and `BuildCompositional` accepts closure
+   rules only with `TrustClosureFootprints()` (the report's assurance is then
+   `AssuranceOracleComponentsTested`). A violation rejects the machine and the report names it (WFC
+   and CC are shown as not evaluated).
 3. **Verify each component locally.** Enumerate only that component's subspace and run the WFC
    and CC checks over its valid states. A component of `k` variables costs the product of *those*
    domains, not the whole machine's.
@@ -372,12 +391,16 @@ large.
 **Trade-off:** `BuildCompositional` returns a **lazy** `Machine` that computes `Apply` and
 `Normalize` at runtime from the rules (there are no global tables to precompute), so `Export` is
 unavailable (it needs the flat step tables that only global `Build` materializes). Runtime is no
-longer a single array lookup; it evaluates the rules for the touched component.
+longer a single array lookup; it evaluates the rules for the touched component. The repair loop is
+bounded by the sum of each component's deepest verified repair chain, and `Apply` panics past it
+(only a rule that breaks its footprint or is nondeterministic can get there).
 
 **Preconditions:** every invariant declares its footprint, every event declares its write set
 (both automatic when rules are written with the combinator vocabulary, see "Rule layers" below),
-every event reads only what it writes, the zero state is valid, and the machine fits in 64 bits of
-state (`State` is one `uint64`). No single component may exceed the enumeration budget.
+every event reads only what it writes, the zero state is valid, every variable's range fits its
+bit field, and the machine fits in 64 bits of state (`State` is one `uint64`). No single component
+may exceed the enumeration budget, and a closure whose perturbation test would exceed 2^28 calls is
+rejected before any check runs.
 
 ## Differential Testing via Extracted Oracles
 
@@ -404,15 +427,17 @@ Neither oracle uses a footprint shortcut: both check every ordered pair of event
 both reject the guarded pay/ship machine that `Build`'s former shortcut certified. They differ from
 `Build` in scope: they check all pairs whether or not they were declared `Independent`, and the
 table oracle checks every encodable state in the tables (including invalid states no run reaches),
-so either can reject a machine `Build` correctly accepts. Neither runs as part of `Build` or any
-other entry point: the guarantee they add holds for the machines they are actually run on. gsm's
-CI builds both from a pinned proof commit, checks them against pinned hashes
+so either can reject a machine `Build` correctly accepts. The OCaml binaries do not run as part of
+`Build` or any other entry point: the guarantee they add holds for the machines they are actually
+run on. gsm's CI builds both from a pinned proof commit, checks them against pinned hashes
 (`.github/oracle/`), and runs the whole test suite with `GSM_REQUIRE_ORACLES=1`, so the oracle
 tests cannot skip. The table oracle also runs in-process on every success path. `internal/oracle`
 holds it, generated as Go from the proof's extraction (`PROVENANCE`; CI regenerates it and
 requires the same bytes). `Build`, `SynthesizeWith` (and through them `BuildOrSynthesize` and
 `Synthesis.Machine`) and `BuildCompositional` (per component) return no machine unless it certifies
-the tables (`oracle_gate.go`, `Report.Assurance`).
+the tables (`oracle_gate.go`, `Report.Assurance`). The rules oracle is generated as Go the same way
+and runs in-process in `Build` when every rule is a combinator and its work is within
+`RulesOracleMaxWork` (`Report.RulesOracleSkipped` says why it did not run).
 Only `Build` machines have tables, and only combinator rules serialize.
 
 **Differential cross-check** (`oracle_differential_test.go`). Every `Build` in the test run is
@@ -460,6 +485,23 @@ the same bytes to the rules oracle. The format addresses variables and events by
 state (a stable, domain-separated hash over the packed state value, well defined because the policy
 pins the layout), so the same audit layer can attest which state an action produced and reproduce
 it by replaying the same events over a reference build.
+
+## Federations
+
+`Federation.Build` (`federation.go`, `federation_verify.go`, `federation_monotone.go`) builds every
+component with `Registry.Build`, so each component's tables are oracle-gated, then runs the
+federation-level checks in Go: certificate validation for `EmbedCertified` subs, names and shared
+variables, M1 for each morphism (R1/R2 for resolvers), cross-registry CC (C1: a target event
+commutes with every source-driven change of its shared component, `CrossOrderError`), repaired CC
+(C2: two target events commute with the morphism repair between them, `SameTargetOrderError`), and
+acyclicity, or under `AllowMonotoneCycles` monotonicity over every state the Kleene iteration can
+visit. `FedReport.Checks` lists what ran and `FedReport.Assurance` says it is Go-checked.
+
+The runtime `FedMachine` holds one component `State` per registry. `Apply` runs the component's
+table step, then repairs the shared components in topological order (or by Kleene iteration on a
+monotone cycle). A target inside an `EmbedCertified` sub is repaired by a lookup in the
+certificate's verified table instead of its `Map` or `Resolver` closure (`certificate_exec.go`;
+`FedReport.Runtime` says which targets do). See CERTIFICATE-DESIGN.md.
 
 ## Related Work
 
