@@ -191,7 +191,7 @@ func TestCertificateVerify_MonotoneRechecked(t *testing.T) {
 }
 
 // TestCertify_MonotoneCyclicRoundTrip: a real AllowMonotoneCycles certificate still verifies and
-// embeds after the completeness and monotonicity re-checks.
+// embeds (into a parent that opts in itself) after the completeness and monotonicity re-checks.
 func TestCertify_MonotoneCyclicRoundTrip(t *testing.T) {
 	a := NewRegistry("A")
 	av := a.Bool("a")
@@ -209,7 +209,13 @@ func TestCertify_MonotoneCyclicRoundTrip(t *testing.T) {
 	if err := cert.Verify(map[string]*Registry{"A": a, "B": b}); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if _, _, err := NewFederation("outer").EmbedCertified(sub, cert).Build(); err != nil {
+	// The sub's AllowMonotoneCycles opt-in does not carry over to the parent: the parent
+	// must opt in itself for the embedded cycle to build.
+	if _, _, err := NewFederation("outer").EmbedCertified(sub, cert).Build(); err == nil ||
+		!strings.Contains(err.Error(), "AllowMonotoneCycles") {
+		t.Fatalf("EmbedCertified Build without the parent's opt-in = %v, want a cycle rejection", err)
+	}
+	if _, _, err := NewFederation("outer").AllowMonotoneCycles().EmbedCertified(sub, cert).Build(); err != nil {
 		t.Fatalf("EmbedCertified Build: %v", err)
 	}
 }

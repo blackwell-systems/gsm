@@ -206,6 +206,8 @@ func (f *Federation) withoutEdges(remove map[int]bool) *Federation {
 		resolvers:   map[*Registry]Resolver{},
 		allowCycles: f.allowCycles,
 		certified:   f.certified,
+
+		monotoneSubs: f.monotoneSubs,
 	}
 	for _, r := range f.comps {
 		g.register(r)

@@ -269,6 +269,12 @@ type verifyInfo struct {
 	StateCount   int    `json:"state_count"`
 	EventCount   int    `json:"event_count"`
 	VerifiedAt   string `json:"verified_at,omitempty"`
+
+	// Version 2: the event pairs CC was checked for, by event name, and whether that is
+	// every pair. Pairs outside this set were declared Independent away and are not
+	// guaranteed to commute. Absent from version 1 files.
+	AllPairs bool        `json:"all_pairs"`
+	Pairs    [][2]string `json:"pairs"`
 }
 
 // Export writes the verified machine to a portable JSON format.
@@ -280,7 +286,9 @@ type verifyInfo struct {
 //   - Event names (ordered)
 //   - Normal form table: nf[stateID] → normalized stateID
 //   - Step table: step[eventID][stateID] → normalized result stateID
-//   - Verification metadata (WFC/CC results, state count, etc.)
+//   - Verification metadata (WFC/CC results, state count, etc.), including (since format
+//     version 2) the event pairs CC was checked for ("pairs", by event name) and whether that
+//     is every pair ("all_pairs"); version 2 only adds fields to version 1
 //
 // Runtime libraries only need to:
 //  1. Load the JSON
@@ -322,7 +330,7 @@ func (m *Machine) Export(path string) error {
 
 	export := exportFormat{
 		Name:       m.name,
-		Version:    1,
+		Version:    2,
 		Vars:       vars,
 		Events:     eventNames,
 		NF:         m.nf,
@@ -333,7 +341,12 @@ func (m *Machine) Export(path string) error {
 			CC:         true,
 			StateCount: len(m.nf),
 			EventCount: len(eventNames),
+			AllPairs:   m.allPairs,
+			Pairs:      make([][2]string, len(m.ccPairs)),
 		},
+	}
+	for i, p := range m.ccPairs {
+		export.Verification.Pairs[i] = [2]string{eventNames[p[0]], eventNames[p[1]]}
 	}
 
 	data, err := json.MarshalIndent(export, "", "  ")
