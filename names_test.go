@@ -79,7 +79,7 @@ func TestDuplicateEventName_AllPairsMode(t *testing.T) {
 }
 
 func TestDuplicateEventName_BuildCompositional(t *testing.T) {
-	_, _, err := dupEventRegistry().BuildCompositional()
+	_, _, err := dupEventRegistry().BuildCompositional(gsm.TrustClosureFootprints())
 	wantDupErr(t, err, "dup")
 }
 

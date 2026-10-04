@@ -232,19 +232,19 @@ func TestBuildCompositionalIsCertifiedPerComponent(t *testing.T) {
 		return oracle.CheckLookup(l)
 	})
 	r := twoCounters()
-	m, rep, err := r.BuildCompositional()
+	m, rep, err := r.BuildCompositional(TrustClosureFootprints())
 	if err != nil || m == nil {
 		t.Fatalf("BuildCompositional: %v", err)
 	}
-	if rep.Assurance != AssuranceOracleComponents {
-		t.Errorf("Assurance = %v, want %v", rep.Assurance, AssuranceOracleComponents)
+	if rep.Assurance != AssuranceOracleComponentsTested {
+		t.Errorf("Assurance = %v, want %v", rep.Assurance, AssuranceOracleComponentsTested)
 	}
 	if calls != rep.Components {
 		t.Errorf("the oracle ran %d times for %d components", calls, rep.Components)
 	}
 
 	withTableOracle(t, rejecting)
-	m, rep, err = twoCounters().BuildCompositional()
+	m, rep, err = twoCounters().BuildCompositional(TrustClosureFootprints())
 	assertFailedClosed(t, "BuildCompositional", m, err)
 	if rep == nil || rep.Assurance != AssuranceNone || rep.OracleDisagreement == "" {
 		t.Fatalf("BuildCompositional: report %+v; want Assurance none and the disagreement", rep)
@@ -269,7 +269,7 @@ func TestComponentTables(t *testing.T) {
 	r.Event("inca").Writes(a).Apply(func(s State) State { return s.SetInt(a, min(s.GetInt(a)+1, 3)) }).Add()
 	r.Event("seta").Writes(a).Apply(func(s State) State { return s.SetInt(a, 2) }).Add()
 	r.Event("flipb").Writes(b).Apply(func(s State) State { return s.SetInt(b, 1-s.GetInt(b)) }).Add()
-	if _, _, err := r.BuildCompositional(); err != nil {
+	if _, _, err := r.BuildCompositional(TrustClosureFootprints()); err != nil {
 		t.Fatal(err)
 	}
 	want := []oracle.Tables{

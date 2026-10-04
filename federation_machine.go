@@ -119,11 +119,30 @@ func (m *FedMachine) mapImage(e fedEdge, src, dst State) State {
 // dst, is a state of component j. Build checked every image over valid source and target
 // states, but FedMachine runs the closures again at Apply time, on states Build may not
 // have enumerated (a cyclic network's reset shared components, for one), so the result is
-// checked here, where it is computed, as Machine.Apply does on a lazy machine.
+// checked here, where it is computed, as Machine.Apply does on a lazy machine. The write mask
+// is checked too: out may differ from dst only in j's shared variables (those some incoming
+// morphism declares Shared()), so a closure that writes a local variable at a state Build did
+// not enumerate (or an embedded closure that differs from its certificate) panics here instead
+// of silently erasing local state.
 func (m *FedMachine) mustBeTarget(j int, what func() string, dst, out State) State {
 	c := m.comps[j]
 	if err := c.dom.imageError(what, c.name, dst, out); err != nil {
 		panic(err.Error())
+	}
+	if diff := out.packed ^ dst.packed; diff != 0 {
+		var shared uint64
+		for _, vi := range m.sharedVar[j] {
+			v := c.vars[vi]
+			shared |= uint64((1<<v.bits)-1) << v.offset
+		}
+		if diff&^shared != 0 {
+			for _, v := range c.vars {
+				if (diff>>v.offset)&uint64((1<<v.bits)-1) != 0 && !containsInt(m.sharedVar[j], v.index) {
+					panic(fmt.Sprintf("gsm: %s on target state %s returned %s, which modifies non-shared variable %q of %q; "+
+						"a Map or Resolver may only overwrite variables declared in Shared()", what(), dst, out, v.name, c.name))
+				}
+			}
+		}
 	}
 	return State{packed: out.packed, vars: c.vars}
 }
@@ -242,9 +261,15 @@ func (m *FedMachine) Component(r *Registry) *Machine {
 // derived purely from the source's state. It is small and serializable, so a distributed
 // federation exchanges these along tree edges instead of shipping full federated state
 // (the constructive normal form, Corollary 8.10).
+//
+// A projection carries no ordering by itself. A transport that can reorder or redeliver
+// messages should stamp Version (strictly increasing per From→To edge, assigned by the source
+// node; SharedProjection leaves it 0) and merge with MergeProjectionAfter, which refuses a
+// projection that is not newer than the last one applied.
 type Projection struct {
 	From, To string            // source and target registry names
 	Shared   map[string]uint64 // target shared-variable name → raw value
+	Version  uint64            // source-assigned sequence number; 0 means unversioned
 }
 
 // SharedProjection computes ϕ_ij(σ_i) — the message the source `src` sends its child `dst`

@@ -23,7 +23,9 @@ import (
 // assumes (an event reads only its own footprint). For combinator rules the check
 // is syntactic and exact; for closures it is a perturbation test that detects
 // dependence on any one or two outside variables but not a joint dependence on
-// three or more (see footprint.go). A component is verified with all other
+// three or more (see footprint.go). BuildCompositional therefore accepts closure
+// rules only with the TrustClosureFootprints option, and then reports
+// AssuranceOracleComponentsTested. A component is verified with all other
 // variables held at zero, so BuildCompositional requires the zero state to be valid.
 
 // maxComponentBits caps a single component's subspace so enumeration stays cheap.
@@ -139,21 +141,88 @@ func overlaps(a, b []int) bool {
 //
 // Like Build, it rejects any effect or repair result it computes that is not a state of
 // this machine (see EffectFunc). The returned machine runs the rules again at Apply time
-// and panics on such a result (see Machine.Apply).
+// and panics on such a result (see Machine.Apply), or on a repair chain longer than the
+// verified bound (see Machine.Normalize).
 //
 // Preconditions (else it returns an error, and you should use Build): every
 // invariant declares a footprint (Watches) and every event declares its writes
-// (Writes); the zero state is valid; and no single component exceeds
-// maxComponentBits.
-func (r *Registry) BuildCompositional() (*Machine, *Report, error) {
-	m, rep, err := r.buildCompositional()
+// (Writes); the zero state is valid; every variable's range fits its bit field; and
+// no single component exceeds maxComponentBits.
+//
+// Closure rules need an opt-in. A combinator rule's footprint is checked exactly,
+// from its expression tree. A Go closure is opaque, so its footprint can only be
+// tested by perturbation (see footprint.go), which misses a closure that depends
+// jointly on three or more outside variables. By default BuildCompositional
+// therefore returns an error naming the first closure rule; pass
+// TrustClosureFootprints() to accept a tested footprint for closures, in which case
+// Report.Assurance is AssuranceOracleComponentsTested.
+func (r *Registry) BuildCompositional(opts ...CompositionalOption) (*Machine, *Report, error) {
+	var o compositionalOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	m, rep, err := r.buildCompositional(o)
 	if err == nil && machineObserver != nil {
 		machineObserver("compositional", r, m)
 	}
 	return m, rep, err
 }
 
-func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
+// CompositionalOption configures BuildCompositional.
+type CompositionalOption func(*compositionalOptions)
+
+type compositionalOptions struct {
+	trustClosures bool
+}
+
+// TrustClosureFootprints lets BuildCompositional certify a machine whose rules
+// include Go closures (Holds/Repair/Apply/Guard rather than the combinator
+// vocabulary). The caller accepts that each closure reads and writes only its
+// declared footprint (Writes for an event, Watches for an invariant) and is
+// deterministic. gsm tests this by perturbation: from every state of the closure's
+// component it changes each outside variable, and each pair of outside variables,
+// to every other value. That catches a dependence on one or two outside variables
+// but not a joint dependence on three or more, so for closures footprint
+// conformance is tested, not proved. The report says so: Report.Assurance is
+// AssuranceOracleComponentsTested. Build checks closures exactly, with no
+// footprint assumption, for machines small enough to enumerate.
+func TrustClosureFootprints() CompositionalOption {
+	return func(o *compositionalOptions) { o.trustClosures = true }
+}
+
+// firstClosureRule names the first rule whose footprint BuildCompositional cannot
+// check syntactically (a closure), or returns "" when every rule is a combinator rule.
+func (r *Registry) firstClosureRule() string {
+	for _, ev := range r.events {
+		if !ev.syntactic() {
+			return fmt.Sprintf("event %q", ev.name)
+		}
+	}
+	for _, inv := range r.invariants {
+		if !inv.syntactic() {
+			return fmt.Sprintf("invariant %q", inv.name)
+		}
+	}
+	return ""
+}
+
+// checkDomains rejects a variable whose domain does not fit its bit field. Int
+// computes max - min + 1 in int, so a range such as Int(0, math.MaxInt) overflows
+// to a negative domain; the perturbation and enumeration loops would then run for
+// 2^63 iterations instead of failing.
+func (r *Registry) checkDomains() error {
+	for _, v := range r.vars {
+		if v.domain < 2 || v.bits > 63 || uint64(v.domain) > uint64(1)<<v.bits {
+			return fmt.Errorf("gsm: variable %q has an invalid domain (%d values in %d bits): its range is too wide "+
+				"(max - min + 1 overflows int); declare a smaller range", v.name, v.domain, v.bits)
+		}
+	}
+	return nil
+}
+
+func (r *Registry) buildCompositional(o compositionalOptions) (_ *Machine, rep *Report, err error) {
 	if err = r.checkNames(); err != nil {
 		return nil, nil, err
 	}
@@ -169,6 +238,16 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 			rep.noteDomainViolation(err)
 		}
 	}()
+	if err = r.checkDomains(); err != nil {
+		return nil, nil, err
+	}
+	closure := r.firstClosureRule()
+	if closure != "" && !o.trustClosures {
+		return nil, nil, fmt.Errorf("gsm: %s is a Go closure; BuildCompositional checks only combinator rules exactly "+
+			"(a closure's footprint can only be tested by perturbation, which misses a joint dependence on three or "+
+			"more outside variables). Write the rule with combinators, use Build (exact for any rule), or pass "+
+			"gsm.TrustClosureFootprints() to accept a tested footprint", closure)
+	}
 	// State packs every variable into one uint64. A variable placed past bit 64
 	// reads as 0 and ignores writes, so a machine that wide cannot be represented,
 	// let alone certified (it used to be certified with those variables frozen).
@@ -203,6 +282,7 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 	report.Components = len(comps)
 
 	maxRepair := 0
+	repairBound := 0 // sum over components of the deepest repair chain (see Machine.Normalize)
 	pairsDisjoint, pairsBrute := 0, 0
 
 	// Which event pairs must be checked for CC (mirrors verifyCC).
@@ -246,6 +326,9 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 		localPairs = append(localPairs, p)
 	}
 
+	// Size every component, and the footprint test of every closure rule, before
+	// running any check, so a machine too large to verify fails at once rather than
+	// after the smaller components (or never, for a perturbation of 2^40 cases).
 	for ci := range comps {
 		c := &comps[ci]
 		bits, count := r.componentSize(c)
@@ -253,6 +336,14 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 			return nil, report, fmt.Errorf("gsm: component with vars %v needs %d bits (max %d); refactor into smaller footprints",
 				c.vars, bits, maxComponentBits)
 		}
+		if err := r.checkPerturbationCost(c, count); err != nil {
+			return nil, report, err
+		}
+	}
+
+	for ci := range comps {
+		c := &comps[ci]
+		_, count := r.componentSize(c)
 		if count > report.MaxComponentStates {
 			report.MaxComponentStates = count
 		}
@@ -273,6 +364,7 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 		if depth > maxRepair {
 			maxRepair = depth
 		}
+		repairBound += depth
 
 		// CC: brute-force the local pairs whose shared component is this one.
 		for _, p := range localPairs {
@@ -307,6 +399,9 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 	report.WFC = true
 	report.CC = true
 	report.Assurance = AssuranceOracleComponents
+	if closure != "" {
+		report.Assurance = AssuranceOracleComponentsTested
+	}
 	report.FootprintChecked = true
 	report.MaxRepairLen = maxRepair
 	report.PairsDisjoint = pairsDisjoint
@@ -324,6 +419,8 @@ func (r *Registry) buildCompositional() (_ *Machine, rep *Report, err error) {
 		lazy:       true,
 		invariants: r.invariants,
 		eventDefs:  r.events,
+
+		repairBound: repairBound,
 	}
 	for i, ev := range r.events {
 		m.events[ev.name] = i
@@ -456,4 +553,21 @@ func (r *Registry) verifyComponentCC(c *component, i, j int, report *Report) err
 		}
 	})
 	return ccErr
+}
+
+// lazyRepairBoundError is the panic message when a lazy machine's repairs from in have
+// not reached a valid state after bound steps (now is the state reached, last the
+// invariant repaired last).
+//
+// The bound is exact for the machine BuildCompositional verified. Each component's
+// deepest repair chain was measured over every state of that component, and a repair
+// in one component neither reads nor writes another component's variables, so from any
+// state the repairs take at most the sum of those depths, whatever order the
+// components' invariants fire in. A longer chain means a rule reads or writes outside
+// its declared footprint, or is not deterministic, and the repairs may cycle forever.
+func (m *Machine) lazyRepairBoundError(in, now State, last string, bound int) string {
+	return fmt.Sprintf("gsm: machine %q: repairs from %s did not reach a valid state within %d steps, the most "+
+		"BuildCompositional verified for this machine (the sum of each component's deepest repair chain); "+
+		"a rule reads or writes outside its declared footprint or is not deterministic, and the repairs may "+
+		"cycle (state reached: %s, last repaired: invariant %q)", m.name, in, bound, now, last)
 }

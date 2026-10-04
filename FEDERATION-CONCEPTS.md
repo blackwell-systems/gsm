@@ -124,6 +124,8 @@ Why can no conflict arise? Because nothing you decide later loops back to distur
 
 That is why gsm's constructive normal form is: normalize each source independently, then propagate shared components along arrows in topological order. No product state space, no fixed-point loop, no iteration. It just falls out.
 
+The sweep settles the *state*; event order across registries is a separate question. A source event changes a target's shared component, and a target event that reads that shared component (in its guard, its effect, or the target's repair) can then land differently depending on which event arrived first: `recall` then `sell` leaves nothing sold, `sell` then `recall` leaves one sale. Each registry's own CC check cannot see this, because the two events sit on different registries. So `Build` also checks **cross-registry CC**: for every target, every image its morphism (or resolver) can produce from a valid source state, every target event, and every valid target state whose shared component is such an image, delivering the source change first and the target event first must end at the same target state. A failure is reported as a `CrossOrderError` naming the morphism, the source normal forms, the target event and state, and the two diverging results. Target events that touch only local variables, or that write a shared variable without reading one, always pass.
+
 ---
 
 ## When It Gets Hard: Cycles

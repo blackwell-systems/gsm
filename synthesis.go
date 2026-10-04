@@ -23,6 +23,16 @@ type Synthesis struct {
 	// error otherwise), AssuranceNone when no convergent compensation was found.
 	Assurance Assurance
 
+	// Substituted is set by BuildOrSynthesize when it returned the synthesized machine in place
+	// of the registry as written: the invariants' declared Repair functions (if any) are not
+	// used by that machine. String() leads with this. Synthesize and SynthesizeWith leave it
+	// false.
+	Substituted bool
+
+	// BuildError is the Build error that made BuildOrSynthesize fall back to synthesis: why
+	// the declared compensation was rejected. Nil from Synthesize and SynthesizeWith.
+	BuildError error
+
 	r        *Registry
 	vars     []Var          // the registry's variables when SynthesizeWith returned
 	events   map[string]int // event name -> index, when SynthesizeWith returned
@@ -77,7 +87,10 @@ func (r *Registry) Synthesize() (*Synthesis, error) { return r.SynthesizeWith() 
 // falls back to synthesizing a convergent compensation and building that instead. On success it
 // returns a ready-to-use Machine; the returned *Synthesis is nil when Build succeeded as written, and
 // non-nil when a synthesized compensation was substituted, in which case Repairs() and String()
-// describe exactly what changed. It returns an error only when neither path works: Build failed and
+// describe exactly what changed. On that path the returned machine does NOT run the invariants'
+// declared Repair functions: Synthesis.Substituted is true, Synthesis.BuildError holds the Build
+// error that triggered the fallback, and String() opens with a line saying so. A caller that must
+// run its own repairs should treat a non-nil *Synthesis as a failure to build as written. It returns an error only when neither path works: Build failed and
 // no convergent compensation exists (the error carries the impossibility witness when the search was
 // exhaustive) or could not be searched. This ties gsm's two mechanisms together, verification (Build,
 // which reports failures) and repair generation (Synthesize), so a caller can say "build this, and if
@@ -107,6 +120,7 @@ func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis,
 	if serr != nil {
 		return nil, nil, fmt.Errorf("gsm: build failed and synthesis could not run: %w", serr)
 	}
+	s.BuildError = err
 	if !s.Convergent {
 		if s.Exhaustive {
 			if w := s.Witness(); w != "" {
@@ -116,6 +130,7 @@ func (r *Registry) BuildOrSynthesize(opts ...SynthOption) (*Machine, *Synthesis,
 		}
 		return nil, s, fmt.Errorf("gsm: build failed and no convergent compensation was found within the search budget")
 	}
+	s.Substituted = true
 	return s.Machine(), s, nil
 }
 
@@ -532,6 +547,13 @@ func (s *Synthesis) Witness() string { return s.witness }
 func (s *Synthesis) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Synthesis: %s (%d nodes)\n", s.r.name, s.Nodes)
+	if s.Substituted {
+		b.WriteString("  REPAIR SYNTHESIZED: the returned machine uses the synthesized compensation below, " +
+			"not the invariants' declared Repair functions.\n")
+		if s.BuildError != nil {
+			fmt.Fprintf(&b, "  Build rejected the rules as written: %v\n", s.BuildError)
+		}
+	}
 	switch {
 	case s.Convergent:
 		fmt.Fprintf(&b, "  CONVERGENT — synthesized a compensation (cost %d). Representative repair:\n", s.Cost)

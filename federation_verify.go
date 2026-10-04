@@ -431,3 +431,198 @@ func rawLE(a, b []uint64) bool {
 	}
 	return true
 }
+
+// CrossOrderError reports two event orders that a federation delivers to different
+// federated normal forms: an event of a target registry and a change of the target's
+// shared component caused by its source(s). It is the federated counterpart of a
+// registry's CCFailure, for the pair of events that sits on two different registries.
+//
+// Read it as: the target is in State, whose shared component is the image of From (a
+// normal form of the source, or a combination of source normal forms for a resolved
+// target). The source moves to To (by any of its events, or by a change propagated to it
+// from further upstream). Delivering that change first and then Event gives
+// SourceFirst; delivering Event first and then the change gives EventFirst.
+type CrossOrderError struct {
+	Federation  string
+	Morphism    string // "src→dst", or "resolver for \"dst\"" on a multi-source target
+	Target      string // target registry name
+	Event       string // target event
+	State       State  // target state (valid, shared component consistent with From)
+	From        string // source normal form(s) that produced State's shared component
+	To          string // source normal form(s) after the source change
+	SourceFirst State  // source change delivered first, then Event
+	EventFirst  State  // Event delivered first, then the source change
+}
+
+func (e *CrossOrderError) Error() string {
+	return fmt.Sprintf("gsm: federation %q: event %q of %q does not commute with a source change across %s "+
+		"(cross-registry CC): at target state %s, whose shared component comes from source %s, when the source "+
+		"moves to %s, delivering the source change first gives %s but delivering %q first gives %s; the "+
+		"target event's guard, effect, or the target's repair reads a morphism-controlled (Shared) variable",
+		e.Federation, e.Event, e.Target, e.Morphism, e.State, e.From, e.To, e.SourceFirst, e.Event, e.EventFirst)
+}
+
+// verifyCrossOrder checks that every target event commutes with every change of the
+// target's shared component that its source(s) can cause: cross-registry CC. Component
+// Build checks CC only between events of one registry, and M1/R1/R2 say nothing about a
+// target event that reads a shared variable, so without this a federation can deliver
+// "source event, target event" and "target event, source event" to different states.
+//
+// The runtime (FedMachine.Apply, acyclic case) applies a target event as
+// b ↦ ow(ρ_B(e(b)), v) and a source change as b ↦ ow(b, v'), where ow(b, v) overwrites b's
+// shared component with the image v, v is the current image of the source(s), and ρ_B(e(·))
+// is the component machine's Apply (step then normalize). A source change cannot depend on
+// the target, and source-determinacy (checked by verifyEdge/verifyResolved) makes
+// ow(ow(x, v), v') = ow(x, v'). So the two orders from a consistent state b (shared = v)
+// end at the same source state and differ only in the target:
+//
+//	source first: ow(ρ_B(e(ow(b, v'))), v')
+//	event first:  ow(ρ_B(e(b)), v')
+//
+// Build requires these to be equal for every image v' in Img (the images of the morphism or
+// resolver over every valid source state or source combination), every event e of the
+// target, and every valid target state b whose shared component is in Img (the target states
+// a federated normal form can hold). Because Img is quantified as a whole, the check covers
+// a source change from any cause, so a source event, an event further upstream propagated
+// along a chain, and a change to any source of a resolved target are all covered by the one
+// condition on each target. Pairs of events on the same registry are its own CC; events on
+// unrelated registries touch disjoint state.
+//
+// Cost per target: |Img| x |{b valid : shared(b) in Img}| x |events| machine lookups, after
+// |valid(src)| (or the source-combination count, for a resolver) closure calls to build Img.
+// For a single-source target |Img| <= |valid(src)|, so this is within the M1 enumeration
+// bound verifyEdge already enforces.
+//
+// The same check runs on AllowMonotoneCycles networks. There it rules out the same race
+// between a target event and a change of its shared component, but the argument above is
+// for the acyclic sweep: on a cycle a target's local state can also feed back into its own
+// sources, which this check does not model.
+func (f *Federation) verifyCrossOrder(comps []*Machine) error {
+	inEdges := make([][]edgeDef, len(f.comps))
+	for _, e := range f.edges {
+		di := f.idx[e.dst]
+		inEdges[di] = append(inEdges[di], e)
+	}
+	for ti, edges := range inEdges {
+		if len(edges) == 0 {
+			continue
+		}
+		if err := f.verifyCrossOrderTarget(f.comps[ti], comps[ti], edges); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges []edgeDef) error {
+	resolver, resolved := f.resolvers[target]
+	sources, sharedVars := resolverInputs(edges)
+	morphism := fmt.Sprintf("morphism %s→%s", edges[0].src.name, target.name)
+	if resolved {
+		morphism = fmt.Sprintf("resolver for %q", target.name)
+	}
+
+	var mask uint64
+	for _, v := range sharedVars {
+		mask |= uint64((1<<v.bits)-1) << v.offset
+	}
+
+	// Img: the shared images the source(s) can produce, keyed by the packed shared bits, each
+	// with a witness source normal form (or combination) for the report.
+	rep := representativeTarget(target)
+	dom := newDomainCheck(target.vars)
+	witness := map[uint64]string{}
+	var images []uint64
+	addImage := func(out State, what func() string, src string) error {
+		if err := dom.imageError(what, target.name, rep, out); err != nil {
+			return err
+		}
+		img := out.packed & mask
+		if _, ok := witness[img]; !ok {
+			witness[img] = src
+			images = append(images, img)
+		}
+		return nil
+	}
+	if resolved {
+		srcValids := make([][]State, len(sources))
+		total := 1
+		for i, s := range sources {
+			srcValids[i] = s.validStates()
+			if len(srcValids[i]) == 0 {
+				return nil // no valid source combination: nothing to propagate
+			}
+			if total > maxStateSpace/len(srcValids[i]) {
+				return fmt.Errorf("gsm: resolver for %q: cross-registry order check space exceeds %d source combinations",
+					target.name, maxStateSpace)
+			}
+			total *= len(srcValids[i])
+		}
+		err := forEachCombo(srcValids, func(cs []State) error {
+			combo := make(map[string]State, len(sources))
+			desc := "{"
+			for k, s := range sources {
+				combo[s.name] = cs[k]
+				if k > 0 {
+					desc += ", "
+				}
+				desc += fmt.Sprintf("%s: %s", s.name, cs[k])
+			}
+			return addImage(resolver(rep, combo), resolverName(target.name), desc+"}")
+		})
+		if err != nil {
+			return err
+		}
+	} else {
+		e := edges[0]
+		for _, sa := range e.src.validStates() {
+			if err := addImage(e.mapFn(sa, rep), e.describe, sa.String()); err != nil {
+				return err
+			}
+		}
+	}
+	if len(images) < 2 {
+		return nil // the shared component never changes, so nothing can race with it
+	}
+
+	inImg := make(map[uint64]bool, len(images))
+	for _, img := range images {
+		inImg[img] = true
+	}
+	var consistent []State
+	for _, b := range target.validStates() {
+		if inImg[b.packed&mask] {
+			consistent = append(consistent, State{packed: b.packed, vars: tm.vars})
+		}
+	}
+	events := tm.Events()
+	if len(consistent) > 0 && len(images) > maxStateSpace/len(consistent) {
+		return fmt.Errorf("gsm: %s: cross-registry order check space (%d images x %d target states) exceeds %d",
+			morphism, len(images), len(consistent), maxStateSpace)
+	}
+
+	ow := func(s State, img uint64) State { return State{packed: (s.packed &^ mask) | img, vars: tm.vars} }
+	for _, ev := range events {
+		for _, b := range consistent {
+			after := tm.Apply(b, ev) // ρ_B(e(b)), computed once per (event, state)
+			for _, v2 := range images {
+				eventFirst := ow(after, v2)
+				sourceFirst := ow(tm.Apply(ow(b, v2), ev), v2)
+				if sourceFirst.packed != eventFirst.packed {
+					return &CrossOrderError{
+						Federation:  f.name,
+						Morphism:    morphism,
+						Target:      target.name,
+						Event:       ev,
+						State:       b,
+						From:        witness[b.packed&mask],
+						To:          witness[v2],
+						SourceFirst: sourceFirst,
+						EventFirst:  eventFirst,
+					}
+				}
+			}
+		}
+	}
+	return nil
+}

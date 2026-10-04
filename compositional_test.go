@@ -30,7 +30,7 @@ func TestBuildCompositional_ScalesBeyondGlobalEnumeration(t *testing.T) {
 	}
 
 	// Footprint-local certification can.
-	_, rep, err := r.BuildCompositional()
+	_, rep, err := r.BuildCompositional(gsm.TrustClosureFootprints())
 	if err != nil {
 		t.Fatalf("BuildCompositional: %v\n%s", err, rep)
 	}
@@ -65,7 +65,7 @@ func TestBuildCompositional_Runtime(t *testing.T) {
 	r.Event("inca").Writes(a).Apply(func(s gsm.State) gsm.State { return s.SetInt(a, s.GetInt(a)+1) }).Add()
 	r.Event("incb").Writes(b).Apply(func(s gsm.State) gsm.State { return s.SetInt(b, s.GetInt(b)+1) }).Add()
 
-	m, _, err := r.BuildCompositional()
+	m, _, err := r.BuildCompositional(gsm.TrustClosureFootprints())
 	if err != nil {
 		t.Fatalf("BuildCompositional: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBuildCompositional_DetectsNonTermination(t *testing.T) {
 		Repair(func(s gsm.State) gsm.State { return s.SetInt(a, s.GetInt(a)+1) }).Add()
 	r.Event("inca").Writes(a).Apply(func(s gsm.State) gsm.State { return s.SetInt(a, s.GetInt(a)+1) }).Add()
 
-	if _, _, err := r.BuildCompositional(); err == nil {
+	if _, _, err := r.BuildCompositional(gsm.TrustClosureFootprints()); err == nil {
 		t.Fatal("expected WFC failure for a non-terminating repair")
 	}
 }

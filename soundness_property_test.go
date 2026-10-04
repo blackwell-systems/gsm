@@ -338,7 +338,7 @@ func TestBuildMatchesBruteForce(t *testing.T) {
 			}
 		}
 
-		if _, _, cerr := rm.r.BuildCompositional(); cerr == nil {
+		if _, _, cerr := rm.r.BuildCompositional(TrustClosureFootprints()); cerr == nil {
 			compCertified++
 			if div2 != "" {
 				t.Fatalf("UNSOUND: BuildCompositional certified %s\nbut %s", rm.desc, div2)
@@ -413,7 +413,7 @@ func FuzzBuildSoundness(f *testing.F) {
 				t.Fatalf("UNSOUND: Build certified %s\n%s\nbut %s", rm.desc, rep, d)
 			}
 		}
-		if _, _, err := rm.r.BuildCompositional(); err == nil {
+		if _, _, err := rm.r.BuildCompositional(TrustClosureFootprints()); err == nil {
 			if d := ref.divergence(starts, 2); d != "" {
 				t.Fatalf("UNSOUND: BuildCompositional certified %s\nbut %s", rm.desc, d)
 			}

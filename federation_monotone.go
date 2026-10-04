@@ -79,9 +79,9 @@ func (f *Federation) verifyMonotoneVisited() error {
 		points := 1
 		empty := false
 		for i, s := range sources {
-			d, err := visitedOf(f.idx[s])
-			if err != nil {
-				return err
+			d, verr := visitedOf(f.idx[s])
+			if verr != nil {
+				return verr
 			}
 			if len(d) == 0 {
 				empty = true
@@ -129,8 +129,8 @@ func (f *Federation) verifyMonotoneVisited() error {
 			var ref []uint64
 			for di, dst := range dstDom {
 				out := image(combo, dst)
-				if err := dom.imageError(describe, target.name, dst, out); err != nil {
-					return err
+				if ierr := dom.imageError(describe, target.name, dst, out); ierr != nil {
+					return ierr
 				}
 				for _, v := range dom.vars {
 					if !sharedIdx[v.index] && out.getRaw(v) != dst.getRaw(v) {
