@@ -159,7 +159,9 @@ func (m *Machine) lazyApply(ev eventDef, s State) State {
 // received from a parent registry, returning the merged state. A distributed target node
 // uses it to incorporate its parent's shared component without holding the parent's state or
 // the federated machine. (Merging shared variables preserves local validity by the M1
-// guarantee, so no re-normalization is required.)
+// guarantee, so no re-normalization is required, provided p is the morphism image of a valid
+// source state, as SharedProjection computes it.) It does not check order: a stale projection
+// merged after a newer one wins. Use MergeProjectionAfter when the transport can reorder.
 //
 // It returns s unchanged and an error if s is not a state of this machine (see EffectFunc),
 // if the projection names a variable this machine does not have, or if a value is outside
