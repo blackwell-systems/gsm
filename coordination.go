@@ -87,6 +87,11 @@ func (f *Federation) CoordinationPlan() []CoordinationPoint {
 // converges, so this turns a rejected cyclic federation into an accepted one that converges given the
 // named coordination. An empty plan is exactly Build.
 //
+// gsm does not check the coordination itself. The returned report records each removed edge
+// on its target component (Report.Coordinated, printed as "Coordinated input"): something
+// outside gsm must serialize writes to those shared variables, and each write must leave the
+// target valid (apply it, then Normalize).
+//
 // A point names the morphisms it coordinates by Src, Dst and shared variable set (Shared, in
 // any order), as CoordinationPlan returns them, and removes every morphism matching all three
 // (parallel morphisms between two registries are separate points). A point that matches none
@@ -129,7 +134,31 @@ func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *F
 	if len(remove) == 0 {
 		return f.Build()
 	}
-	return f.withoutEdges(remove).Build()
+	m, rep, err := f.withoutEdges(remove).Build()
+	recordCoordinated(rep, f.edges, remove)
+	return m, rep, err
+}
+
+// recordCoordinated notes each removed edge on its target component's report
+// (Report.Coordinated), so the report names what the coordination mechanism must do.
+func recordCoordinated(rep *FedReport, edges []edgeDef, remove map[int]bool) {
+	if rep == nil {
+		return
+	}
+	for ei, e := range edges {
+		if !remove[ei] {
+			continue
+		}
+		cp := CoordinationPoint{Src: e.src.name, Dst: e.dst.name}
+		for _, v := range e.shared {
+			cp.Shared = append(cp.Shared, v.name)
+		}
+		for _, c := range rep.Components {
+			if c != nil && c.Name == e.dst.name {
+				c.Coordinated = append(c.Coordinated, cp)
+			}
+		}
+	}
 }
 
 // sortedNames returns a sorted copy of names.

@@ -2,6 +2,7 @@ package gsm
 
 import (
 	"fmt"
+	"math"
 )
 
 // Registry holds the rules that govern state machines: variables, invariants,
@@ -42,6 +43,9 @@ type invariantDef struct {
 	// This is what lets a machine be serialized and re-verified from its rules.
 	predAST   Pred
 	repairAST Transform
+	// foreign names a variable passed to Watches that is not a variable of this
+	// registry; checkNames reports it (every build path calls checkNames).
+	foreign string
 }
 
 type eventDef struct {
@@ -53,6 +57,9 @@ type eventDef struct {
 	// DeclEventGuarded (nil for closures).
 	effectAST Transform
 	guardAST  Pred
+	// foreign names a variable passed to Writes that is not a variable of this
+	// registry; checkNames reports it (every build path calls checkNames).
+	foreign string
 }
 
 // NewRegistry creates a Registry for a named state machine.
@@ -62,13 +69,21 @@ func NewRegistry(name string) *Registry {
 	return &Registry{name: name, allIndependent: true}
 }
 
-// Independent declares that two events may arrive in either order
-// (they are not causally related). Compensation Commutativity (CC)
-// will be checked for this pair.
+// Independent declares that two events may arrive in either order at a replica
+// (they are concurrent, not causally related). Compensation Commutativity (CC) is
+// certified for every declared pair: Build fails if a declared pair does not commute.
 //
-// Calling Independent() automatically switches to declared-only mode:
-// only explicitly declared pairs will be verified. This avoids checking
-// all O(n²) event pairs when most are causally ordered.
+// The first call switches the registry to declared-only mode: only declared pairs
+// are required to commute, so Build accepts a machine in which some undeclared pair
+// does not. That is sound only if every such pair is delivered in causal order: the
+// two events reach every replica in the same fixed order (the convergence theorem
+// for declared-only mode, normalization-confluence coq/Trace.v run_tequiv and
+// coq/CausalReplay.v causal_tequiv, exempts a pair from CC only when it is never
+// reordered). gsm cannot see delivery order, so Build still checks every undeclared
+// pair on its step tables and lists each one that does not commute in
+// Report.CausalOrderRequired, with a witness state; the report's convergence line
+// says convergence holds under causal delivery of those pairs. An empty
+// CausalOrderRequired means every pair commutes and the declarations cost nothing.
 func (r *Registry) Independent(e1name, e2name string) *Registry {
 	// Auto-switch to declared-only mode when Independent is used
 	r.allIndependent = false
@@ -82,7 +97,8 @@ func (r *Registry) Independent(e1name, e2name string) *Registry {
 // OnlyDeclaredPairs explicitly switches Compensation Commutativity (CC) checking
 // to only the event pairs declared via Independent(). This is now automatic when
 // you call Independent(), but this method remains for explicitness and backward
-// compatibility.
+// compatibility. Every undeclared pair must then be delivered in causal order; see
+// Independent and Report.CausalOrderRequired.
 func (r *Registry) OnlyDeclaredPairs() *Registry {
 	r.allIndependent = false
 	return r
@@ -104,6 +120,9 @@ func (r *Registry) OnlyDeclaredPairs() *Registry {
 // check (checkUnchanged), so the registry they build from has the same declarations
 // as the one checked.
 func (r *Registry) checkNames() error {
+	if err := r.checkDeclaredVars(); err != nil {
+		return err
+	}
 	seen := make(map[string]bool, len(r.events))
 	for _, ev := range r.events {
 		if seen[ev.name] {
@@ -126,6 +145,44 @@ func (r *Registry) checkNames() error {
 		}
 	}
 	return nil
+}
+
+// checkDeclaredVars rejects an event or invariant that names a variable of another
+// registry in Writes or Watches (or whose combinator rule mentions one at a position
+// this registry does not have). Such a Var carries an index into the other registry's
+// variable list, which BuildCompositional would otherwise use as an index into this one.
+func (r *Registry) checkDeclaredVars() error {
+	for _, ev := range r.events {
+		if ev.foreign != "" {
+			return fmt.Errorf("gsm: registry %q: event %q Writes variable %q, which is not a variable of this "+
+				"registry (was it declared on another registry?)", r.name, ev.name, ev.foreign)
+		}
+		for _, i := range ev.writes {
+			if i < 0 || i >= len(r.vars) {
+				return fmt.Errorf("gsm: registry %q: event %q writes a variable that is not a variable of this "+
+					"registry (index %d; was it declared on another registry?)", r.name, ev.name, i)
+			}
+		}
+	}
+	for _, inv := range r.invariants {
+		if inv.foreign != "" {
+			return fmt.Errorf("gsm: registry %q: invariant %q Watches variable %q, which is not a variable of "+
+				"this registry (was it declared on another registry?)", r.name, inv.name, inv.foreign)
+		}
+		for _, i := range inv.footprint {
+			if i < 0 || i >= len(r.vars) {
+				return fmt.Errorf("gsm: registry %q: invariant %q watches a variable that is not a variable of "+
+					"this registry (index %d; was it declared on another registry?)", r.name, inv.name, i)
+			}
+		}
+	}
+	return nil
+}
+
+// owns reports whether v is a variable of this registry: the variable declared at
+// v's position has v's name, kind, layout and domain.
+func (r *Registry) owns(v Var) bool {
+	return v.index >= 0 && v.index < len(r.vars) && sameVar(r.vars[v.index], v)
 }
 
 // registryShape is what a rule closure could change by declaring on its own
@@ -201,7 +258,14 @@ func (r *Registry) Enum(name string, values ...string) Var {
 }
 
 // Int declares a bounded integer state variable. Its name must be unique within
-// the registry.
+// the registry. It panics if max <= min, or if the range has more values than an int
+// can count (for example Int(0, math.MaxInt)).
+//
+// Writes through SetInt, Inc, Dec, IncBy, DecBy and combinator Set saturate at the
+// bounds: a value past max is stored as max, silently. Build reports each rule that
+// saturates (Report.Saturations), because an invariant written to catch the overflow
+// (bal <= max || overdraft) never sees it. Size the range past any bound an invariant
+// tests.
 func (r *Registry) Int(name string, min, max int) Var {
 	if max < min {
 		panic(fmt.Sprintf("gsm: int %q has max < min", name))
@@ -209,6 +273,13 @@ func (r *Registry) Int(name string, min, max int) Var {
 	if max == min {
 		panic(fmt.Sprintf("gsm: int %q needs max > min; a single-value range (%d..%d) is a degenerate "+
 			"variable with no states to range over", name, min, max))
+	}
+	// The domain size max-min+1 must be an int. Int(0, math.MaxInt) or a range
+	// spanning both signs widely overflows it, which used to pass the Go checks and
+	// fail later, far from the declaration.
+	if span := max - min; span < 0 || span == math.MaxInt {
+		panic(fmt.Sprintf("gsm: int %q range %d..%d is too wide: it has more than math.MaxInt values. "+
+			"A gsm variable enumerates its domain, so declare the range the machine needs", name, min, max))
 	}
 	domain := max - min + 1
 	bits := bitsNeeded(domain)
@@ -241,10 +312,17 @@ func (r *Registry) Invariant(name string) *InvariantBuilder {
 	}
 }
 
-// Watches declares the invariant's footprint — which variables it constrains
-// and which its repair may modify.
+// Watches declares the invariant's footprint: which variables it constrains
+// and which its repair may modify. Each must be a variable of this registry; a
+// variable of another registry makes every build path return an error naming it.
 func (ib *InvariantBuilder) Watches(vars ...Var) *InvariantBuilder {
 	for _, v := range vars {
+		if !ib.r.owns(v) {
+			if ib.def.foreign == "" {
+				ib.def.foreign = v.name
+			}
+			continue
+		}
 		ib.def.footprint = append(ib.def.footprint, v.index)
 	}
 	return ib
@@ -293,9 +371,17 @@ func (r *Registry) Event(name string) *EventBuilder {
 	}
 }
 
-// Writes declares which variables this event modifies.
+// Writes declares which variables this event modifies. Each must be a variable of
+// this registry; a variable of another registry makes every build path return an
+// error naming it.
 func (eb *EventBuilder) Writes(vars ...Var) *EventBuilder {
 	for _, v := range vars {
+		if !eb.r.owns(v) {
+			if eb.def.foreign == "" {
+				eb.def.foreign = v.name
+			}
+			continue
+		}
 		eb.def.writes = append(eb.def.writes, v.index)
 	}
 	return eb

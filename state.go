@@ -82,14 +82,18 @@ func (s State) SetBool(v Var, val bool) State {
 }
 
 // SetInt returns a new State with an int variable set.
-// Value is clamped to the variable's declared range.
+// The value is clamped to the variable's declared range, silently: SetInt(bal, 4) on
+// Int("bal", 0, 3) stores 3. Build lists every rule that clamps (Report.Saturations),
+// since an invariant written to catch the overflow never sees it.
 func (s State) SetInt(v Var, val int) State {
 	max := v.min + v.domain - 1
 	if val < v.min {
 		val = v.min
+		noteClamp(s, v)
 	}
 	if val > max {
 		val = max
+		noteClamp(s, v)
 	}
 	return s.setRaw(v, uint64(val-v.min))
 }
