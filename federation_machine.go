@@ -101,7 +101,13 @@ func (m *FedMachine) Normalize(fs FedState) FedState {
 }
 
 // repair recomputes target j's state from its sources (single-source morphism or resolver).
+//
+// A target internal to an EmbedCertified sub runs from the certificate's verified table instead
+// (tableRepair): its closures are not called.
 func (m *FedMachine) repair(fs FedState, j int) State {
+	if m.certTab != nil && m.certTab[j] != nil {
+		return m.tableRepair(m.certTab[j], fs, j)
+	}
 	if r := m.resolvers[j]; r != nil {
 		return m.mustBeTarget(j, resolverName(m.comps[j].name), fs.states[j], r(fs.states[j], m.sourcesOf(fs, j)))
 	}
@@ -295,6 +301,22 @@ func (m *FedMachine) SharedProjection(srcState State, src, dst *Registry) (Proje
 	if e == nil {
 		return Projection{}, fmt.Errorf("gsm: no morphism %q→%q", src.name, dst.name)
 	}
+	// A single-source morphism internal to an EmbedCertified sub projects from the certificate's
+	// table, as Apply repairs from it; its Map is not called. The source state must be one the
+	// certificate covers (a valid state of src).
+	if ct := m.certTab; ct != nil && ct[di] != nil && len(ct[di].srcs) == 1 && ct[di].srcs[0] == si {
+		fs := FedState{states: make([]State, len(m.comps))}
+		fs.states[si] = srcState
+		img, err := m.certLookup(ct[di], fs)
+		if err != nil {
+			return Projection{}, fmt.Errorf("gsm: SharedProjection %s→%s: %w", src.name, dst.name, err)
+		}
+		shared := make(map[string]uint64, len(e.shared))
+		for _, v := range e.shared {
+			shared[v.name] = (img >> v.offset) & uint64((1<<v.bits)-1)
+		}
+		return Projection{From: src.name, To: dst.name, Shared: shared}, nil
+	}
 	// Apply the morphism to a representative valid target (the target machine's normalized zero
 	// state); source-determinacy (checked at Build) guarantees the shared values are independent of
 	// which valid target we use, and a normalized state stays within the morphism's contract.
@@ -321,6 +343,16 @@ func (m *FedMachine) IsValid(fs FedState) bool {
 		}
 		// The morphism/merge invariant holds iff recomputing the target's shared component is a
 		// no-op — it already equals the (single) morphism image or the resolver's merge.
+		if m.certTab != nil && m.certTab[j] != nil {
+			// A state the certificate does not cover is not a valid federated state; say so
+			// rather than panic as Normalize does.
+			ct := m.certTab[j]
+			img, err := m.certLookup(ct, fs)
+			if err != nil || !m.comps[j].isVerifiedState(fs.states[j].packed) || fs.states[j].packed&ct.mask != img {
+				return false
+			}
+			continue
+		}
 		if want := m.repair(fs, j); want.ID() != fs.states[j].ID() {
 			return false
 		}

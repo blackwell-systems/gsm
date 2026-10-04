@@ -7,10 +7,12 @@ Today `Build` re-checks the local conditions on the whole combined network, whic
 certificate path is an opt-in optimization that does not change what gsm can verify, only what it
 can safely skip.
 
-Implemented (`certificate.go`): `Certificate`, `Federation.Certify`, `Federation.EmbedCertified`
-(re-checks internal edges from the tables, re-runs the live sub's internal closures over every
-valid source and target state so they cannot differ from the tables there, and rebuilds each
-component with `Build`, so component convergence is re-checked rather than trusted),
+Implemented (`certificate.go`, `certificate_exec.go`): `Certificate`, `Federation.Certify`,
+`Federation.EmbedCertified` (re-checks internal edges from the tables, re-runs the live sub's
+internal closures over every valid source and target state so they cannot differ from the tables
+there, rebuilds each component with `Build`, so component convergence is re-checked rather than
+trusted, and then **executes the verified tables** at run time instead of the closures; see
+"Certified execution"),
 morphism/resolver table extraction, a digest that is tamper-complete over the declarations
 (component rules, names and declared pairs, plus those tables; see "Versioning and trust policy"), and `Certificate.Verify`, a standalone differential re-checker that re-derives the federated
 conditions from the tables rather than the producer's closures. Input ports are implemented
@@ -112,8 +114,9 @@ boundary:
 - **(iv) Digest match.** The embedded subsystem's `PolicyDigest()` equals the certificate's identity.
 
 If all pass, `Build` uses the certificate's tables for the internal morphisms instead of re-verifying
-their closures. (As built, it still rebuilds each component and re-checks its convergence, and it
-re-verifies the internal closures against the tables; see "Versioning and trust policy".) If any fail, it falls back to full re-verification (current behavior), so the
+their closures, and the machine runs those tables (see "Certified execution"). (As built, it still
+rebuilds each component and re-checks its convergence, and it re-verifies the internal closures
+against the tables; see "Versioning and trust policy".) If any fail, it falls back to full re-verification (current behavior), so the
 certificate path is never less sound than today, only faster when it applies.
 
 ## Resolver tags
@@ -141,10 +144,13 @@ carry the framing of another, and the declared pairs are digested as a set. The 
 is not covered: it labels messages only, and nothing is decided by it. The digest binds a morphism or resolver
 closure only through its table, which records its images at one representative target: a closure
 that differs only at other targets digests the same. `EmbedCertified` therefore does not rely on
-the digest for the closures: it re-runs them over every valid source and target state (writes only
-to `Shared()` variables, validity, source-determinacy), which, with the digest-matched table at the
-representative target, ties each closure to its table on the whole verified domain. At runtime the
-FedMachine also refuses any image outside the target's domain or that writes a non-shared variable.
+the digest for the closures. The machine executes the tables, not the closures (see "Certified
+execution"), and Build binds the tables that run to the digest. It also re-runs the closures over
+every valid source and target state (writes only to `Shared()` variables, validity,
+source-determinacy), which, with the digest-matched table at the representative target, ties each
+closure to its table on the whole verified domain; that binding is no longer what makes the
+runtime correct, and is kept as described there. Where the FedMachine still runs a closure, it
+refuses any image outside the target's domain or that writes a non-shared variable.
 The digest is an unkeyed SHA-256 over public data: it is an integrity binding, not authentication,
 since anyone can recompute it for altered tables. That is why every condition below is re-derived
 from the tables rather than trusted from the digest.
@@ -193,8 +199,84 @@ runtime needs them), so the CC re-check adds two table lookups per state per eve
 the internal closures costs what `Embed` spends verifying them (valid sources times valid targets
 per morphism), the same order as the M1/R2 table re-check. So `EmbedCertified` no longer saves
 verification time over `Embed`; what it adds is the pin: the subsystem must match the certificate
-(digest), its non-port shared variables are sealed against outer writers, and the federated
-conditions are re-derived from tables a consumer can check without the producer's closures.
+(digest), its non-port shared variables are sealed against outer writers, the federated
+conditions are re-derived from tables a consumer can check without the producer's closures, and
+the machine runs exactly those tables.
+
+## Certified execution
+
+A FedMachine built with `EmbedCertified` repairs each internal target of the certified sub by a
+lookup in the certificate's table, not by calling the sub's `Map` or `Resolver` closure. That is
+what `Apply`, `Normalize`, `IsValid` and `SharedProjection` run. The guarantee therefore covers
+exactly the code that runs: the tables Build re-checked (M1/R2, completeness, port freeness,
+acyclicity or monotonicity) and bound to the digest are the tables the machine executes. There is
+no flag: a certified sub always runs its tables where they apply.
+
+The two halves of the runtime are both tables now. Each component runs `Registry.Build`'s step
+and normal-form tables (event x state to state, and state to normal form), which Build re-checks
+(WFC, CC) and the in-process table oracle certifies; that was already so. The morphism and
+resolver repair between components is the certificate's table (source state, or source
+combination, to the target's shared values), which is the new part.
+
+How it is built:
+
+- **Snapshot.** Build deep-copies the certificate's tables once, recomputes the digest over the
+  copy (it must equal the certificate's digest, as well as the digest over the live closures),
+  re-checks the copy, and compiles the copy. A closure that changes the `Certificate` while Build
+  runs, or code that changes it afterwards, cannot reach the machine.
+- **Encoding.** The tables use the certificate's own encoding: source ids are packed component
+  states (the component's bit layout), and each value is a raw shared-variable value placed at
+  that variable's offset. The compiled form keys each source by its rank among that component's
+  valid states and stores, per source combination, the target's shared bits as one `uint64`; a
+  repair overwrites the target's shared bits with it, leaving its local bits as they are.
+- **Domain.** Only valid states of the source components and of the target are covered (those are
+  the states the table rows and M1/R2 range over). Phase 1 normalization and M1 keep every state
+  `Normalize` reaches inside that domain, so a state outside it means the `FedState` was not one of
+  this machine's. `Normalize` and `Apply` then panic, naming the component, the state and the
+  certified sub; `IsValid` returns false; `SharedProjection` returns an error.
+- **Wiring.** Build refuses wiring the certificate does not describe, which the table would
+  otherwise silently replace: a morphism the outer federation adds between two components of the
+  same certified sub, and an outer `Resolve` for a target whose sources are all inside the sub
+  (when the sub has no resolver of its own for it).
+
+Where the closures still run (each verified at Build, and bound to the tables on every valid
+state):
+
+- **Cyclic networks.** Kleene iteration resets shared components to bottom and repairs from
+  there, so it evaluates repair on source states that are not valid; the tables do not cover
+  them, so a cyclic machine runs the closures.
+- **Seam targets.** A certified target that also receives an outer morphism (into a declared
+  input port) is repaired by the outer resolver, which Build verifies at the seam.
+- **`SharedProjection` into a resolved target.** The certificate tabulates the resolver, not each
+  morphism into it, so a projection along one of those morphisms runs its `Map`.
+
+`FedReport.Runtime` states, per certified sub, whether its internal targets execute verified
+tables, and if not all of them, how many and why.
+
+What is given up: nothing semantically. On every state the certificate covers, the tables and
+the closures agree (Build binds them, and `certificate_exec_test.go` compares the two machines on
+every source combination and target state, every in-domain federated state, and every event).
+What changes is that the closures are not called at run time for a certified sub: a side effect
+in a `Map` or `Resolver` (logging, metrics, a counter) does not happen. Closures were required to
+be pure already; now the purity is not even observable.
+
+The closure binding (`bindClosures`) is kept although the runtime no longer depends on it. It is
+an early, specific diagnostic for the usual mistake (a sub whose closures were edited after
+certification), and it is what lets the build-time checks that still evaluate closures (the
+cross-registry order check, the monotone-cycle checks) and the paths above that still run them
+speak for the tables. Its cost is unchanged.
+
+Memory: the compiled form stores one `uint64` per table row (per valid source state, or source
+combination for a resolver), plus, per source component, one `int32` per encoding of that
+component (half the size of the component's own normal-form table, shared by every table that
+reads that component). The certificate's rows (two slices each) are not kept by the machine.
+Build also holds a transient copy of the certificate's tables while it checks them.
+
+Speed: a repair is one rank read per source and one array read, with no allocation. On an Apple
+M1 Pro, `BenchmarkFedRepair_*` measures 6.8 ns for a single-source repair (39.7 ns with the
+closure) and 8.1 ns for a two-source resolver (184 ns with the closure, which builds the source
+map), and a whole `FedMachine.Apply` takes 96 ns versus 276 ns (resolver) and 102 ns versus
+168 ns (three-component chain).
 
 ## Soundness condition
 
@@ -203,9 +285,10 @@ the certificate is parametric over its declared input ports. This is the composi
 result of the federated paper (§8) together with its assume-guarantee refinement (the input/output
 port contract). The check is entirely at the boundary: interface conditions plus a graph-level
 cycle/monotonicity check, with no re-enumeration of the subsystem's state space. The implementation
-nevertheless re-enumerates the internal morphisms (from the tables, and the live closures against
-them), because a Go closure can be changed after certification in ways the digest cannot see; the
-boundary-only form needs the closures to be bound by something stronger than their tables.
+nevertheless re-enumerates the internal morphisms from the tables, and the live closures against
+them. The machine executes the tables, so the closures matter at run time only where they still run
+(see "Certified execution"); the closure binding is what keeps those paths, and the build-time checks
+that evaluate closures, in agreement with the tables.
 
 ## Proposed API shape (sketch)
 
