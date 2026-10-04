@@ -552,10 +552,10 @@ No repair functions execute at runtime. Everything is baked into lookup tables d
 r.OnlyDeclaredPairs()
 r.Independent("deposit", "notify")  // These two can happen in either order
 r.Independent("withdraw", "notify")
-// Other pairs not checked
+// Other pairs: checked, and reported if they need causal delivery
 ```
 
-Use this when you know some events are causally ordered (e.g., `pay` always before `ship`).
+Use this when you know some events are causally ordered (e.g., `pay` always before `ship`). That knowledge is an obligation on the runtime: every undeclared pair must be delivered in causal order, the same fixed order at every replica. `Build` still checks the undeclared pairs and lists each one that does not commute in `Report.CausalOrderRequired`; the report's convergence line then reads "GUARANTEED under causal delivery of the N undeclared pair(s) above". A listed pair that your runtime can reorder is not causally ordered: declare it `Independent` and make it commute.
 
 ---
 
