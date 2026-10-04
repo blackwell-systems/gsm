@@ -87,6 +87,13 @@ const (
 	// every step from the expression trees, so it does not trust gsm's tables
 	// at all.
 	AssuranceOracleTablesAndRules
+	// AssuranceOracleComponentsTested: AssuranceOracleComponents for a machine
+	// with Go closure rules, built with TrustClosureFootprints. The oracle
+	// certified every component's tables, but that cross-component pairs commute
+	// rests on gsm's footprint check, which for closures is a perturbation test
+	// (it misses a joint dependence on three or more outside variables), not an
+	// exact check.
+	AssuranceOracleComponentsTested
 )
 
 func (a Assurance) String() string {
@@ -97,6 +104,9 @@ func (a Assurance) String() string {
 		return "tables certified by the verified table oracle; rules certified by the verified rules oracle"
 	case AssuranceOracleComponents:
 		return "component tables certified by the verified table oracle; cross-component independence by gsm's footprint check"
+	case AssuranceOracleComponentsTested:
+		return "component tables certified by the verified table oracle; cross-component independence by gsm's footprint check, " +
+			"which for closure rules is a perturbation test, not exact"
 	}
 	return "not certified"
 }

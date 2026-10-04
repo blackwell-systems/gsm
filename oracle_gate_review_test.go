@@ -88,7 +88,7 @@ func TestOracleGateConcurrentBuilds(t *testing.T) {
 			if _, rep, err := r.Build(); err != nil || rep.Assurance != AssuranceOracleTables {
 				t.Error(err)
 			}
-			if _, rep, err := twoCounters().BuildCompositional(); err != nil || rep.Assurance != AssuranceOracleComponents {
+			if _, rep, err := twoCounters().BuildCompositional(TrustClosureFootprints()); err != nil || rep.Assurance != AssuranceOracleComponentsTested {
 				t.Error(err)
 			}
 		}(i)

@@ -246,7 +246,7 @@ func TestDeclareDuringVerification(t *testing.T) {
 			"Synthesize": func(r *Registry) error { _, err := r.Synthesize(); return err },
 			"Build":      func(r *Registry) error { _, _, err := r.Build(); return err },
 			"BuildCompositional": func(r *Registry) error {
-				_, _, err := r.BuildCompositional()
+				_, _, err := r.BuildCompositional(TrustClosureFootprints())
 				return err
 			},
 		}

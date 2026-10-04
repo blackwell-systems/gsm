@@ -3,6 +3,9 @@ package gsm
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // maxStateSpace is the default ceiling on enumerable states.
@@ -25,6 +28,40 @@ type Report struct {
 	PairsDisjoint int        // proved by verified footprint disjointness (BuildCompositional only; always 0 for Build)
 	PairsBrute    int        // proved by exhaustive check
 	CCFailure     *CCFailure // non-nil if CC failed
+
+	// PairsUndeclared is the number of event pairs outside the declared Independent
+	// set that Build also checked (0 when every pair is checked, the default).
+	PairsUndeclared int
+
+	// CausalOrderRequired lists the undeclared event pairs (Registry.Independent
+	// switches to declared-only mode) that do NOT commute, each with a witness state
+	// and the two results. Build does not fail on them, but convergence then holds
+	// only if each listed pair is delivered in causal order: the two events reach
+	// every replica in the same fixed order. Empty when every pair commutes or when
+	// every pair was certified.
+	CausalOrderRequired []CCFailure
+
+	// NotIdempotent lists the events for which applying the event twice reaches a
+	// different state than applying it once, from some state Build checked. The
+	// convergence guarantee is about permutations of one multiset of events: each
+	// event delivered exactly once. A listed event delivered twice (an at-least-once
+	// queue redelivering it) changes the result, so its duplicates must be
+	// suppressed (an event id and a dedupe set, for example) before Apply.
+	NotIdempotent []string
+
+	// Saturations lists the rules whose write to an Int or enum variable was
+	// clamped into the variable's range (SetInt, Inc, Dec, combinator Set) on some
+	// state Build ran the rule on. Clamping is part of the verified semantics, so
+	// convergence is unaffected, but an invariant meant to catch the overflow never
+	// sees it. Recorded for writes made on states Build passed to the rule.
+	Saturations []Saturation
+
+	// Coordinated lists, on the report of a federation component, the morphism edges
+	// into it that BuildCoordinated removed: their shared variables are external
+	// inputs that the coordination mechanism (a single writer, a lock, a consensus
+	// round) must serialize, and each write must leave the component valid
+	// (Normalize after writing). gsm does not check that coordination.
+	Coordinated []CoordinationPoint
 
 	// Compositional (BuildCompositional) results
 	Components         int  // number of footprint components verified
@@ -87,6 +124,17 @@ type CCFailure struct {
 	Result2 State // apply e2 then e1
 }
 
+// Saturation records a rule whose write was clamped into a variable's range.
+type Saturation struct {
+	Rule   string // `event "deposit"` or `invariant "cap" repair`
+	Var    string // the variable written
+	States int    // how many input states the rule saturated on
+}
+
+func (s Saturation) String() string {
+	return fmt.Sprintf("%s clamps %q into its range on %d state(s)", s.Rule, s.Var, s.States)
+}
+
 func (r *Report) String() string {
 	s := fmt.Sprintf("Machine: %s\n", r.Name)
 	s += fmt.Sprintf("  Variables: %d\n", r.VarCount)
@@ -142,8 +190,24 @@ func (r *Report) String() string {
 		s += "  Convergence: NOT CERTIFIED (no machine)\n"
 		return s
 	}
+	if r.CC && r.PairsUndeclared > 0 {
+		if n := len(r.CausalOrderRequired); n == 0 {
+			s += fmt.Sprintf("  Undeclared pairs: %d checked, all commute (order free)\n", r.PairsUndeclared)
+		} else {
+			s += fmt.Sprintf("  Undeclared pairs: %d checked, %d do not commute: each must be causally ordered "+
+				"(not independent), delivered in the same order at every replica\n", r.PairsUndeclared, n)
+			for _, f := range r.CausalOrderRequired {
+				s += fmt.Sprintf("    (%s, %s) from %s: %s→%s gives %s, %s→%s gives %s\n", f.Event1, f.Event2, f.State,
+					f.Event1, f.Event2, f.Result1, f.Event2, f.Event1, f.Result2)
+			}
+		}
+	}
 	if r.WFC && r.CC && r.Assurance != AssuranceNone {
-		s += "\n  Convergence: GUARANTEED\n"
+		if n := len(r.CausalOrderRequired); n > 0 {
+			s += fmt.Sprintf("\n  Convergence: GUARANTEED under causal delivery of the %d undeclared pair(s) above\n", n)
+		} else {
+			s += "\n  Convergence: GUARANTEED\n"
+		}
 		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
 		if r.RulesOracleSkipped != "" {
 			s += fmt.Sprintf("  Rules oracle: not run: %s\n", r.RulesOracleSkipped)
@@ -151,8 +215,28 @@ func (r *Report) String() string {
 	} else {
 		s += fmt.Sprintf("\n  Assurance: %s\n", r.Assurance)
 	}
+	s += r.obligations()
 
 	return s
+}
+
+// obligations renders what the guarantee assumes of the runtime and of the rules
+// beyond what Build certified: exactly-once delivery of non-idempotent events,
+// silent saturation, and federation edges left to external coordination.
+func (r *Report) obligations() string {
+	var b strings.Builder
+	if len(r.NotIdempotent) > 0 {
+		fmt.Fprintf(&b, "  Delivery: exactly once for %s (applying one twice differs from once); "+
+			"deduplicate redelivered events\n", strings.Join(r.NotIdempotent, ", "))
+	}
+	for _, sat := range r.Saturations {
+		fmt.Fprintf(&b, "  Saturation: %s (silently; an invariant testing the bound never sees the overflow)\n", sat)
+	}
+	for _, cp := range r.Coordinated {
+		fmt.Fprintf(&b, "  Coordinated input: %s is set by external coordination, not by a morphism; "+
+			"serialize its writes and Normalize after each (not checked by gsm)\n", cp)
+	}
+	return b.String()
 }
 
 // Build verifies WFC and CC, then returns an immutable Machine.
@@ -265,21 +349,30 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 		valid[i] = r.isValidEncoding(uint64(i))
 	}
 
+	// The rules run on states over a build-private copy of the variable list, so a
+	// write that saturates (SetInt, combinator Set) can be attributed to this build
+	// (see clampRecorder). The copy is the same schema, so rule results are states of
+	// the machine exactly as before.
+	bvars := append([]Var(nil), r.vars...)
 	mkState := func(id uint64) State {
-		return State{packed: id, vars: r.vars}
+		return State{packed: id, vars: bvars}
 	}
+	rec := watchClamps(bvars)
+	defer rec.stop()
+	run := checkedRules{r: r, dom: newDomainCheck(bvars), clamp: rec}
 
 	// Phase 1: Verify WFC and compute normal forms
-	nf, err := r.computeNormalForms(packedCount, stateCount, valid, mkState, report)
+	nf, err := r.computeNormalForms(run, packedCount, stateCount, valid, mkState, report)
 	if err != nil {
 		return nil, report, err
 	}
 
 	// Phase 2: Compute step tables
-	step, err := r.computeStepTables(packedCount, valid, nf, mkState)
+	step, err := r.computeStepTables(run, packedCount, valid, nf, mkState)
 	if err != nil {
 		return nil, report, err
 	}
+	report.Saturations = rec.saturations()
 
 	// Phase 3: Verify CC (skipped when a certificate already attests convergence).
 	if runCC {
@@ -287,6 +380,7 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 		if err != nil {
 			return nil, report, err
 		}
+		report.NotIdempotent = r.notIdempotent(packedCount, valid, nf, step)
 	}
 
 	if err := r.checkUnchanged(before); err != nil {
@@ -313,10 +407,9 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 }
 
 // computeNormalForms verifies WFC and computes the normal form table.
-func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool, mkState func(uint64) State, report *Report) ([]uint64, error) {
+func (r *Registry) computeNormalForms(run checkedRules, packedCount, stateCount int, valid []bool, mkState func(uint64) State, report *Report) ([]uint64, error) {
 	nf := make([]uint64, packedCount)
 	maxRepair := 0
-	run := r.checked()
 	var err error
 
 	for i := 0; i < packedCount; i++ {
@@ -361,9 +454,8 @@ func (r *Registry) computeNormalForms(packedCount, stateCount int, valid []bool,
 }
 
 // computeStepTables builds the Step[e][s] = NF(apply(e, s)) tables.
-func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) ([][]uint64, error) {
+func (r *Registry) computeStepTables(run checkedRules, packedCount int, valid []bool, nf []uint64, mkState func(uint64) State) ([][]uint64, error) {
 	step := make([][]uint64, len(r.events))
-	run := r.checked()
 	for ei, ev := range r.events {
 		step[ei] = make([]uint64, packedCount)
 		for i := 0; i < packedCount; i++ {
@@ -383,6 +475,13 @@ func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64,
 // exactly, over the whole state space: for each valid state s it compares
 // Step[j][Step[i][s]] with Step[i][Step[j][s]]. The step tables are already
 // computed, so each pair costs two table lookups per state and no closure calls.
+// A declared pair that does not commute fails the build.
+//
+// In declared-only mode (Registry.Independent) it also checks every undeclared pair
+// the same way, without failing: an undeclared pair that does not commute is
+// recorded in Report.CausalOrderRequired, since convergence then depends on that
+// pair being delivered in causal order. The cost is at most that of the default
+// all-pairs check.
 //
 // There is deliberately no disjointness shortcut here. Skipping a pair because the
 // two events touch different variables is sound only when each event also READS
@@ -395,44 +494,40 @@ func (r *Registry) computeStepTables(packedCount int, valid []bool, nf []uint64,
 // verifyFootprints has established the precondition for every component.
 func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][]uint64, mkState func(uint64) State, report *Report) error {
 	pairsChecked := 0
+	inDomain := ccDomain(packedCount, valid, nf)
 
-	// The CC domain: every valid state (its own normal form), plus the zero state
-	// Machine.NewState returns, so a run started from NewState is covered even when
-	// the zero state violates an invariant. This is CC1 as THEORY.md §6.3 states it
-	// (over valid states). Every step lands on a valid state, so commutation on this
-	// domain makes any permutation of the checked events reach the same state from
-	// any valid start or from NewState. A state that is neither (an invalid state a
-	// caller builds by hand) is outside the guarantee.
-	inDomain := make([]bool, packedCount)
-	for s := 0; s < packedCount; s++ {
-		inDomain[s] = valid[s] && (nf[s] == uint64(s) || s == 0)
+	// firstWitness returns the first state in the CC domain on which i and j do not
+	// commute, or -1.
+	firstWitness := func(i, j int) int {
+		for s := 0; s < packedCount; s++ {
+			if inDomain[s] && step[j][step[i][s]] != step[i][step[j][s]] {
+				return s
+			}
+		}
+		return -1
+	}
+	failure := func(i, j, s int) CCFailure {
+		return CCFailure{
+			Event1:  r.events[i].name,
+			Event2:  r.events[j].name,
+			State:   mkState(uint64(s)),
+			Result1: mkState(step[j][step[i][s]]),
+			Result2: mkState(step[i][step[j][s]]),
+		}
 	}
 
-	for _, p := range r.ccPairs() {
+	declared := r.ccPairs()
+	for _, p := range declared {
 		i, j := p[0], p[1]
 		pairsChecked++
-		for s := 0; s < packedCount; s++ {
-			if !inDomain[s] {
-				continue
-			}
-
-			after_ij := step[j][step[i][s]]
-			after_ji := step[i][step[j][s]]
-
-			if after_ij != after_ji {
-				report.CC = false
-				report.PairsTotal = pairsChecked
-				report.PairsDisjoint = 0
-				report.PairsBrute = pairsChecked
-				report.CCFailure = &CCFailure{
-					Event1:  r.events[i].name,
-					Event2:  r.events[j].name,
-					State:   mkState(uint64(s)),
-					Result1: mkState(after_ij),
-					Result2: mkState(after_ji),
-				}
-				return &compensationError{"gsm: Compensation Commutativity (CC) check failed"}
-			}
+		if s := firstWitness(i, j); s >= 0 {
+			f := failure(i, j, s)
+			report.CC = false
+			report.PairsTotal = pairsChecked
+			report.PairsDisjoint = 0
+			report.PairsBrute = pairsChecked
+			report.CCFailure = &f
+			return &compensationError{"gsm: Compensation Commutativity (CC) check failed"}
 		}
 	}
 
@@ -440,7 +535,157 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][
 	report.PairsTotal = pairsChecked
 	report.PairsDisjoint = 0
 	report.PairsBrute = pairsChecked
+
+	if !r.allIndependent {
+		isDeclared := make(map[[2]int]bool, len(declared))
+		for _, p := range declared {
+			isDeclared[p] = true
+		}
+		for i := 0; i < len(r.events); i++ {
+			for j := i + 1; j < len(r.events); j++ {
+				if isDeclared[[2]int{i, j}] {
+					continue
+				}
+				report.PairsUndeclared++
+				if s := firstWitness(i, j); s >= 0 {
+					report.CausalOrderRequired = append(report.CausalOrderRequired, failure(i, j, s))
+				}
+			}
+		}
+	}
 	return nil
+}
+
+// ccDomain is the CC domain: every valid state (its own normal form), plus the zero
+// state Machine.NewState returns, so a run started from NewState is covered even when
+// the zero state violates an invariant. This is CC1 as THEORY.md §6.3 states it (over
+// valid states). Every step lands on a valid state, so commutation on this domain
+// makes any permutation of the checked events reach the same state from any valid
+// start or from NewState. Machine.Apply normalizes any other input first, so it
+// starts inside the domain too.
+func ccDomain(packedCount int, valid []bool, nf []uint64) []bool {
+	inDomain := make([]bool, packedCount)
+	for s := 0; s < packedCount; s++ {
+		inDomain[s] = valid[s] && (nf[s] == uint64(s) || s == 0)
+	}
+	return inDomain
+}
+
+// notIdempotent returns, in declaration order, the events e with
+// Step[e][Step[e][s]] != Step[e][s] for some s in the CC domain: delivering e twice
+// differs from delivering it once, so e needs exactly-once delivery.
+func (r *Registry) notIdempotent(packedCount int, valid []bool, nf []uint64, step [][]uint64) []string {
+	inDomain := ccDomain(packedCount, valid, nf)
+	var out []string
+	for ei, ev := range r.events {
+		for s := 0; s < packedCount; s++ {
+			if inDomain[s] && step[ei][step[ei][s]] != step[ei][s] {
+				out = append(out, ev.name)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// clampRecorder attributes saturating writes (State.SetInt and combinator enum
+// writes clamp a value into the variable's range) to the rule Build is running.
+// A build registers one for its private copy of the variable list; noteClamp finds
+// it by the address of that copy, which only states derived from the build's own
+// states carry. A nil recorder records nothing.
+type clampRecorder struct {
+	key     *Var
+	pending atomic.Int32 // set by noteClamp; the hot path reads only this
+	mu      sync.Mutex
+	hits    []string          // variables clamped since the last call ended; reused
+	counts  map[[3]string]int // (kind, name, variable) -> calls that clamped it
+	order   [][3]string
+}
+
+var (
+	clampWatchers  atomic.Int32 // number of registered recorders; noteClamp's fast exit
+	clampRecorders sync.Map     // *Var (first element of a build's variable copy) -> *clampRecorder
+)
+
+// watchClamps registers a recorder for states over vars (a build-private slice).
+func watchClamps(vars []Var) *clampRecorder {
+	if len(vars) == 0 {
+		return nil
+	}
+	rec := &clampRecorder{key: &vars[0], counts: map[[3]string]int{}}
+	clampRecorders.Store(rec.key, rec)
+	clampWatchers.Add(1)
+	return rec
+}
+
+func (c *clampRecorder) stop() {
+	if c == nil {
+		return
+	}
+	clampRecorders.Delete(c.key)
+	clampWatchers.Add(-1)
+}
+
+// noteClamp is called by every saturating write. It costs one atomic load unless
+// a build is running.
+func noteClamp(s State, v Var) {
+	if clampWatchers.Load() == 0 || len(s.vars) == 0 {
+		return
+	}
+	if rec, ok := clampRecorders.Load(&s.vars[0]); ok {
+		c := rec.(*clampRecorder)
+		c.mu.Lock()
+		c.hits = append(c.hits, v.name)
+		c.pending.Store(1)
+		c.mu.Unlock()
+	}
+}
+
+// after attributes the clamps noted during one rule call (kind "event" or
+// "invariant", name) to that rule, once per variable per call. It costs one atomic
+// load when the call clamped nothing.
+func (c *clampRecorder) after(kind, name string) {
+	if c == nil || c.pending.Load() == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, v := range c.hits {
+		dup := false
+		for _, w := range c.hits[:i] {
+			if w == v {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue
+		}
+		k := [3]string{kind, name, v}
+		if c.counts[k] == 0 {
+			c.order = append(c.order, k)
+		}
+		c.counts[k]++
+	}
+	c.hits = c.hits[:0]
+	c.pending.Store(0)
+}
+
+func (c *clampRecorder) saturations() []Saturation {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []Saturation
+	for _, k := range c.order {
+		rule := fmt.Sprintf("%s %q", k[0], k[1])
+		if k[0] == "invariant" {
+			rule += " repair"
+		}
+		out = append(out, Saturation{Rule: rule, Var: k[2], States: c.counts[k]})
+	}
+	return out
 }
 
 // allInvariantsHold checks V_R(s).
@@ -457,11 +702,12 @@ func (r *Registry) allInvariantsHold(s State) bool {
 // machine (domainCheck). Every verification path runs closures through one, made once per
 // run so the domain check is precomputed.
 type checkedRules struct {
-	r   *Registry
-	dom *domainCheck
+	r     *Registry
+	dom   *domainCheck
+	clamp *clampRecorder // Build only: attributes saturating writes to rules
 }
 
-func (r *Registry) checked() checkedRules { return checkedRules{r, newDomainCheck(r.vars)} }
+func (r *Registry) checked() checkedRules { return checkedRules{r: r, dom: newDomainCheck(r.vars)} }
 
 // applyFirstRepair fires the first violated invariant's repair (priority order). It
 // returns an error if the repair's result is not a state of this machine.
@@ -477,6 +723,7 @@ func (c checkedRules) applyFirstRepair(s State) (State, error) {
 // repair runs inv's repair on s and checks the result is a state of this machine.
 func (c checkedRules) repair(inv invariantDef, s State) (State, error) {
 	out := inv.repair(s)
+	c.clamp.after("invariant", inv.name)
 	return out, c.dom.ruleError(c.r.name, "invariant", inv.name, "repair", s, out)
 }
 
@@ -487,6 +734,7 @@ func (c checkedRules) applyEvent(ev eventDef, s State) (State, error) {
 		return s, nil
 	}
 	out := ev.effect(s)
+	c.clamp.after("event", ev.name)
 	return out, c.dom.ruleError(c.r.name, "event", ev.name, "effect", s, out)
 }
 
