@@ -367,7 +367,7 @@ m, _, _ := gsm.NewFederation("storefront").
     Build()
 ```
 
-**Certificate-based reuse.** A verified sub-federation can be packaged as a `Certificate` and reused without re-verifying its internals. `sub.Certify()` builds and verifies the subsystem and returns a certificate carrying the verdict, each morphism and resolver in extensional table form (reified from the finite, source-determined maps), and a digest over the component rules, the names and declared pairs they are addressed by, and those tables (it binds each morphism closure only through its table, which records the images at one representative target). `EmbedCertified(sub, cert)` embeds it on that certificate: `Build` re-checks the internal morphisms from the certificate's tables instead of re-verifying their closures, checks the seam (the boundary morphisms) and the whole-graph acyclicity, and rebuilds each certified component with `Build`, which re-checks its convergence. A consumer that receives a certificate re-checks it independently with `cert.Verify(components)`, which re-derives validity preservation (M1/R2) from the tables rather than the producer's morphism closures and re-checks every component's convergence, so a composition is confirmed without trusting the producer's code or its recorded verdict. An outer morphism may read a certified subsystem, or write one of its declared **input ports** (shared variables the sub leaves free): declare them at `Certify(gsm.Port{Registry: r, Var: v})`, and `Build` verifies each inbound boundary morphism at the seam (M1/R2). A write to any other (sealed) variable is rejected. See [CERTIFICATE-DESIGN.md](CERTIFICATE-DESIGN.md).
+**Certificate-based reuse.** A verified sub-federation can be packaged as a `Certificate` and reused, pinned to what was certified. `sub.Certify()` builds and verifies the subsystem and returns a certificate carrying its build report, each morphism and resolver in extensional table form (reified from the finite, source-determined maps), and a digest over the component rules, the names and declared pairs they are addressed by, and those tables (it binds each morphism closure only through its table, which records the images at one representative target; the digest is an integrity binding, not authentication). `EmbedCertified(sub, cert)` embeds it on that certificate: `Build` re-checks the internal morphisms from the certificate's tables, re-runs the live internal closures over every valid source and target state so they cannot differ from the tables there (a closure that writes a non-shared variable is refused, as plain `Build` refuses it), checks the seam (the boundary morphisms) and the whole-graph acyclicity, and rebuilds each certified component with `Build`, which re-checks its convergence. A consumer that receives a certificate re-checks it independently with `cert.Verify(components)`, which re-derives validity preservation (M1/R2), table completeness (one row per valid source state, valid source ids) and, for a cyclic `Monotone` certificate, monotonicity from the tables rather than the producer's morphism closures and re-checks every component's convergence, so a composition is confirmed without trusting the producer's code or its recorded report. An outer morphism may read a certified subsystem, or write one of its declared **input ports** (shared variables the sub leaves free): declare them at `Certify(gsm.Port{Registry: r, Var: v})`, and `Build` verifies each inbound boundary morphism at the seam (M1/R2). A write to any other (sealed) variable is rejected. See [CERTIFICATE-DESIGN.md](CERTIFICATE-DESIGN.md).
 
 <!-- gocheck: check federation -->
 ```go
@@ -621,12 +621,12 @@ Both reject the guarded-shipment machine above. Neither shares the footprint ass
 
 **What gsm recomputes itself.** Independently of the oracles, gsm does not trust a stored
 verdict. `Certificate.Verify` recomputes the certificate digest from the consumer's registries,
-re-derives validity preservation (M1/R2), input-port freeness, and acyclicity from the
-certificate's morphism tables, and rebuilds every component with `Build` (WFC and CC). When
-`Build` runs on a federation containing `EmbedCertified` subsystems, it recomputes the digest,
-re-derives M1/R2, port freeness, and acyclicity from the tables for the internal morphisms, and
-rebuilds every certified component with `Build`; it skips only re-verifying the internal
-morphisms from their closures. The certificate's recorded `Report` is never used for a decision.
+re-derives validity preservation (M1/R2), table completeness, input-port freeness, and
+acyclicity (or monotonicity, for a cyclic `Monotone` certificate) from the certificate's morphism
+tables, and rebuilds every component with `Build` (WFC and CC). When `Build` runs on a federation
+containing `EmbedCertified` subsystems, it recomputes the digest, re-derives the same conditions
+from the tables for the internal morphisms, re-verifies the live internal closures over every
+valid source and target state, and rebuilds every certified component with `Build`. The certificate's recorded `Report` is never used for a decision.
 All of this is gsm's Go code: it removes trust in stored results, not in the Go verifier.
 
 ## Compensation Synthesis

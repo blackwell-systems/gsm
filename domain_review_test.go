@@ -66,25 +66,17 @@ func staleSub(t *testing.T, bad bool) (*Federation, *Certificate, *Registry) {
 	return sub, cert, dst
 }
 
-// R6: EmbedCertified trusts an internal Map on its certificate, which records the
-// Map's images at one representative target only, so Federation.Build checks the
-// images at that target (extractTables) and no others: a Map edited after
-// certification to go wrong only elsewhere builds (documented). The FedMachine
-// checks every image it computes, so the bad image is refused when it is computed.
+// R6: EmbedCertified used to trust an internal Map on its certificate, which records the
+// Map's images at one representative target only, so a Map edited after certification to
+// go wrong only elsewhere built. Build now re-runs the live sub's closures over every valid
+// source and target state, so the edited Map is refused at Build, before any image is used.
 func TestReview_EmbedCertifiedInternalMapUnchecked(t *testing.T) {
-	sub, cert, dst := staleSub(t, true)
+	sub, cert, _ := staleSub(t, true)
 	outer := NewFederation("outer").EmbedCertified(sub, cert)
-	fm, _, err := outer.Build()
-	if err != nil {
-		t.Fatalf("Build checks internal Maps only at the representative target, where this one is correct: %v", err)
-	}
-	fs := fm.Normalize(fm.NewState()) // the representative target (n=0) maps to n=2
-	if got := fm.Of(fs, dst).GetInt(dst.vars[0]); got != 2 {
-		t.Fatalf("n = %d after the first Normalize, want 2", got)
-	}
-	msg := catchPanic(func() { fm.Normalize(fs) }) // target n=2: the Map returns n=3
-	if !strings.Contains(msg, "not a state of") || !strings.Contains(msg, "src→dst") {
-		t.Fatalf("FedMachine did not refuse the out-of-domain image: %q", msg)
+	_, _, err := outer.Build()
+	if err == nil || !strings.Contains(err.Error(), "does not match its certificate") ||
+		!strings.Contains(err.Error(), "not a state of") || !strings.Contains(err.Error(), "src→dst") {
+		t.Fatalf("Build accepted (or misreported) a Map that is wrong away from the representative target: %v", err)
 	}
 }
 
