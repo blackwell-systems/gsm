@@ -233,6 +233,8 @@ type FedState struct {
 //     morphism per registry (multi-source is out of scope, Remark 8.15);
 //   - each morphism must satisfy M1, validity preservation under shared-component overwrite
 //     (Prop 8.14), and its Map must touch only the declared Shared() variables.
+//   - every target event must commute with every change of the target's shared component that
+//     its source(s) can cause (cross-registry CC; a failure is a *CrossOrderError).
 //
 // This is the federated analogue of gsm's single-registry contract: a FedMachine only
 // exists if convergence is guaranteed.
@@ -348,6 +350,11 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	// Forest + morphism verification (multi-source rejection, M1 validity preservation,
 	// shared-only well-formedness) before the acyclicity check.
 	if err := f.verify(subOf); err != nil {
+		return nil, report, err
+	}
+	// Cross-registry CC: every target event commutes with every source-driven change of the
+	// target's shared component.
+	if err := f.verifyCrossOrder(m.comps); err != nil {
 		return nil, report, err
 	}
 
