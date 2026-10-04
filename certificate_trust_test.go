@@ -234,8 +234,13 @@ func TestMergeProjectionAfter_StaleRejected(t *testing.T) {
 	p2.Version = 2
 
 	// Unversioned merge: the reordered, older p1 silently wins.
-	s, _ := dstM.MergeProjection(dstM.NewState(), p2)
-	s, _ = dstM.MergeProjection(s, p1)
+	s, err := dstM.MergeProjection(dstM.NewState(), p2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s, err = dstM.MergeProjection(s, p1); err != nil {
+		t.Fatal(err)
+	}
 	if s.Get(sstate) != "listed" {
 		t.Fatalf("baseline: want the stale value to win under MergeProjection, got %s", s.Get(sstate))
 	}
