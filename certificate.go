@@ -187,7 +187,8 @@ func sortPortRefs(refs []PortRef) {
 // verdict is never trusted. The certificate's digest
 // must match the sub at Build. An outer morphism may read the subsystem (subsystem as source) or
 // write one of the subsystem's declared input ports; an inbound morphism to any other (sealed)
-// variable is rejected. Use Embed for the full-re-verification form.
+// variable is rejected. Use Embed for the full-re-verification form. As with Embed, the sub's
+// AllowMonotoneCycles does not carry over to f, and a second resolver for a target panics.
 func (f *Federation) EmbedCertified(sub *Federation, cert *Certificate) *Federation {
 	ce := &certifiedEmbed{comps: make(map[*Registry]bool, len(sub.comps)), cert: cert, sub: sub}
 	for _, r := range sub.comps {
@@ -195,12 +196,8 @@ func (f *Federation) EmbedCertified(sub *Federation, cert *Certificate) *Federat
 		ce.comps[r] = true
 	}
 	f.edges = append(f.edges, sub.edges...)
-	for r, res := range sub.resolvers {
-		f.resolvers[r] = res
-	}
-	if sub.allowCycles {
-		f.allowCycles = true
-	}
+	f.embedResolvers(sub, "EmbedCertified")
+	f.noteMonotoneSub(sub)
 	f.certified = append(f.certified, ce)
 	return f
 }

@@ -338,11 +338,11 @@ fed.Morphism(hr, door).Shared(access).Map(hrToDoor).Add().
     })
 ```
 
-Multi-source convergence is the paper's **Federated Convergence with Resolution** theorem (§8), which holds whenever the resolver is a function of its sources alone (**R1**) and preserves target validity (**R2**, the multi-source generalization of M1). gsm certifies exactly those hypotheses: it **exhaustively verifies at build time** that, for *this* federation, the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same verify-the-preconditions contract it applies to single-registry WFC/CC. A resolver that could diverge (violates R2), reads local state (violates R1), or writes non-shared variables is rejected; a multi-source target *without* a resolver is rejected.
+Multi-source convergence is the paper's **Federated Convergence with Resolution** theorem (§8), which holds whenever the resolver is a function of its sources alone (**R1**) and preserves target validity (**R2**, the multi-source generalization of M1). gsm certifies exactly those hypotheses: it **exhaustively verifies at build time** that, for *this* federation, the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same verify-the-preconditions contract it applies to single-registry WFC/CC. A resolver that could diverge (violates R2), reads local state (violates R1), or writes non-shared variables is rejected; a multi-source target *without* a resolver is rejected. A target has exactly one resolver: a second `Resolve` for the same target, or an embedded sub-federation that brings a resolver for a target that already has one, panics rather than replacing the first.
 
 > Single-source authority is the special case of a resolver with one source. Both are backed by the paper's proofs (Federated Convergence, and its multi-source generalization); gsm's build-time checks establish the theorems' preconditions.
 
-**Monotone cycles.** Acyclicity is only needed to tame *non-monotone* repair (the divergence counterexample is negation, which is antitone). With `Federation.AllowMonotoneCycles()`, cyclic networks are allowed when every morphism/resolver is **monotone** (verified by enumeration); `Build` then computes the normal form by Kleene iteration to the least fixed point, which converges order-independently even on arbitrary cyclic graphs (the paper's *Monotone Convergence Despite Cycles*, via Knaster–Tarski + chaotic iteration). State-based CRDTs are the compensation-free special case of this monotone regime; that CRDTs (op- and state-based) are a *strict* sub-fragment of normalization confluence is machine-checked in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (see [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)). Non-monotone cycles are still rejected. When a cycle is rejected, `Build`'s error names the offending loop, and `Federation.DiagnoseCycle` iterates the loop's repair to report whether it settles or oscillates (the loop-composite fixed-point witness), so you can see exactly which constraint cycle cannot converge. To *accept* such a network rather than reject it, `Federation.CoordinationPlan` returns a set of morphism edges (shared variables) to place under an external single writer or consensus, and `Federation.BuildCoordinated(plan)` builds the federation given that coordination: the coordinated edges become external inputs and the acyclic residual converges coordination-free. This is a localized mixed-consistency partition (consensus only on the obstructing edges); the plan is a correct feedback edge set of size at most the number of independent cycles, not necessarily the minimum, which is the group feedback edge set problem (NP-hard in general).
+**Monotone cycles.** Acyclicity is only needed to tame *non-monotone* repair (the divergence counterexample is negation, which is antitone). With `Federation.AllowMonotoneCycles()`, cyclic networks are allowed when every morphism/resolver is **monotone** (verified by enumeration); `Build` then computes the normal form by Kleene iteration to the least fixed point, which converges order-independently even on arbitrary cyclic graphs (the paper's *Monotone Convergence Despite Cycles*, via Knaster–Tarski + chaotic iteration). State-based CRDTs are the compensation-free special case of this monotone regime; that CRDTs (op- and state-based) are a *strict* sub-fragment of normalization confluence is machine-checked in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (see [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)). Non-monotone cycles are still rejected. The opt-in belongs to the federation it is called on: embedding a sub-federation that opted in (with `Embed` or `EmbedCertified`) does not opt the parent in, so a parent with a cycle must call `AllowMonotoneCycles` itself (`Build`'s cycle error names the opted-in sub). When a cycle is rejected, `Build`'s error names the offending loop, and `Federation.DiagnoseCycle` iterates the loop's repair to report whether it settles or oscillates (the loop-composite fixed-point witness), so you can see exactly which constraint cycle cannot converge. To *accept* such a network rather than reject it, `Federation.CoordinationPlan` returns a set of morphism edges (shared variables) to place under an external single writer or consensus, and `Federation.BuildCoordinated(plan)` builds the federation given that coordination: the coordinated edges become external inputs and the acyclic residual converges coordination-free. This is a localized mixed-consistency partition (consensus only on the obstructing edges); the plan is a correct feedback edge set of size at most the number of independent cycles, not necessarily the minimum, which is the group feedback edge set problem (NP-hard in general).
 
 **Compositional construction.** A verified sub-federation embeds into a larger one with `Federation.Embed`: define and verify a subsystem on its own, then reuse it as a unit and connect it with more morphisms. The composed federation runs as the flat convergent machine (a `FedState` holds one `State` per component, so no product state space is materialized). This realizes the paper's compositional-collapse result — a convergent sub-federation collapses to an effective registry — enabling modular, hierarchical verification and black-box reuse of subsystems.
 
@@ -534,6 +534,9 @@ oracle-gated:
 - the Kleene iteration of monotone cycles;
 - a certificate's digest and morphism tables.
 
+`FedReport.Assurance` says this for each built federation, and `FedReport.Checks` lists the
+federation-level checks that ran; `FedReport.String()` prints both above the component reports.
+
 This matches CERTIFICATE-DESIGN.md: an extracted federation oracle is planned separately.
 
 **Memory and process limits.** The oracle reads `Build`'s own tables through accessors and copies
@@ -657,6 +660,12 @@ Synthesis is the inverse of `Build`: `Build` **verifies** a compensation you wro
 `Synthesize` **generates** one (or proves impossibility). It's a natural fit for tooling or
 LLM-authored policy — describe the rules, get a convergent machine with a proof.
 
+`BuildOrSynthesize` builds the rules as written and falls back to synthesis only when the
+compensation is what failed. When it returns a synthesized machine, that machine does not run your
+invariants' `Repair` functions: the returned `*Synthesis` is non-nil, `Synthesis.Substituted` is
+true, `Synthesis.BuildError` holds the `Build` error that triggered the fallback, and
+`Synthesis.String()` opens with `REPAIR SYNTHESIZED`.
+
 ## Performance
 
 ### Build Time
@@ -758,6 +767,9 @@ The exported JSON contains:
 - Event names (ordered)
 - Normal form table: `nf[stateID] → normalized stateID`
 - Step table: `step[eventID][stateID] → normalized result stateID`
+- Verification metadata, including (format version 2) the event pairs CC was checked for
+  (`verification.pairs`, by event name) and whether that is every pair (`verification.all_pairs`).
+  Pairs outside that set are not guaranteed to commute. Version 2 only adds fields to version 1.
 
 ### Runtime Implementation (Python Example)
 

@@ -30,6 +30,11 @@ type Federation struct {
 	resolvers   map[*Registry]Resolver
 	allowCycles bool
 	certified   []*certifiedEmbed // sub-federations embedded on certificate (see certificate.go)
+
+	// monotoneSubs names embedded sub-federations that opted in to AllowMonotoneCycles. The
+	// opt-in does not carry over to f; Build names them when it rejects a cycle, so the parent
+	// can opt in itself.
+	monotoneSubs []string
 }
 
 // A Resolver merges the morphism images of a target's incoming edges into its shared
@@ -65,10 +70,24 @@ func NewFederation(name string) *Federation {
 // Resolve declares how a multi-source target combines its incoming morphism images into its
 // shared component. Required for any target with more than one incoming morphism (a target
 // with a single source uses that morphism's Map directly and needs no resolver). See Resolver.
+//
+// A target has at most one resolver. Resolve panics if target already has one, whether from an
+// earlier Resolve or from an embedded sub-federation, as MorphismBuilder.Add panics on a
+// misdeclared morphism: a second resolver would otherwise silently replace the first.
 func (f *Federation) Resolve(target *Registry, r Resolver) *Federation {
 	f.register(target)
-	f.resolvers[target] = r
+	f.addResolver(target, r, "Resolve")
 	return f
+}
+
+// addResolver records r as target's resolver, panicking if target already has one. via names the
+// declaration (Resolve, Embed or EmbedCertified) in the panic message.
+func (f *Federation) addResolver(target *Registry, r Resolver, via string) {
+	if _, dup := f.resolvers[target]; dup {
+		panic(fmt.Sprintf("gsm: federation %q: %s declares a second Resolver for target %q; a target has "+
+			"exactly one resolver, and a second one would replace the first", f.name, via, target.name))
+	}
+	f.resolvers[target] = r
 }
 
 // AllowMonotoneCycles permits cyclic morphism networks. By default the network must be
@@ -79,6 +98,10 @@ func (f *Federation) Resolve(target *Registry, r Resolver) *Federation {
 // (lattice) shared domains, a monotone repair operator converges — order-independently, by
 // chaotic iteration — even when the constraint graph has cycles. Non-monotone cyclic
 // networks (e.g. the negation counterexample) are still rejected.
+//
+// The opt-in belongs to the federation it is called on. Embedding a sub-federation that opted in
+// does not opt the parent in: a parent whose network has a cycle (inside the sub or through its
+// boundary morphisms) must call AllowMonotoneCycles itself.
 func (f *Federation) AllowMonotoneCycles() *Federation {
 	f.allowCycles = true
 	return f
@@ -94,19 +117,34 @@ func (f *Federation) AllowMonotoneCycles() *Federation {
 // convergent machine over all components — no product state space is materialized, since a
 // FedState holds one State per component — and Build re-checks the (local) conditions on the
 // combined network. If boundary morphisms introduce a cycle, the usual rules apply: Build
-// rejects it unless AllowMonotoneCycles is set and the repair is monotone.
+// rejects it unless AllowMonotoneCycles is set on f and the repair is monotone. A sub's own
+// AllowMonotoneCycles does not carry over to f (see AllowMonotoneCycles). Embed panics if the
+// sub declares a resolver for a target that already has one (see Resolve).
 func (f *Federation) Embed(sub *Federation) *Federation {
 	for _, r := range sub.comps {
 		f.register(r)
 	}
 	f.edges = append(f.edges, sub.edges...)
-	for r, res := range sub.resolvers {
-		f.resolvers[r] = res
-	}
-	if sub.allowCycles {
-		f.allowCycles = true
-	}
+	f.embedResolvers(sub, "Embed")
+	f.noteMonotoneSub(sub)
 	return f
+}
+
+// embedResolvers brings in sub's resolvers, in component order so a panic is deterministic.
+func (f *Federation) embedResolvers(sub *Federation, via string) {
+	for _, r := range sub.comps {
+		if res, ok := sub.resolvers[r]; ok {
+			f.addResolver(r, res, fmt.Sprintf("%s(%q)", via, sub.name))
+		}
+	}
+}
+
+// noteMonotoneSub records that sub opted in to AllowMonotoneCycles, without opting f in.
+func (f *Federation) noteMonotoneSub(sub *Federation) {
+	if sub.allowCycles {
+		f.monotoneSubs = append(f.monotoneSubs, sub.name)
+	}
+	f.monotoneSubs = append(f.monotoneSubs, sub.monotoneSubs...)
 }
 
 // Add registers a component registry. Idempotent. Morphism also auto-registers its
@@ -179,13 +217,37 @@ type FedReport struct {
 	Name       string
 	Components []*Report
 	Edges      int
+
+	// Assurance states what certified the federation as a whole. Each component's own
+	// Report.Assurance says what certified that component (Build gates it on the verified table
+	// oracle); the federation-level conditions in Checks are verified by gsm's Go code and are
+	// not oracle-certified, so the federated composition is not oracle-certified. Empty unless
+	// Build returned a machine.
+	Assurance string
+
+	// Checks lists the federation-level checks Build ran and passed, in order. Empty unless
+	// Build returned a machine.
+	Checks []string
 }
+
+// fedAssurance is FedReport.Assurance for a federation Build accepted.
+const fedAssurance = "components oracle-gated (see each component's Assurance); federation-level checks " +
+	"verified by gsm's Go enumeration, not by the verified oracle; the federated composition is not oracle-certified"
 
 func (r *FedReport) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Federation: %s\n", r.Name)
 	fmt.Fprintf(&b, "  Components: %d\n", len(r.Components))
-	fmt.Fprintf(&b, "  Morphisms:  %d\n\n", r.Edges)
+	fmt.Fprintf(&b, "  Morphisms:  %d\n", r.Edges)
+	if r.Assurance != "" {
+		fmt.Fprintf(&b, "  Federation assurance: %s\n", r.Assurance)
+		for _, c := range r.Checks {
+			fmt.Fprintf(&b, "    checked (Go, not oracle): %s\n", c)
+		}
+	} else {
+		b.WriteString("  Federation assurance: not certified\n")
+	}
+	b.WriteString("\n")
 	for _, c := range r.Components {
 		for _, line := range strings.Split(strings.TrimRight(c.String(), "\n"), "\n") {
 			fmt.Fprintf(&b, "  %s\n", line)
@@ -368,8 +430,13 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 		// A cycle. Allowed only under AllowMonotoneCycles, and only if repair is monotone.
 		if !f.allowCycles {
 			if path := f.cyclePath(); path != "" {
-				return nil, report, fmt.Errorf("%w: %s (use AllowMonotoneCycles if the repair is monotone, "+
+				err = fmt.Errorf("%w: %s (use AllowMonotoneCycles if the repair is monotone, "+
 					"or call DiagnoseCycle to see whether the loop converges)", err, path)
+			}
+			if len(f.monotoneSubs) > 0 {
+				err = fmt.Errorf("%w; embedded sub-federation(s) %q opted in to AllowMonotoneCycles, but the "+
+					"opt-in does not carry over: call AllowMonotoneCycles on %q itself to allow the cycle",
+					err, f.monotoneSubs, f.name)
 			}
 			return nil, report, err
 		}
@@ -382,7 +449,34 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 		m.topo = topo
 	}
 
+	report.Assurance = fedAssurance
+	report.Checks = f.checksRun(m.cyclic)
 	return m, report, nil
+}
+
+// checksRun lists the federation-level checks build ran, for FedReport.Checks.
+func (f *Federation) checksRun(cyclic bool) []string {
+	single, resolved := 0, len(f.resolvers)
+	for _, e := range f.edges {
+		if _, ok := f.resolvers[e.dst]; !ok {
+			single++
+		}
+	}
+	checks := []string{
+		"names: component, variable and event names distinct",
+		"shared variables: every Shared() variable belongs to its morphism's target",
+		fmt.Sprintf("M1: %d single-source morphism(s) write only Shared() variables, preserve target validity, and are source-determined", single),
+		fmt.Sprintf("R1/R2: %d resolver(s) write only shared variables, are source-determined, and preserve target validity", resolved),
+	}
+	if cyclic {
+		checks = append(checks, "monotone cycles: every morphism and resolver is monotone (AllowMonotoneCycles); normal form by Kleene iteration")
+	} else {
+		checks = append(checks, "acyclicity: the network has a topological order")
+	}
+	if len(f.certified) > 0 {
+		checks = append(checks, fmt.Sprintf("certificates: %d certified embed(s) match their digest, tables re-checked, seam writes only input ports", len(f.certified)))
+	}
+	return checks
 }
 
 func containsInt(xs []int, x int) bool {

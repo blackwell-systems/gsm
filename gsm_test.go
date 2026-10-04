@@ -336,7 +336,7 @@ func TestExport(t *testing.T) {
 	if export["name"] != "order_fulfillment" {
 		t.Errorf("wrong name: %v", export["name"])
 	}
-	if export["version"].(float64) != 1 {
+	if export["version"].(float64) != 2 {
 		t.Errorf("wrong version: %v", export["version"])
 	}
 
