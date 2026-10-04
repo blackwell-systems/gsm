@@ -199,7 +199,17 @@ r.Independent("deposit", "send_notification")
 r.Independent("withdraw", "send_notification")
 ```
 
-**Independent events** can arrive in either order (they're not causally related). Only declared pairs will be checked for commutativity.
+**Independent events** can arrive in either order (they're not causally related). Declared pairs are certified: `Build` fails if one does not commute.
+
+**Every undeclared pair must be delivered in causal order.** Declared-only mode is sound only if each pair you did not declare reaches every replica in one fixed order (normalization-confluence `coq/Trace.v` `run_tequiv`, `coq/CausalReplay.v` `causal_tequiv`). gsm cannot see your delivery order, so `Build` still checks every undeclared pair on its step tables (two lookups per state, no closure calls) and does not fail on them, but lists each one that does not commute in `Report.CausalOrderRequired`, with a witness state. The report then reads:
+
+```
+  Undeclared pairs: 5 checked, 3 do not commute: each must be causally ordered (not independent), delivered in the same order at every replica
+    (close, deposit) from {open=true, bal=0, notified=false}: close→deposit gives ..., deposit→close gives ...
+  Convergence: GUARANTEED under causal delivery of the 3 undeclared pair(s) above
+```
+
+If your runtime can reorder a listed pair, declare it `Independent` (and fix the rules until it commutes) instead. An empty list means every pair commutes and the declarations cost nothing.
 
 `Build` checks every declared pair exactly, whatever the pair's footprints. Two events that write different variables can still fail to commute: a guard or effect may read a variable the other event writes (see [Why not guard the shipment on payment?](#example-order-fulfillment)). Only `BuildCompositional` skips pairs by footprint, and only after it has checked what each event reads (see [Compositional Verification](#compositional-verification)).
 
