@@ -485,16 +485,17 @@ func (e *CrossOrderError) Error() string {
 // a federated normal form can hold). Because Img is quantified as a whole, the check covers
 // a source change from any cause, so a source event, an event further upstream propagated
 // along a chain, and a change to any source of a resolved target are all covered by the one
-// condition on each target. Pairs of events on the same registry are its own CC; events on
-// unrelated registries touch disjoint state.
+// condition on each target. Pairs of events on the same target are covered by its own CC
+// plus C2, which verifyRepairedCC checks in the same pass; events on unrelated registries
+// touch disjoint state. This condition is C1 of FederationEvents.v.
 //
 // Cost per target: |Img| x |{b valid : shared(b) in Img}| x |events| machine lookups, after
 // |valid(src)| (or the source-combination count, for a resolver) closure calls to build Img.
 // For a single-source target |Img| <= |valid(src)|, so this is within the M1 enumeration
 // bound verifyEdge already enforces.
 //
-// The same check runs on AllowMonotoneCycles networks. There it rules out the same race
-// between a target event and a change of its shared component, but the argument above is
+// The same checks (C1 and C2) run on AllowMonotoneCycles networks. There they rule out the same
+// races between a target event and a change of its shared component, but the argument above is
 // for the acyclic sweep: on a cycle a target's local state can also feed back into its own
 // sources, which this check does not model.
 func (f *Federation) verifyCrossOrder(comps []*Machine) error {
@@ -581,8 +582,8 @@ func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges
 			}
 		}
 	}
-	if len(images) < 2 {
-		return nil // the shared component never changes, so nothing can race with it
+	if len(images) == 0 {
+		return nil // no valid source state: nothing is ever propagated
 	}
 
 	inImg := make(map[uint64]bool, len(images))
@@ -595,13 +596,23 @@ func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges
 			consistent = append(consistent, State{packed: b.packed, vars: tm.vars})
 		}
 	}
+	ow := func(s State, img uint64) State { return State{packed: (s.packed &^ mask) | img, vars: tm.vars} }
+
+	// C2 runs even when the shared component has a single image: the repair between two target
+	// events can erase what the first one wrote into a shared variable although no source moves.
+	if err := f.verifyRepairedCC(target, tm, morphism, consistent, mask, witness, ow); err != nil {
+		return err
+	}
+	if len(images) < 2 {
+		return nil // the shared component never changes, so no source change can race with an event
+	}
+
 	events := tm.Events()
 	if len(consistent) > 0 && len(images) > maxStateSpace/len(consistent) {
 		return fmt.Errorf("gsm: %s: cross-registry order check space (%d images x %d target states) exceeds %d",
 			morphism, len(images), len(consistent), maxStateSpace)
 	}
 
-	ow := func(s State, img uint64) State { return State{packed: (s.packed &^ mask) | img, vars: tm.vars} }
 	for _, ev := range events {
 		for _, b := range consistent {
 			after := tm.Apply(b, ev) // ρ_B(e(b)), computed once per (event, state)
@@ -620,6 +631,90 @@ func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges
 						SourceFirst: sourceFirst,
 						EventFirst:  eventFirst,
 					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// SameTargetOrderError reports two events of one target registry that its own CC check
+// accepts but that do not commute in the federation, because the morphism (or resolver)
+// repair runs between them: the federated condition C2 ("repaired CC") fails.
+//
+// Read it as: the target is in State, whose shared component is the image of Source (a
+// normal form of the source, or a combination of source normal forms for a resolved
+// target), and no source moves. FedMachine.Apply applies a target event as
+// b ↦ ow(ρ_B(e(b)), v), so delivering First and then Second gives FirstThenSecond, and
+// delivering Second and then First gives SecondThenFirst. The two differ, typically because
+// one event writes a shared variable, the repair overwrites it, and the other event reads it.
+//
+// The check is static: it quantifies over every valid source state and every valid target
+// state consistent with it, not only over states a run reaches. So a rejection is sound
+// (the witness is a valid, morphism-consistent federated state from which the two orders
+// diverge whenever that state can occur) but can be conservative for a federation that
+// never reaches the witness.
+type SameTargetOrderError struct {
+	Federation      string
+	Morphism        string // "morphism src→dst", or "resolver for \"dst\"" on a multi-source target
+	Target          string // target registry name
+	First           string // the event delivered first on the FirstThenSecond side
+	Second          string // the other event
+	State           State  // target state (valid, shared component consistent with Source)
+	Source          string // source normal form(s) that produced State's shared component
+	FirstThenSecond State  // First, repair, Second, repair
+	SecondThenFirst State  // Second, repair, First, repair
+}
+
+func (e *SameTargetOrderError) Error() string {
+	return fmt.Sprintf("gsm: federation %q: events %q and %q of %q commute on %q alone (CC) but not with the "+
+		"repair across %s between them (repaired CC, C2): at target state %s, whose shared component comes from "+
+		"source %s, delivering %q then %q gives %s but %q then %q gives %s, so the federation may diverge on "+
+		"these two orders; typically one event writes a morphism-controlled (Shared) variable that the repair "+
+		"overwrites before the other event reads it (a static check over every valid source state: the witness "+
+		"is a valid consistent state, which a given run may never reach)",
+		e.Federation, e.First, e.Second, e.Target, e.Target, e.Morphism, e.State, e.Source,
+		e.First, e.Second, e.FirstThenSecond, e.Second, e.First, e.SecondThenFirst)
+}
+
+// verifyRepairedCC checks C2 (FederationEvents.v): every pair of target events the target's
+// own CC check covers (all pairs, or the declared Independent pairs) commutes when the
+// morphism repair runs after each event, with the sources fixed:
+//
+//	ow(ρ_B(e2(ow(ρ_B(e1(b)), v))), v) = ow(ρ_B(e1(ow(ρ_B(e2(b)), v))), v)
+//
+// for every image v of a valid source state (or source combination) and every valid target
+// state b whose shared component is v (consistent lists exactly these b). The target's own
+// CC gives e1(e2(b)) = e2(e1(b)) without the repair, and C1 (verifyCrossOrder) says an event
+// does not care whether the source moved before it; neither implies C2 (c2_counterexample),
+// and C1 + C2 together make every interleaving of federated-independent events converge in
+// an acyclic federation (fed_events_commute). A pair outside the checked set is not declared
+// independent, so the federation, like the component, makes no promise about its order.
+//
+// Cost per target: 4 x |pairs| x |consistent| machine table lookups, where |consistent| is
+// at most the target's valid-state count. That is within a constant of the target's own CC
+// check (|pairs| x |valid| lookups), which Build already ran under the maxStateSpace cap,
+// so no separate cap is needed.
+func (f *Federation) verifyRepairedCC(target *Registry, tm *Machine, morphism string, consistent []State,
+	mask uint64, witness map[uint64]string, ow func(State, uint64) State) error {
+	names := tm.Events()
+	for _, b := range consistent {
+		v := b.packed & mask
+		for _, p := range tm.ccPairs {
+			e1, e2 := names[p[0]], names[p[1]]
+			x12 := ow(tm.Apply(ow(tm.Apply(b, e1), v), e2), v)
+			x21 := ow(tm.Apply(ow(tm.Apply(b, e2), v), e1), v)
+			if x12.packed != x21.packed {
+				return &SameTargetOrderError{
+					Federation:      f.name,
+					Morphism:        morphism,
+					Target:          target.name,
+					First:           e1,
+					Second:          e2,
+					State:           b,
+					Source:          witness[v],
+					FirstThenSecond: x12,
+					SecondThenFirst: x21,
 				}
 			}
 		}

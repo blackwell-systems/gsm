@@ -228,6 +228,12 @@ type FedReport struct {
 	// Checks lists the federation-level checks Build ran and passed, in order. Empty unless
 	// Build returned a machine.
 	Checks []string
+
+	// Runtime states, for each sub-federation embedded with EmbedCertified, what its internal
+	// morphisms and resolvers run at Apply time: the certificate's verified tables (the usual
+	// case), or the closures, with the reason, for the targets that cannot run from tables.
+	// Empty when nothing was embedded on a certificate, or unless Build returned a machine.
+	Runtime []string
 }
 
 // fedAssurance is FedReport.Assurance for a federation Build accepted.
@@ -243,6 +249,9 @@ func (r *FedReport) String() string {
 		fmt.Fprintf(&b, "  Federation assurance: %s\n", r.Assurance)
 		for _, c := range r.Checks {
 			fmt.Fprintf(&b, "    checked (Go, not oracle): %s\n", c)
+		}
+		for _, l := range r.Runtime {
+			fmt.Fprintf(&b, "    runtime: %s\n", l)
 		}
 	} else {
 		b.WriteString("  Federation assurance: not certified\n")
@@ -280,6 +289,10 @@ type FedMachine struct {
 	cyclic    bool    // true when the network has cycles (requires monotone repair)
 	sharedVar [][]int // sharedVar[j] = var indices of j that some morphism controls (reset to ⊥)
 	kleeneCap int     // safe upper bound on Kleene iteration rounds
+
+	// certTab[j] is target j's certificate table when j is internal to an EmbedCertified sub and
+	// runs from that table (see certificate_exec.go); nil when j runs its morphism or resolver.
+	certTab []*certTable
 }
 
 // FedState is a compact federated state: one component State per registry.
@@ -296,7 +309,15 @@ type FedState struct {
 //   - each morphism must satisfy M1, validity preservation under shared-component overwrite
 //     (Prop 8.14), and its Map must touch only the declared Shared() variables.
 //   - every target event must commute with every change of the target's shared component that
-//     its source(s) can cause (cross-registry CC; a failure is a *CrossOrderError).
+//     its source(s) can cause (cross-registry CC, C1; a failure is a *CrossOrderError);
+//   - every pair of target events the target's own CC covers must still commute when the
+//     morphism repair runs after each of them (repaired CC, C2; a failure is a
+//     *SameTargetOrderError).
+//
+// C1 and C2 are checked statically, over every valid source state, so together they are
+// sufficient for every interleaving of independent events to converge in an acyclic
+// federation; a failure means the federation may diverge from the reported state, which a
+// particular run need not reach.
 //
 // This is the federated analogue of gsm's single-registry contract: a FedMachine only
 // exists if convergence is guaranteed.
@@ -369,8 +390,9 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	// certificate and that the seam obeys the output-port restriction, before any component is
 	// built. subOf classifies components as belonging to a certified sub or not.
 	subOf := f.subOf()
-	if err := f.validateCertificates(subOf); err != nil {
-		return nil, report, err
+	certSnaps, certErr := f.validateCertificates(subOf)
+	if certErr != nil {
+		return nil, report, certErr
 	}
 
 	for i, r := range f.comps {
@@ -414,8 +436,9 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	if err := f.verify(subOf); err != nil {
 		return nil, report, err
 	}
-	// Cross-registry CC: every target event commutes with every source-driven change of the
-	// target's shared component.
+	// Cross-registry CC (C1): every target event commutes with every source-driven change of the
+	// target's shared component. Repaired CC (C2): every pair of target events covered by the
+	// target's CC commutes with the repair between them. Both run per target, in one pass.
 	if err := f.verifyCrossOrder(m.comps); err != nil {
 		return nil, report, err
 	}
@@ -456,6 +479,7 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 		m.topo = topo
 	}
 
+	report.Runtime = f.certRuntime(m, certSnaps, subOf)
 	report.Assurance = fedAssurance
 	report.Checks = f.checksRun(m.cyclic)
 	return m, report, nil
@@ -474,6 +498,8 @@ func (f *Federation) checksRun(cyclic bool) []string {
 		"shared variables: every Shared() variable belongs to its morphism's target",
 		fmt.Sprintf("M1: %d single-source morphism(s) write only Shared() variables, preserve target validity, and are source-determined", single),
 		fmt.Sprintf("R1/R2: %d resolver(s) write only shared variables, are source-determined, and preserve target validity", resolved),
+		"cross-registry CC (C1): every target event commutes with every source-driven change of its shared component",
+		"repaired CC (C2): every target event pair its own CC covers commutes with the morphism repair between the two events",
 	}
 	if cyclic {
 		checks = append(checks, "monotone cycles: every morphism and resolver is monotone (AllowMonotoneCycles); normal form by Kleene iteration")

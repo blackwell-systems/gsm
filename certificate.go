@@ -22,10 +22,11 @@ import (
 // Independent pair, the wiring, a recorded morphism image, or the port declaration changes. The
 // digest binds a morphism or resolver closure only through its table, which records its images at
 // one representative target, so a closure that differs only at other targets digests the same.
-// EmbedCertified does not rely on the digest for that: at Build it re-runs the live sub's
-// closures over every valid source and target state (write mask, validity, source-determinacy),
-// which ties each closure to its table on the whole verified domain, and the FedMachine checks
-// every image at runtime (in the target's domain, and writing only Shared() variables). A
+// EmbedCertified does not rely on the digest for that: the FedMachine executes the certificate's
+// tables, not the closures, for the sub's internal morphisms (see EmbedCertified), and at Build it
+// also re-runs the live sub's closures over every valid source and target state (write mask,
+// validity, source-determinacy), which ties each closure to its table on the whole verified
+// domain for the checks and paths that still evaluate closures. A
 // consumer can re-check the federated conditions from the tables, independently of the
 // producer's morphism closures, via Verify. The digest is an unkeyed SHA-256 over public data: it
 // binds the tables to the components (integrity), it does not authenticate who produced them.
@@ -196,6 +197,19 @@ func sortPortRefs(refs []PortRef) {
 // write one of the subsystem's declared input ports; an inbound morphism to any other (sealed)
 // variable is rejected. Use Embed for the full-re-verification form. As with Embed, the sub's
 // AllowMonotoneCycles does not carry over to f, and a second resolver for a target panics.
+//
+// At run time the machine executes the certificate's verified tables for the sub's internal
+// morphisms and resolvers: Apply, Normalize, IsValid and SharedProjection repair each internal
+// target by a lookup in the table Build checked (copied at Build, so a later change to cert does
+// not reach the machine), and the sub's Map and Resolver closures are not called. The result is
+// the same as running the closures on every state the certificate covers (Build binds the
+// closures to the tables there), but a side effect in a closure (logging, a counter) does not
+// happen at run time. A state outside the certificate's domain (a source or target that is not a
+// valid state of its component) makes Normalize and Apply panic, naming it. The exceptions, which
+// keep the closures Build verified, are a cyclic network (Kleene iteration evaluates repair on
+// states the tables do not cover), a target that also has a writer outside the sub (an input
+// port), and SharedProjection along a morphism into a resolved target (the certificate tabulates
+// the resolver, not each morphism into it). FedReport.Runtime says which applies.
 func (f *Federation) EmbedCertified(sub *Federation, cert *Certificate) *Federation {
 	ce := &certifiedEmbed{comps: make(map[*Registry]bool, len(sub.comps)), cert: cert, sub: sub}
 	for _, r := range sub.comps {
@@ -233,21 +247,41 @@ func internalEdge(subOf map[*Registry]int, e edgeDef) bool {
 // matches its certificate (digest recomputed over the sub plus the certificate's declared input
 // ports) and that the seam is legal: an inbound morphism into a certified subsystem is allowed only
 // when every variable it writes is a declared input port of that subsystem.
-func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
-	for _, ce := range f.certified {
+//
+// It returns, per certified embed, the snapshot of the certificate's tables it checked: the
+// FedMachine executes those tables (compileCertTables), so they are copied once here, bound to the
+// digest, and re-checked, and nothing a closure does to the Certificate later in Build (or after
+// it) reaches the machine.
+func (f *Federation) validateCertificates(subOf map[*Registry]int) ([][]MorphismTable, error) {
+	snaps := make([][]MorphismTable, len(f.certified))
+	for id, ce := range f.certified {
 		if ce.cert == nil {
-			return fmt.Errorf("gsm: certified embed of %q has a nil certificate", ce.sub.name)
+			return nil, fmt.Errorf("gsm: certified embed of %q has a nil certificate", ce.sub.name)
 		}
-		tables, err := ce.sub.extractTables()
+		snap := snapshotTables(ce.cert.Tables)
+		// The tables that will run must be the ones the digest covers. Anyone can recompute an
+		// unkeyed digest, so this binds them; the re-check below is what validates them.
+		got, err := digestComponentsAndTables(ce.sub.comps, snap, ce.sub.allowCycles, ce.cert.InputPorts)
 		if err != nil {
-			return fmt.Errorf("gsm: cannot digest certified sub-federation %q: %w", ce.sub.name, err)
-		}
-		got, err := digestComponentsAndTables(ce.sub.comps, tables, ce.sub.allowCycles, ce.cert.InputPorts)
-		if err != nil {
-			return err
+			return nil, err
 		}
 		if got != ce.cert.Digest {
-			return fmt.Errorf("gsm: certificate for %q does not match the embedded sub-federation; "+
+			return nil, fmt.Errorf("gsm: certificate for %q does not match the embedded sub-federation (its digest does "+
+				"not cover its tables over these components); rebuild the certificate from the current subsystem", ce.sub.name)
+		}
+		// Early mismatch diagnostic: the live sub's closures, reified the same way, must give
+		// the same digest. Correctness does not rest on it (the tables run, not the closures),
+		// but a sub whose closures were edited after certification is almost always a mistake.
+		tables, err := ce.sub.extractTables()
+		if err != nil {
+			return nil, fmt.Errorf("gsm: cannot digest certified sub-federation %q: %w", ce.sub.name, err)
+		}
+		got, err = digestComponentsAndTables(ce.sub.comps, tables, ce.sub.allowCycles, ce.cert.InputPorts)
+		if err != nil {
+			return nil, err
+		}
+		if got != ce.cert.Digest {
+			return nil, fmt.Errorf("gsm: certificate for %q does not match the embedded sub-federation; "+
 				"rebuild the certificate from the current subsystem", ce.sub.name)
 		}
 		// Re-check the morphism conditions from the tables rather than trusting the
@@ -257,13 +291,26 @@ func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
 		for _, r := range ce.sub.comps {
 			byName[r.name] = r
 		}
-		if err := ce.cert.recheckTables(byName); err != nil {
-			return err
+		checked := *ce.cert
+		checked.Tables = snap
+		if err := checked.recheckTables(byName); err != nil {
+			return nil, err
 		}
+		// Closure binding: the live closures must agree with the tables on every valid source
+		// and target state. The tables are what Apply runs, so this is not needed for the
+		// certified runtime; it is kept because the build-time checks that still evaluate
+		// closures (cross-registry order, the monotone-cycle checks) and the closures that
+		// still run (a cyclic network's Kleene iteration, SharedProjection along a morphism into
+		// a resolved target) then speak for the tables too, and because it names the closure
+		// that differs.
 		if err := ce.sub.bindClosures(); err != nil {
-			return fmt.Errorf("gsm: certified sub-federation %q: an internal morphism closure does not match "+
+			return nil, fmt.Errorf("gsm: certified sub-federation %q: an internal morphism closure does not match "+
 				"its certificate: %w", ce.sub.name, err)
 		}
+		if err := f.checkCertifiedWiring(id, ce, subOf); err != nil {
+			return nil, err
+		}
+		snaps[id] = snap
 	}
 	// Seam rule: an inbound morphism (target inside a certified sub, source outside it) is allowed
 	// only if every variable it writes is a declared input port; a write to a sealed variable is
@@ -279,13 +326,13 @@ func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
 		ce := f.certified[did]
 		for _, v := range e.shared {
 			if !ce.isInputPort(e.dst.name, v.name) {
-				return fmt.Errorf("gsm: morphism %s→%s writes %q into certified sub-federation %q, which is not a "+
+				return nil, fmt.Errorf("gsm: morphism %s→%s writes %q into certified sub-federation %q, which is not a "+
 					"declared input port; declare it via Certify(gsm.Port{...}) or embed with Embed for full re-verification",
 					e.src.name, e.dst.name, v.name, ce.sub.name)
 			}
 		}
 	}
-	return nil
+	return snaps, nil
 }
 
 // bindClosures re-verifies the live sub's internal morphism and resolver closures over every
@@ -294,7 +341,10 @@ func (f *Federation) validateCertificates(subOf map[*Registry]int) error {
 // tables, which record each closure's images at the representative target; source-determinacy
 // at every valid target then makes the closure agree with its table everywhere on the verified
 // domain, so a closure that matches the certificate at one target and differs elsewhere is
-// refused here instead of being trusted. The cost is that of verifying the sub with Embed.
+// refused here instead of being trusted. The cost is that of verifying the sub with Embed. The
+// FedMachine runs the tables, so this is a diagnostic for the certified runtime; it is what
+// makes the build-time checks that evaluate closures, and the paths that still run them, agree
+// with the tables (see validateCertificates).
 func (f *Federation) bindClosures() error {
 	inEdges := make(map[*Registry][]edgeDef)
 	for _, e := range f.edges {
