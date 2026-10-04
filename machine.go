@@ -46,8 +46,18 @@ func (m *Machine) NewState() State {
 }
 
 // Apply processes an event, returning the unique normal form.
-// This is a single table lookup — O(1).
-// Panics if the event name is unknown.
+// This is a table lookup, O(1). Panics if the event name is unknown.
+//
+// An input that violates an invariant (a state restored from storage, or built by hand
+// with Set, SetBool or SetInt) is normalized first: Apply(s, e) is Apply(Normalize(s), e).
+// Order independence was verified from valid states (and from NewState's zero state, which
+// Apply takes as it is), so an unnormalized start would otherwise let two orders of the
+// same events disagree. On a table machine this costs one extra lookup.
+//
+// Delivery: the guarantee is that every order of one multiset of events reaches the same
+// state, so each event must be applied exactly once. An event listed in
+// Report.NotIdempotent changes the result when applied twice; suppress its redeliveries
+// (an at-least-once queue, a retry) before Apply.
 //
 // The input must be a state of this machine (see EffectFunc): one from NewState, Apply,
 // Normalize or MergeProjection, or a state of a structurally identical machine. A table
@@ -71,10 +81,20 @@ func (m *Machine) Apply(s State, event string) State {
 	}
 	if m.lazy {
 		m.mustBeInput("Apply", s)
+		if s.packed != 0 && !m.allHold(s) {
+			s = m.lazyNormalize(s)
+		}
 		return m.lazyApply(m.eventDefs[ei], s)
 	}
+	// Start from the normal form, which is in the verified domain. The zero state is
+	// in the domain as it is (verifyCC checks from it), and an encoding outside the
+	// machine has nf[s] == s, so both keep their table entry.
+	p := s.packed
+	if p != 0 && p < uint64(len(m.nf)) {
+		p = m.nf[p]
+	}
 	return State{
-		packed: m.step[ei][s.packed],
+		packed: m.step[ei][p],
 		vars:   m.vars,
 	}
 }

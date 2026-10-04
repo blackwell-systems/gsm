@@ -43,9 +43,11 @@ func writeVal(s State, v Var, val int) State {
 	default: // enum: set by index (clamped into range)
 		if val < 0 {
 			val = 0
+			noteClamp(s, v)
 		}
 		if val > v.domain-1 {
 			val = v.domain - 1
+			noteClamp(s, v)
 		}
 		return s.setRaw(v, uint64(val))
 	}
