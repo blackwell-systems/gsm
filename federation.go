@@ -228,6 +228,12 @@ type FedReport struct {
 	// Checks lists the federation-level checks Build ran and passed, in order. Empty unless
 	// Build returned a machine.
 	Checks []string
+
+	// Runtime states, for each sub-federation embedded with EmbedCertified, what its internal
+	// morphisms and resolvers run at Apply time: the certificate's verified tables (the usual
+	// case), or the closures, with the reason, for the targets that cannot run from tables.
+	// Empty when nothing was embedded on a certificate, or unless Build returned a machine.
+	Runtime []string
 }
 
 // fedAssurance is FedReport.Assurance for a federation Build accepted.
@@ -243,6 +249,9 @@ func (r *FedReport) String() string {
 		fmt.Fprintf(&b, "  Federation assurance: %s\n", r.Assurance)
 		for _, c := range r.Checks {
 			fmt.Fprintf(&b, "    checked (Go, not oracle): %s\n", c)
+		}
+		for _, l := range r.Runtime {
+			fmt.Fprintf(&b, "    runtime: %s\n", l)
 		}
 	} else {
 		b.WriteString("  Federation assurance: not certified\n")
@@ -280,6 +289,10 @@ type FedMachine struct {
 	cyclic    bool    // true when the network has cycles (requires monotone repair)
 	sharedVar [][]int // sharedVar[j] = var indices of j that some morphism controls (reset to ⊥)
 	kleeneCap int     // safe upper bound on Kleene iteration rounds
+
+	// certTab[j] is target j's certificate table when j is internal to an EmbedCertified sub and
+	// runs from that table (see certificate_exec.go); nil when j runs its morphism or resolver.
+	certTab []*certTable
 }
 
 // FedState is a compact federated state: one component State per registry.
@@ -369,8 +382,9 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	// certificate and that the seam obeys the output-port restriction, before any component is
 	// built. subOf classifies components as belonging to a certified sub or not.
 	subOf := f.subOf()
-	if err := f.validateCertificates(subOf); err != nil {
-		return nil, report, err
+	certSnaps, certErr := f.validateCertificates(subOf)
+	if certErr != nil {
+		return nil, report, certErr
 	}
 
 	for i, r := range f.comps {
@@ -456,6 +470,7 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 		m.topo = topo
 	}
 
+	report.Runtime = f.certRuntime(m, certSnaps, subOf)
 	report.Assurance = fedAssurance
 	report.Checks = f.checksRun(m.cyclic)
 	return m, report, nil
