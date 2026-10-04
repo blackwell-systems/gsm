@@ -1,10 +1,12 @@
 # Holonomy-minimal coordination (design note)
 
-Status: **proposed, not implemented.** This note specifies a sharper replacement for the plan that
-`Federation.CoordinationPlan` returns today, backed by theorems that are now machine-checked
-axiom-free in the papers repo (`coq/CohomologyGraph.v`, CI-verified on Coq 8.18, 8.20, and Rocq 9.3).
-It is additive: `Build`, `DiagnoseCycle`, `CoordinationPlan`, and `BuildCoordinated` keep their
-current behavior.
+Status: **proposed, not implemented in gsm.** This note specifies a sharper replacement for the plan
+that `Federation.CoordinationPlan` returns today. The theory behind it is machine-checked axiom-free
+in the papers repo, [normalization-confluence](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq)
+(CI-verified on Coq 8.18, 8.20, and Rocq 9.3): the cycle-basis criterion in `coq/CohomologyGraph.v`,
+and the soundness of the plan itself in `coq/CoordinatedCycles.v` (see
+[Mechanized soundness](#mechanized-soundness-coordinatedcyclesv)). It is additive: `Build`,
+`DiagnoseCycle`, `CoordinationPlan`, and `BuildCoordinated` keep their current behavior.
 
 ## Problem
 
@@ -57,7 +59,10 @@ demoted edges hold at that normal form. No consensus is involved; the root is an
 as a source is in today's acyclic federations.
 
 This is a semantic choice, so it must be explicit: the plan reports **which registry is the
-authority root** for each accepted cycle, and the user can override it. Demoting an edge also means
+authority root** for each accepted cycle, and the user can override it. The proof shows the report
+is required, not cosmetic: the normal form is unique *given the root*, and a different root can
+reach a different normal form from the same state (`root_choice_matters`: the copy-back loop rooted
+at A reaches A = B = 0, rooted at B reaches A = B = 1, and both are consistent with the whole loop). Demoting an edge also means
 a local write to the demoted target's shared variables no longer propagates backward along that
 edge; the report must say so. "Coordination-free" in this note always means *coordination-free given
 the reported authority root*.
@@ -145,9 +150,56 @@ consumers keep working. `WithRoot(registry)` overrides the authority root.
 A plan is sound when every morphism in a non-fallback component is a bijection on one shared carrier,
 the tree spans the component, every edge in `Balanced` has identity holonomy against the tree, and
 every edge in `Coordinate` is removed from the driving network. Under those conditions the
-tree-driven normal form is unique (acyclic authority) and satisfies every balanced edge
-(`keep_balanced_suffices`), and no plan relative to the same tree can keep any `Coordinate` edge
-(`unbalanced_blocks`).
+tree-driven normal form is unique given the root (acyclic authority) and satisfies every balanced
+edge (`keep_balanced_suffices`), and no plan relative to the same tree can keep any `Coordinate` edge
+(`unbalanced_blocks`). This is now a mechanized theorem, below.
+
+## Mechanized soundness (`CoordinatedCycles.v`)
+
+`coq/CoordinatedCycles.v` in normalization-confluence proves the plan sound, axiom-free. Its model:
+registries are the vertices of a group-labeled graph, the shared fiber of every registry is the
+group itself acting on itself (the **regular action**; `Z/2` with xor covers gsm's copy and `1 - x`
+loops), and an edge `(u, v, g)` is a morphism transporting the value at `u` to `g * s(u)` at `v`, so
+every transport is **invertible**. A plan, relative to a designated authority root `r`, splits the
+edges of a component into a spanning tree `T` grown from `r` (its edges drive values, against a
+morphism's direction where needed, which is where invertibility is used), balanced non-tree edges
+`B` (demoted to checked constraints), and coordinated non-tree edges `C` (removed from the
+federation). The driving network is acyclic, so the acyclic federation results apply to it
+unchanged.
+
+| Theorem | What it says |
+|---|---|
+| `coordinated_sound` | With `T` a spanning tree and every edge of `B` balanced: for every initial state and every topological order of the driving network, the normal form satisfies every tree edge and every balanced constraint, keeps the root's value, is the **unique** state satisfying `T ++ B` with that root value, and every other order reaches the same state. |
+| `coordinated_unique_nf` | The same, as existence and uniqueness of the normal form for every authority value. |
+| `coordination_needed` | Keeping any unbalanced edge of `C`, as a writer or as a constraint, leaves no consistent state at all. |
+| `plan_exact` | A set of non-tree edges can be kept with a consistent state **iff** it avoids `C`: the coordinated set is exactly the unbalanced edges, no fewer and no more. |
+| `coordinated_events_converge` | Any two permutations of local events converge under the plan, provided the root's own events commute; events on non-root tree registries are overwritten by the drive (the demotion warning above). |
+
+The same file records where the naive statement is false, and each one is a requirement on the
+implementation:
+
+- **The root must be reported** (`root_choice_matters`, above). Uniqueness holds only given the
+  root, so `ComponentPlan.Root` is part of the result, not a detail.
+- **An authority is needed at all** (`copyback_without_authority`): with both copy-back edges kept as
+  writers there are two consistent states and two propagation orders reach different ones. Trivial
+  holonomy gives existence, not uniqueness.
+- **Transports must be invertible** (`noninvertible_balance_not_static`): with a constant back edge,
+  whether the edge holds at the normal form depends on the authority value, so "balanced" is not a
+  property of the cycle. This is why a non-invertible morphism forces `Fallback`.
+- **"No consistent state" needs the regular action** (`nonfree_holonomy_counterexample`): a
+  bijection acting on a fiber that is not the group itself (a swap of `{0, 1}` acting on
+  `{0, 1, 2}`) has non-identity holonomy yet admits a consistent state (value 2). The edge is still
+  violated for another authority value, so a plan sound for every root value must still coordinate
+  it; only the "no consistent state at all" reading of `unbalanced_blocks` is lost.
+
+**Follow-up (gsm, not implemented).** Today's `Federation.CoordinationPlan` returns a list of
+`CoordinationPoint`s (`Src`, `Dst`, `Shared`) and reports no authority root. That is consistent
+with what it does (it removes a feedback edge set and every remaining source is an authority, as in
+any acyclic federation), but the edges it cuts come from a depth-first search in component order,
+so which registries end up authoritative is implicit. Any implementation of this design
+(`HolonomyPlan` / `BuildHolonomy`) must report the root per component, and the report and
+`FedReport` should name it, as `root_choice_matters` requires. Reporting the implied authorities of
+today's plan is a smaller follow-up worth considering in the same change.
 
 ## Tests and examples to ship with v1
 

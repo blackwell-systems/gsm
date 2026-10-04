@@ -280,6 +280,15 @@ This doesn't always work because a repair might violate other invariants.
 
 **Better measure**: Lexicographic tuple (depth, violated count), but in general, proving termination requires invariant-specific reasoning.
 
+**The potential need not be a natural number.** The convergence theorem only needs the measure to
+be well-founded. The mechanized proof states WFC for a potential into any type with any
+well-founded strict order (ordinals, lexicographic products, integers bounded below) and proves
+termination, confluence and unique normal forms from it, for the all-pairs and the causal system
+alike ([`GovernanceWF.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/GovernanceWF.v): `governance_wf_confluent`,
+`causal_governance_wf_unique_normal_forms`; the instance `zw_confluent` is a registry over the
+unbounded integers). So the theorem is domain-independent; finiteness is what gsm's *verification*
+needs (§5.4 enumerates), not what convergence needs.
+
 ### 5.4 Verification Algorithm
 
 The gsm library verifies WFC by **exhaustive simulation**:
@@ -452,6 +461,46 @@ Since μ maps into a well-ordered set and strictly decreases at every step, ever
 ### 7.6 Eventual Consistency
 
 The convergence theorem provides **strong eventual consistency**: all replicas processing the same set of events (in any order) reach the same valid state, assuming WFC and CC hold. This is stronger than weak eventual consistency (which only guarantees convergence after quiescence).
+
+### 7.7 The Converse: CC Is Exact on Reachable States
+
+WFC and CC are not only sufficient. Under free delivery, a repair that returns a valid state, and
+WFC, every event buffer delivered from a start s₀ has a unique normal form **iff** CC1 and CC2 hold
+on the states reachable from s₀ ([`GovernanceConverse.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/GovernanceConverse.v):
+`cc_exact_from`, `cc_exact`; each failure at a reachable state is an observable divergence,
+`cc1_fail_diverge_from`). Under causal delivery the exact condition is that governed steps of a
+concurrent pair commute wherever the pair can be delivered (`causal_exact`). The naive converse
+("CC fails somewhere, so some run diverges") is false: a failure at a state no run reaches, or one
+that a later event erases, is harmless (`masked_cc1`, `naive_causal_converse_fails`).
+
+This is why gsm's results read the way they do. `Build` checks CC over **every** valid state (plus
+the zero state), not only the reachable ones, because it does not know the start a deployment will
+use. That static check is sufficient, so a pass is a guarantee; a failure reports a witness state
+from which the two orders diverge, which a particular deployment may never reach.
+
+### 7.8 Delivery: Duplicates and Redelivery
+
+The theorems above are about permutations of one multiset of events: each event delivered exactly
+once. Transports usually promise at-least-once delivery. The mechanized account
+([`AtLeastOnce.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/AtLeastOnce.v)):
+
+- **A duplicate is absorbed when the event is idempotent** and commutes with what was delivered
+  between the copies (`alo_absorbed`); when all delivered events commute, every at-least-once
+  delivery of idempotent events reaches the exactly-once result (`alo_commuting_exactly_once`).
+- **A non-idempotent event diverges when duplicated** (`non_idempotent_diverges`), from any state
+  where its governed step is not idempotent: a capped counter increment delivered twice ends at 2
+  where once ends at 1 (`inc_duplicate_diverges`).
+- **Under causal delivery, redelivery must itself be causal**: no copy of an event may arrive after
+  an event that causally follows it (`causal_alo_exactly_once`). Idempotence alone is not enough
+  (`late_duplicate_diverges`): a late redelivery of `add` after its causal successor `remove` sets
+  a flag that exactly-once delivery leaves cleared, though both events are idempotent and every
+  concurrent pair commutes.
+
+gsm reports which events need deduplication: `Report.NotIdempotent` lists every event whose second
+application changes the state from some state `Build` checked, printed as "Delivery: exactly once
+for ...". Those events need an event id and a dedupe set (or equivalent) before `Apply`. Events not
+listed tolerate duplicates under the conditions above; in declared-only or causal deployments, a
+redelivered copy must also not overtake an effect of its own event.
 
 ---
 
@@ -667,8 +716,13 @@ witnesses `witness_not_cmrdt` / `witness_leaves_valid_space` showing the inclusi
 the decidability of the compensation-free classification (`compensationFree_step_no_repair`: under
 it every event-step is exactly its guarded effect, with no repair) are mechanized in
 Coq/Rocq, axiom-free (`Print Assumptions` reports "Closed under the global context"), with CI
-that gates on the axiom-free property. See the
-[mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq).
+that gates on the axiom-free property. The development has since grown to cover the converse of
+CC (§7.7), WFC over any well-founded order (§5.3), at-least-once delivery (§7.8), the monotone
+regime under the ascending chain condition instead of finite height (`ChaoticACC.v`), event
+interleavings in federations (§11.4), and the soundness of a holonomy-minimal coordination plan
+(`CoordinatedCycles.v`; see HOLONOMY-COORDINATION-DESIGN.md). At the time of writing the gate
+checks 254 headline results; the current list is in the
+[mechanized proof](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq)'s README.
 
 Beyond the meta-theory, gsm's own per-machine verification is **differentially tested** against
 the proof, at two different trust boundaries. Both checkers are extracted from the Coq
@@ -770,7 +824,7 @@ op₁ ; op₂ = op₂ ; op₁
 - CRDTs: stronger requirement (hard to express business rules)
 - gsm: weaker requirement (can enforce invariants, but requires verification)
 
-**Subsumption (machine-checked)**: CRDTs are not merely comparable to gsm, they are a *special case* of it. A CRDT is a governed machine whose operations were designed so compensation never fires: a machine with compensation depth zero on every reachable state. Normalization confluence keeps the convergence guarantee after dropping that design restriction, so every CRDT embeds as a gsm registry, and the inclusion is **strict**: governed machines exist that no CRDT can express, because they leave the valid space and rely on compensation to return. This is proven axiom-free in `coq/CRDT.v` for both op-based (`cmrdt_SEC`) and state-based (`cvrdt_SEC`) CRDTs, with the strictness witnesses `witness_not_cmrdt` and `witness_leaves_valid_space`; the full statement is in [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md). So the trade-off bullets above are the pragmatic view; the structural relationship is containment, not peerage. The compensation-free corner is itself a decidable, extracted classification (see §9.7), so gsm can tell you whether a given machine is in the CRDT fragment.
+**Subsumption (machine-checked)**: CRDTs are not merely comparable to gsm, they are a *special case* of it. A CRDT is a governed machine whose operations were designed so compensation never fires: a machine with compensation depth zero on every reachable state. Normalization confluence keeps the convergence guarantee after dropping that design restriction, so every CRDT embeds as a gsm registry, and the inclusion is **strict**: governed machines exist that no CRDT can express, because they leave the valid space and rely on compensation to return. This is proven axiom-free in `coq/CRDT.v` for both op-based (`cmrdt_SEC`) and state-based (`cvrdt_SEC`) CRDTs, with the strictness witnesses `witness_not_cmrdt` and `witness_leaves_valid_space`; the full statement is in [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md). Under causal delivery, where only concurrent operations must commute, the relationship is exact: a compensation-free governed system satisfies the causal convergence condition **iff** it is an op-based CRDT (`compensation_free_exact` in [`CausalReplay.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CausalReplay.v), with `causal_cmrdt_SEC` for the forward direction). So op-based CRDTs are *exactly* the compensation-free fragment, not just contained in it. The trade-off bullets above are the pragmatic view; the structural relationship is containment, not peerage. The compensation-free corner is itself a decidable, extracted classification (see §9.7), so gsm can tell you whether a given machine is in the CRDT fragment.
 
 ### 10.2 Operational Transformation (OT)
 
@@ -840,7 +894,7 @@ Placing gsm among these formalisms gives its regime a floor and a ceiling, estab
 
 **Floor.** CRDTs and invariant confluence are the *compensation-free* fragment: operations designed so repair never fires (compensation depth zero on every reachable state). This is a strict lower bound proven by construction: every such machine embeds as a gsm registry (§10.1, `cmrdt_SEC` / `cvrdt_SEC`), and membership is decidable and extracted (`compensationFree_step_no_repair`, §9.7). gsm can detect when a machine sits on the floor.
 
-**Ceiling.** The top of the coordination-free lattice is normalization confluence itself. WFC and CC are necessary, not merely sufficient (Section 7 and the paper's necessity results), so there is no strictly more general coordination-free convergence regime to climb into. What lies *above* is not a larger free-lunch regime but coordination: consensus and serialization (§10.4), which buy the cases compensation cannot. That boundary is CC-satisfiability, and it is marked constructively. `Registry.Synthesize` (§9.5) returns an **impossibility witness**, a critical pair of distinct valid states no repair can reconcile, exactly when a machine crosses it. Where the floor is detected by embedding, the ceiling is detected by counterexample: gsm certifies both edges of its own regime.
+**Ceiling.** The top of the coordination-free lattice is normalization confluence itself. CC is necessary, not merely sufficient, once it is quantified over the states a run can reach (§7.7, `cc_exact_from`), so there is no strictly more general coordination-free convergence regime to climb into. What lies *above* is not a larger free-lunch regime but coordination: consensus and serialization (§10.4), which buy the cases compensation cannot. That boundary is CC-satisfiability, and it is marked constructively. `Registry.Synthesize` (§9.5) returns an **impossibility witness**, a critical pair of distinct valid states no repair can reconcile, exactly when a machine crosses it. Where the floor is detected by embedding, the ceiling is detected by counterexample: gsm certifies both edges of its own regime.
 
 **A caveat on "ceiling".** This is the ceiling of *compensation as a mechanism*. Whether the CC-satisfiability frontier coincides with the absolute limit of coordination-freedom is subtler: invariant confluence (Bailis et al., §10.3) is a necessary-and-sufficient characterization for the invariant-preserving subcase, while WFC + CC is a constructive sufficient condition via one mechanism. A system that is coordination-free by some non-compensation argument could still fall on the impossible side of `Synthesize`. gsm marks the edge of what compensation reaches, which is the edge that matters when building on gsm.
 
@@ -860,6 +914,10 @@ Placing gsm among these formalisms gives its regime a floor and a ceiling, estab
 **Mitigation**:
 - Bound domains to reasonable ranges (e.g., balance ∈ [0, 1000000])
 - Use symbolic verification for unbounded domains (future work)
+
+The limitation is gsm's, not the theorem's: convergence holds on infinite domains under any
+well-founded potential (§5.3), and the monotone regime needs only the ascending chain condition,
+not a finite lattice (`ChaoticACC.v`). What needs finiteness is exhaustive verification.
 
 ### 11.2 State Space Explosion
 
@@ -891,11 +949,11 @@ order reduction (ignore irrelevant interleavings); symbolic verification for unb
 
 ### 11.4 Multi-Registry Systems
 
-**Implemented**: gsm federates multiple registries via directed morphisms (Section 8 of the paper), see `federation.go` (`Federation` / `FedMachine`). Cross-registry constraints are morphism invariants; the authority argument (a source deterministically fixes its target's shared component) makes inter-registry compensation coordination-free. For a tree-shaped network, `Build()` proves the whole network converges when every morphism preserves validity under overwrite (M1). Event order across registries is checked by the two conditions of the proof repository's `FederationEvents.v`: C1, cross-registry CC (a target event commutes with every source-driven change of its shared component, `CrossOrderError`), and C2, repaired CC (two target events that commute locally still commute with the morphism repair between them, `SameTargetOrderError`). Static C1 + C2 are sufficient for every interleaving of independent events to converge in an acyclic federation (`fed_events_commute`, `static_c1_c2_gc`); the exact converse needs reachability (`FederationEventsConverse.v`), so a static failure is a sound but possibly conservative rejection. The compositional-collapse result (Section 8) is realized as a portable certificate: `Federation.Certify` / `EmbedCertified` reuse a verified sub-federation pinned to its certificate (the seam is checked, and the internal morphisms are re-checked from their tables and their live closures), and `Certificate.Verify` re-derives the federated conditions from extracted morphism tables independently of the producer's closures (see `CERTIFICATE-DESIGN.md`).
+**Implemented**: gsm federates multiple registries via directed morphisms (Section 8 of the paper), see `federation.go` (`Federation` / `FedMachine`). Cross-registry constraints are morphism invariants; the authority argument (a source deterministically fixes its target's shared component) makes inter-registry compensation coordination-free. For a tree-shaped network, `Build()` proves the whole network converges when every morphism preserves validity under overwrite (M1). Event order across registries is checked by the two conditions of the proof repository's `FederationEvents.v`: C1, cross-registry CC (a target event commutes with every source-driven change of its shared component, `CrossOrderError`), and C2, repaired CC (two target events that commute locally still commute with the morphism repair between them, `SameTargetOrderError`). Static C1 + C2 are sufficient for every interleaving of independent events to converge in an acyclic federation (`fed_events_commute`, `static_c1_c2_gc`). The exact condition is the same two equations restricted to the witnesses a run can produce: all trace-equivalent sequences from a start converge iff C1 and C2 hold at reachable witnesses (`FederationEventsConverse.v`, `fed_exact`), and the naive converse is false (`naive_converse_fails`). gsm checks the static form over every valid source state, so a pass is a guarantee and a failure means the federation *may* diverge from the reported witness. (These are the federated conditions C1 and C2 of `FederationEvents.v`; C2 here is "repaired CC", unrelated to the single-registry CC2 of §6.4.) The compositional-collapse result (Section 8) is realized as a portable certificate: `Federation.Certify` / `EmbedCertified` reuse a verified sub-federation pinned to its certificate (the seam is checked, and the internal morphisms are re-checked from their tables and their live closures), and `Certificate.Verify` re-derives the federated conditions from extracted morphism tables independently of the producer's closures (see `CERTIFICATE-DESIGN.md`).
 
 **Multi-source**: when a target has several independent sources the authority argument no longer picks a winner. The paper's *Federated Convergence with Resolution* theorem covers this: the target carries a `Resolver` — a source-determined (R1), validity-preserving (R2) merge — generalizing the authority function, and convergence holds on any acyclic network (single-source authority is the special case). Because the merge is domain policy, the theorem is stated conditionally on R1/R2, exactly as the single-source case is conditioned on M1. gsm certifies those hypotheses: `Build` **exhaustively verifies** (over every reachable combination of valid source states) that the resolver writes only shared variables, satisfies R1, and satisfies R2 — the same verify-the-preconditions discipline gsm applies to single-registry WFC/CC. A multi-source target without a resolver, or a resolver that violates R1/R2, is rejected.
 
-**Monotone cycles**: acyclicity is required only to tame *non-monotone* repair — the cyclic divergence counterexample uses the antitone negation `1-x`. When shared domains are ordered (lattice) and every morphism/resolver is **monotone**, the federated repair operator has a least fixed point (Knaster–Tarski) reached order-independently by chaotic iteration, so convergence holds on *any* cyclic graph (the *Monotone Convergence Despite Cycles* theorem). `Federation.AllowMonotoneCycles()` opts in: `Build` verifies monotonicity per node by enumeration and `Normalize` runs Kleene iteration to the least fixed point. State-based CRDTs are the compensation-free special case; non-monotone cycles are rejected. Acyclic structure and monotonicity are independent routes to confluence. When a cyclic network is rejected, `Federation.DiagnoseCycle` names the offending loop and reports whether its repair settles or orbits from a representative seed (the loop-composite fixed-point witness).
+**Monotone cycles**: acyclicity is required only to tame *non-monotone* repair: the cyclic divergence counterexample uses the antitone negation `1-x`. When shared domains are ordered (lattice) and every morphism/resolver is **monotone**, the federated repair operator has a least fixed point (Knaster–Tarski) reached order-independently by chaotic iteration, so convergence holds on *any* cyclic graph (the *Monotone Convergence Despite Cycles* theorem). `Federation.AllowMonotoneCycles()` opts in: `Build` verifies monotonicity per node by enumeration and `Normalize` runs Kleene iteration to the least fixed point. State-based CRDTs are the compensation-free special case; non-monotone cycles are rejected. Acyclic structure and monotonicity are independent routes to confluence. For *events* on a monotone cycle there is no per-edge reduction: the exact condition is the global one, that federated-independent events commute after full re-normalization at every reachable state (`FederationEventsCycles.v`, `gc_iff`, `cyc_events_converge_iff`; `cyc_counterexample` is a monotone cycle whose events diverge). gsm runs C1 and C2 on `AllowMonotoneCycles` networks too, where they rule out the same races, but they are not proved sufficient there and gsm does not check the global condition. When a cyclic network is rejected, `Federation.DiagnoseCycle` names the offending loop and reports whether its repair settles or orbits from a representative seed (the loop-composite fixed-point witness). `Federation.CoordinationPlan` and `BuildCoordinated` accept a non-monotone cycle by removing a feedback edge set to external coordination; the sharper holonomy-minimal plan (coordinate only unbalanced cycles) now has a mechanized soundness theorem (`CoordinatedCycles.v`, `coordinated_sound`, `plan_exact`) and is designed, not yet implemented, in HOLONOMY-COORDINATION-DESIGN.md.
 
 **Future work**: partial-synchronization protocol - propagate only each parent's shared projection along tree edges, rather than full federated state.
 

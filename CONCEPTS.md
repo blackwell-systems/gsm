@@ -182,6 +182,11 @@ X = X, replicas converge!
 
 `gsm` **verifies convergence at build time** by checking all possible event orderings exhaustively.
 
+"The same events" means the same multiset, each event delivered once. A redelivered event (an
+at-least-once queue, a retry) is a different multiset. See
+["Redelivered events are harmless"](#redelivered-events-are-harmless) below for which events
+tolerate that.
+
 ---
 
 ## The Two Properties
@@ -366,7 +371,15 @@ Then it is **globally confluent** (all rewrite sequences converge to the same no
 - CC ensures any two events can be "joined" to the same result
 - Together: no matter what order events arrive, compensation brings you to the same valid state
 
-**Proof**: See Section 5 of the paper.
+**Proof**: See Section 5 of the paper, and the axiom-free mechanization in
+[normalization-confluence](https://github.com/blackwell-systems/normalization-confluence/tree/main/coq).
+Two refinements are mechanized there too. The termination measure can be any well-founded
+potential, not just a step count, so the theorem itself does not need finite domains
+([`GovernanceWF.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/GovernanceWF.v)). And the conditions are exact: on the states a run
+can reach, CC holds **iff** every ordering converges
+([`GovernanceConverse.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/GovernanceConverse.v), `cc_exact_from`). gsm checks CC on
+every valid state, which is sufficient; a reported failure is a state from which two orders
+diverge, which a given deployment may never reach.
 
 ---
 
@@ -417,7 +430,11 @@ Order 2: grant_write → grant_read
 Different finals! CC violation!
 ```
 
-To fix: Make `grant_write` guard on `read=true`.
+To fix: repair the other way, so the rule reads "write implies read": when `write` is granted
+without `read`, the repair grants `read` instead of revoking `write`. Both orders then end at
+`{read=true, write=true}`. (Guarding `grant_write` on `read=true` does not fix it: the guard reads
+a variable another event writes, so `grant_write` first is a no-op and the orders still differ, as
+in the guarded `ship` above.)
 
 ### Example 3: WFC Cycle (Termination Failure)
 
@@ -515,6 +532,24 @@ just cannot be serialized or independently re-certified.
 
 ## Common Misconceptions
 
+### "Redelivered events are harmless"
+
+**Only for some events.** The guarantee is about orderings of one multiset of events, each
+delivered once. An at-least-once transport can deliver an event twice. A duplicate is absorbed
+exactly when the event is idempotent (applying it twice equals applying it once) and commutes with
+what arrived between the copies; a non-idempotent event delivered twice diverges from delivering
+it once ([`AtLeastOnce.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/AtLeastOnce.v): `alo_absorbed`, `non_idempotent_diverges`).
+`Build` tells you which events need deduplication: `Report.NotIdempotent` lists them, and the
+report prints `Delivery: exactly once for ...`. A counter increment is the typical case; setting a
+flag is not.
+
+Under causal delivery there is one more rule: a redelivered copy must not arrive after an event
+that causally follows the original. Idempotence alone does not save you there: `add` then `remove`
+then a late duplicate `add` sets a flag that exactly-once delivery leaves cleared
+(`late_duplicate_diverges`).
+
+---
+
 ### "Events must commute"
 
 **False**. Events themselves don't need to commute. Their **normal forms** after compensation must converge:
@@ -540,6 +575,8 @@ machine.Apply(s, "ship")  // O(1) table lookup: step[ship][s]
 ```
 
 No repair functions execute at runtime. Everything is baked into lookup tables during `Build()`.
+(The exception is a lazy `BuildCompositional` machine, which has no global tables and runs the
+rules at `Apply` time; see the README's Compositional Verification section.)
 
 ---
 
@@ -563,6 +600,10 @@ Use this when you know some events are causally ordered (e.g., `pay` always befo
 
 **Narrower than it sounds**. The constraint is finite *per-variable domains* (no arbitrary strings or lists), which is what enables **exhaustive verification**. It is not a cap on the whole state space: `BuildCompositional` verifies each footprint component independently, so a machine whose global state space is astronomically large still certifies when it decomposes into small components. You trade unbounded domains for a mathematical proof of convergence you cannot get with infinite spaces.
 
+The finiteness is a property of gsm's verification, not of the theory: the convergence theorem
+holds on infinite domains under any well-founded repair potential (mechanized in
+[`GovernanceWF.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/GovernanceWF.v)). What an infinite domain costs is the exhaustive check.
+
 For business logic state machines (order workflows, authorization states, inventory counts), finite domains are natural.
 
 ---
@@ -574,7 +615,7 @@ For business logic state machines (order workflows, authorization states, invent
 CRDTs: `op1; op2 = op2; op1` (operations commute)
 gsm: `NF(op1; op2) = NF(op2; op1)` (normal forms converge)
 
-A CRDT is exactly the compensation-free corner of this: a governed machine whose operations were designed so repair never fires. Drop that design restriction and you still have convergence (normalization confluence), and the inclusion is **strict**: governed machines exist that no CRDT can express. This is machine-checked and axiom-free in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (full statement in [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)); gsm can even certify whether a given machine falls in the CRDT fragment.
+A CRDT is exactly the compensation-free corner of this: a governed machine whose operations were designed so repair never fires. Drop that design restriction and you still have convergence (normalization confluence), and the inclusion is **strict**: governed machines exist that no CRDT can express. Under causal delivery the correspondence is exact: a compensation-free governed system converges under causal delivery **iff** it is an op-based CRDT ([`CausalReplay.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CausalReplay.v), `compensation_free_exact`), so op-based CRDTs are precisely the compensation-free fragment. This is machine-checked and axiom-free in [`CRDT.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CRDT.v) (full statement in [SUBSUMPTION.md](https://github.com/blackwell-systems/normalization-confluence/blob/main/SUBSUMPTION.md)); gsm can even certify whether a given machine falls in the CRDT fragment.
 
 ---
 
