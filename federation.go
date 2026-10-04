@@ -309,7 +309,15 @@ type FedState struct {
 //   - each morphism must satisfy M1, validity preservation under shared-component overwrite
 //     (Prop 8.14), and its Map must touch only the declared Shared() variables.
 //   - every target event must commute with every change of the target's shared component that
-//     its source(s) can cause (cross-registry CC; a failure is a *CrossOrderError).
+//     its source(s) can cause (cross-registry CC, C1; a failure is a *CrossOrderError);
+//   - every pair of target events the target's own CC covers must still commute when the
+//     morphism repair runs after each of them (repaired CC, C2; a failure is a
+//     *SameTargetOrderError).
+//
+// C1 and C2 are checked statically, over every valid source state, so together they are
+// sufficient for every interleaving of independent events to converge in an acyclic
+// federation; a failure means the federation may diverge from the reported state, which a
+// particular run need not reach.
 //
 // This is the federated analogue of gsm's single-registry contract: a FedMachine only
 // exists if convergence is guaranteed.
@@ -428,8 +436,9 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	if err := f.verify(subOf); err != nil {
 		return nil, report, err
 	}
-	// Cross-registry CC: every target event commutes with every source-driven change of the
-	// target's shared component.
+	// Cross-registry CC (C1): every target event commutes with every source-driven change of the
+	// target's shared component. Repaired CC (C2): every pair of target events covered by the
+	// target's CC commutes with the repair between them. Both run per target, in one pass.
 	if err := f.verifyCrossOrder(m.comps); err != nil {
 		return nil, report, err
 	}
@@ -489,6 +498,8 @@ func (f *Federation) checksRun(cyclic bool) []string {
 		"shared variables: every Shared() variable belongs to its morphism's target",
 		fmt.Sprintf("M1: %d single-source morphism(s) write only Shared() variables, preserve target validity, and are source-determined", single),
 		fmt.Sprintf("R1/R2: %d resolver(s) write only shared variables, are source-determined, and preserve target validity", resolved),
+		"cross-registry CC (C1): every target event commutes with every source-driven change of its shared component",
+		"repaired CC (C2): every target event pair its own CC covers commutes with the morphism repair between the two events",
 	}
 	if cyclic {
 		checks = append(checks, "monotone cycles: every morphism and resolver is monotone (AllowMonotoneCycles); normal form by Kleene iteration")
