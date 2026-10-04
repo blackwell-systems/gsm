@@ -7,6 +7,125 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - Unreleased
+
+A trust-point release. Each condition a developer could get wrong in the v0.12.0 trust audit is now
+a check gsm runs, a default it picks, or an obligation the report names: event order across
+federated registries, declared-only pairs, invalid start states, closure footprints in
+`BuildCompositional`, monotone cycles over the states the Kleene iteration visits, certificate
+tables, projection staleness, resolver conflicts and the cycle opt-in scope. Merged from #19, #20,
+#21, #22, #23 and #24.
+
+### Upgrading from v0.12.0
+
+- **BREAKING: `BuildCompositional` rejects closure rules by default (#22).** A registry with any
+  closure rule (`Holds`, `Repair`, `Apply` or `Guard` written as a Go function) now fails with an
+  error naming the first one. A closure's footprint can only be tested by perturbation, which
+  misses a joint dependence on three or more outside variables. Write the rules with combinators
+  (no option needed, assurance unchanged), use `Build` (exact for any rule), or pass
+  `TrustClosureFootprints()`: `r.BuildCompositional(gsm.TrustClosureFootprints())`. With the option
+  the report's assurance is the new `AssuranceOracleComponentsTested` instead of
+  `AssuranceOracleComponents`; update code that compares it.
+- **`Export` writes format version 2 (#23).** The JSON `version` field is now `2`, and
+  `verification` gains `pairs` (the event pairs CC was checked for, by name) and `all_pairs`.
+  Version 2 only adds fields; readers that reject an unknown version must accept 2.
+- **Federations that read a shared variable in a target event are rejected (#19).** A target
+  event whose guard, effect or repair depends on a morphism-controlled (`Shared()`) variable no
+  longer builds; `Federation.Build`, `BuildCoordinated` and `Certify` return a
+  `*CrossOrderError` naming the event, the morphism and both results.
+- **The cycle opt-in no longer carries over (#23).** `Embed` and `EmbedCertified` do not copy a
+  sub-federation's `AllowMonotoneCycles` to the parent. A parent with a cycle must call
+  `AllowMonotoneCycles` itself; `Build`'s cycle error names the opted-in sub.
+- **A second resolver for a target panics (#23)** in `Resolve`, `Embed` and `EmbedCertified`,
+  instead of silently replacing the first.
+- **`AllowMonotoneCycles` checks more states (#20).** Monotonicity, source-determinacy, the
+  write mask and image validity are checked over every state the iteration can visit, not only
+  valid ones, so some cyclic federations that built under v0.12.0 are now rejected.
+- **Certificates with incomplete or forged tables are rejected (#21)** by `Certificate.Verify` and
+  `EmbedCertified`, and `EmbedCertified` rejects an internal closure that does not match its
+  certificate over the whole verified domain.
+- **`Int(min, max)` panics at declaration (#24)** when the range has more values than an int can
+  count (for example `Int(0, math.MaxInt)`).
+- **`Machine.Apply` normalizes an invalid input first (#24).** `Apply(s, e)` now equals
+  `Apply(Normalize(s), e)` for a state that violates an invariant.
+- **Runtime panics (#20, #21, #22).** A lazy `BuildCompositional` machine panics when a repair
+  chain exceeds the bound `Build` measured; `FedMachine` panics when a Map or Resolver writes a
+  non-shared variable, or when the monotone-cycle iteration reaches its cap or an invalid fixed
+  point. Each means a closure behaved differently at run time than when it was checked.
+- **Report text changed.** New lines: undeclared pairs and "GUARANTEED under causal delivery",
+  "Delivery: exactly once", "Saturation:", "Coordinated input", `REPAIR SYNTHESIZED`, and the
+  federation `Assurance` and checks.
+
+### Added
+- **Undeclared pairs are checked and reported (#24).** In declared-only mode (`Independent`),
+  `Build` checks every undeclared pair on the step tables without failing on it, and lists each
+  pair that does not commute in `Report.CausalOrderRequired` with a witness. New
+  `Report.PairsUndeclared`. The convergence line reads "GUARANTEED under causal delivery of the N
+  undeclared pair(s) above".
+- **`Report.NotIdempotent` (#24):** events whose second application changes the state, printed as
+  "Delivery: exactly once for ...". The multiset assumption is documented at `Machine.Apply`.
+- **`Report.Saturations` (#24):** rules whose write was clamped into a variable's range, printed
+  as a "Saturation:" line.
+- **`Report.Coordinated` (#24):** `BuildCoordinated` records each removed edge on its target
+  component's report, printed as a "Coordinated input" obligation.
+- **`TrustClosureFootprints()` and `AssuranceOracleComponentsTested` (#22).**
+  `BuildCompositional` takes variadic `CompositionalOption`s; existing calls compile unchanged.
+- **Cross-registry CC (#19).** `Federation.Build` checks that every target event commutes with
+  every change of the target's shared component that its sources can cause, along chains and for
+  resolved targets. New `CrossOrderError`.
+- **Versioned projections (#21).** `Projection.Version`, `Machine.MergeProjectionAfter(s, p, last)`
+  and `ErrStaleProjection`: a stale, unversioned or misaddressed projection is refused.
+  `MergeProjection` is unchanged.
+- **`FedReport.Assurance` and `FedReport.Checks` (#23)** state which federation-level checks ran
+  and that they are checked by gsm's Go code, not by the verified oracle.
+- **`Synthesis.Substituted` and `Synthesis.BuildError` (#23).** `String()` opens with
+  `REPAIR SYNTHESIZED` when `BuildOrSynthesize` returned a machine that does not use the declared
+  repairs.
+- **Export format version 2 (#23):** `verification.pairs` and `verification.all_pairs`.
+
+### Changed
+- **BREAKING: `BuildCompositional` rejects closure rules unless `TrustClosureFootprints()` is
+  passed (#22).** Combinator-only machines need no option.
+- **`Export` format version 1 -> 2 (#23)**, additive.
+- **`Machine.Apply` normalizes an input that violates an invariant (#24)** on table and lazy
+  machines; the zero state keeps its table entry.
+- **`Embed` and `EmbedCertified` do not propagate `AllowMonotoneCycles` (#23)**, and panic on a
+  second resolver for a target, as `Resolve` does. `EmbedCertified` routes through `Embed`'s
+  helpers.
+- **`AllowMonotoneCycles` verification (#20)** runs over the visited states (each valid local part
+  with every in-domain shared value), in the new `verifyMonotoneVisited`, after the existing
+  valid-state check.
+- **`EmbedCertified` binds internal closures (#21):** each internal Map or Resolver is run over
+  every valid source (combination) and valid target state, as `Embed` does. It no longer saves
+  verification time over `Embed` for internal morphisms.
+- **`Certificate.Verify` table checks (#21):** every table source is a provided component, one
+  valid source id per source per row, no duplicate rows, one row per valid source state
+  (combination), at most one table per target, and monotone tables for a cyclic `Monotone`
+  certificate. Docs state the digest binds integrity, not authorship.
+- **`BuildCompositional` fails fast on huge domains (#22):** a variable whose domain does not fit
+  its bit field, or a closure perturbation test above 2^28 calls, is rejected before any check.
+- **Docs.** `Independent`, `SetInt`, `Int`, `MergeProjection`, the monotone-cycle paragraphs and
+  the federation contract state the new checks and obligations.
+
+### Fixed
+- **Cross-registry event order was never checked (#19).** A target event reading a shared
+  variable could diverge against a source event, and `Federation.Build` accepted it.
+- **Declared-only mode hid non-commuting pairs (#24)** behind "Convergence: GUARANTEED".
+- **A hand-built invalid start state voided order independence (#24).**
+- **Monotone cycles could depend on declaration order (#20):** a Map non-monotone only on an
+  invalid visited state built, and the result changed with the order morphisms were declared.
+  Reaching `kleeneCap` returned a non-fixed point silently; it now panics.
+- **`BuildCompositional` accepted a closure that broke its footprint (#22)**, and the lazy
+  runtime could hang on a repair cycle; repairs are now bounded and the loop panics with the
+  input, the state reached and the last invariant repaired.
+- **`BuildCompositional` hung on `Int(0, math.MaxInt)` (#22, #24).**
+- **`EmbedCertified` checked internal closures at one target state only (#21)**, and the runtime
+  image check did not catch a write to a non-shared variable (#21).
+- **`Certificate.Verify` accepted truncated or forged tables (#21).**
+- **A foreign `Var` in `Writes` or `Watches` panicked with an index error (#24);** every build
+  path now returns an error naming the rule and the variable.
+- **A second resolver silently replaced the first (#23).**
+
 ## [0.12.0] - 2026-10-03
 
 A soundness release. `Build` in v0.11.0 and earlier certified some machines that do not converge
@@ -689,7 +808,8 @@ Federated registry networks: gsm now composes multiple registries connected by d
 - Full test suite covering WFC, CC, compensation, and failures
 - Documentation with usage examples, API reference, and design rationale
 
-[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/blackwell-systems/gsm/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/blackwell-systems/gsm/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/blackwell-systems/gsm/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/blackwell-systems/gsm/compare/v0.9.2...v0.10.0
