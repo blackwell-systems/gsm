@@ -28,6 +28,85 @@ import "fmt"
 // change masked, for example a guard `a && b && c` over three outside variables)
 // is not detected. For closure rules, footprint conformance is therefore tested,
 // not proved. Combinator rules have no such gap: they are checked syntactically.
+// BuildCompositional therefore accepts closure rules only with the
+// TrustClosureFootprints option, and reports the result as
+// AssuranceOracleComponentsTested.
+
+// syntactic reports whether the event's footprint is checked exactly from its
+// combinator trees (effect, and guard if any), rather than tested by perturbation.
+func (ev eventDef) syntactic() bool {
+	return ev.effectAST != nil && (ev.guard == nil || ev.guardAST != nil)
+}
+
+// syntactic reports whether the invariant's footprint is derived from its combinator
+// trees (conformant by construction), rather than tested by perturbation.
+func (inv invariantDef) syntactic() bool {
+	return inv.predAST != nil && inv.repairAST != nil
+}
+
+// maxPerturbationCalls caps the closure calls the footprint test of one closure rule
+// may make. The test runs the closure once per component state for every single and
+// pair change of the outside variables, so its cost is the component's state count
+// times (1 + S + P), where S sums (domain - 1) over the outside variables and P sums
+// the products of that over pairs of them. A wide outside variable (an Int over
+// millions of values) makes that astronomically large; BuildCompositional returns an
+// error up front instead of running for hours.
+const maxPerturbationCalls = 1 << 28
+
+// perturbationCalls estimates the closure calls perturbing outside a footprint
+// costs per component state (1 + S + P, see maxPerturbationCalls), in float64 so a
+// huge domain cannot overflow. widest names the widest outside variable.
+func (r *Registry) perturbationCalls(footprint map[int]bool) (calls float64, widest int) {
+	var sum, sumSq float64
+	widest = -1
+	for i, v := range r.vars {
+		if footprint[i] {
+			continue
+		}
+		d := float64(v.domain - 1)
+		sum += d
+		sumSq += d * d
+		if widest < 0 || v.domain > r.vars[widest].domain {
+			widest = i
+		}
+	}
+	return 1 + sum + (sum*sum-sumSq)/2, widest
+}
+
+// checkPerturbationCost returns an error, before any closure runs, when testing a
+// closure rule's footprint in component c (count states) would take more than
+// maxPerturbationCalls closure calls. Combinator rules are checked syntactically and
+// cost nothing here.
+func (r *Registry) checkPerturbationCost(c *component, count int) error {
+	check := func(kind, name string, footprint []int, perCall float64) error {
+		calls, widest := r.perturbationCalls(indexSet(footprint))
+		total := float64(count) * calls * perCall
+		if total <= maxPerturbationCalls {
+			return nil
+		}
+		return fmt.Errorf("gsm: testing the footprint of closure %s %q would take about %.3g closure calls "+
+			"(more than %d): its component has %d states and the widest variable outside its footprint, %q, "+
+			"has %d values. Write the rule with combinators (checked exactly, no perturbation), narrow the "+
+			"domains, or use Build", kind, name, total, maxPerturbationCalls, count,
+			r.vars[widest].name, r.vars[widest].domain)
+	}
+	for _, ei := range c.events {
+		if ev := r.events[ei]; !ev.syntactic() {
+			if err := check("event", ev.name, ev.writes, 1); err != nil {
+				return err
+			}
+		}
+	}
+	for _, ii := range c.invariants {
+		if inv := r.invariants[ii]; !inv.syntactic() {
+			// The repair and the check are each tested.
+			if err := check("invariant", inv.name, inv.footprint, 2); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 func indexSet(idx []int) map[int]bool {
 	m := make(map[int]bool, len(idx))
@@ -149,7 +228,7 @@ func (r *Registry) verifyFootprints(c *component) error {
 	for _, ei := range c.events {
 		ev := r.events[ei]
 		ws := indexSet(ev.writes)
-		if ev.effectAST != nil && (ev.guard == nil || ev.guardAST != nil) {
+		if ev.syntactic() {
 			reads := ev.effectAST.readVars()
 			if ev.guardAST != nil {
 				reads = append(reads, ev.guardAST.vars()...)
@@ -183,7 +262,7 @@ func (r *Registry) verifyFootprints(c *component) error {
 	}
 	for _, ii := range c.invariants {
 		inv := r.invariants[ii]
-		if inv.predAST != nil && inv.repairAST != nil {
+		if inv.syntactic() {
 			continue // footprint derived from the AST: conformant by construction
 		}
 		fp := indexSet(inv.footprint)

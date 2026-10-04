@@ -400,6 +400,9 @@ m, rep, err := r.BuildCompositional()
 // rep.Components          -> number of independent footprint components
 // rep.MaxComponentStates  -> size of the largest component's subspace (the real cost)
 // rep.FootprintChecked    -> footprint conformance held
+
+// Rules written as Go closures need an explicit opt-in (see below):
+m, rep, err = r.BuildCompositional(gsm.TrustClosureFootprints())
 ```
 
 **How it works.** gsm partitions the variables into footprint-connected components (union-find
@@ -417,15 +420,27 @@ For combinator rules the check is syntactic and exact. A closure is opaque, so g
 every state of its component, it changes each outside variable, and each pair of outside
 variables, to every other value and confirms the closure's result does not change. That catches
 dependence on one or two outside variables (such as `paid && inStock`), but not a closure that
-depends only on three or more outside variables jointly. If your rules are closures with
-wide guards, use `Build` (exact, no footprint assumption) or the combinator vocabulary.
+depends only on three or more outside variables jointly. Because of that gap, `BuildCompositional`
+accepts closure rules only when you pass `gsm.TrustClosureFootprints()`, acknowledging that each
+closure reads and writes only its declared footprint and is deterministic. Without the option, a
+registry with any closure rule (`Holds`/`Repair`/`Apply`/`Guard`) is rejected with an error naming
+the first one. With it, `Report.Assurance` is `AssuranceOracleComponentsTested`, whose text says
+the footprint check for closures is a perturbation test, not exact. If your rules are closures
+with wide guards, use `Build` (exact, no footprint assumption) or the combinator vocabulary, which
+`BuildCompositional` accepts with no option.
 
 **Trade-offs.** The returned `Machine` is *lazy*: it computes `Apply`/`Normalize` at runtime from
 the rules instead of via a precomputed table lookup, and `Export` is unavailable (there are no
 global tables to serialize). Each closure result is checked to be a state of the machine as it is
-computed, and `Apply` panics if one is not. Preconditions: every invariant declares its footprint and every
-event its write set (both automatic with the combinator vocabulary), every event reads only what
-it writes, the zero state is valid, and the machine fits in 64 bits of state.
+computed, and `Apply` panics if one is not. `Apply` and `Normalize` also panic, with an
+explanation, if the repairs take more steps than the build verified any repair chain can (the sum
+of each component's deepest chain): that only happens when a rule breaks its footprint or is not
+deterministic, and the repairs could otherwise cycle forever. Preconditions: every invariant
+declares its footprint and every event its write set (both automatic with the combinator
+vocabulary), every event reads only what it writes, the zero state is valid, every variable's
+range fits its bit field, and the machine fits in 64 bits of state. A closure whose footprint test
+would take more than 2^28 closure calls (wide variables outside its footprint) is rejected up
+front.
 
 ## Verification Report
 
@@ -506,7 +521,10 @@ certified the machine:
   tables; the rules oracle did not run, and `Report.RulesOracleSkipped` says why.
 - `AssuranceOracleComponents` (`BuildCompositional`): the oracle certified every component's
   tables. That cross-component pairs commute rests on gsm's footprint check, which the oracle does
-  not see.
+  not see; with combinator rules that check is exact.
+- `AssuranceOracleComponentsTested` (`BuildCompositional` with `TrustClosureFootprints`, on a
+  machine with closure rules): as above, but the footprint check for closures is a perturbation
+  test, not exact.
 
 **The rules oracle in the gate (`Build`).** After the table oracle, `Build` also runs the rules
 oracle, `checkBuild` from the proof (`AstChecker.v`), generated as Go the same way. It reads the

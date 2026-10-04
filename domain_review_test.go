@@ -32,7 +32,7 @@ func TestReview_BuildReportNamesDomainRejection(t *testing.T) {
 // R2: BuildCompositional records a domain rejection as a footprint violation.
 func TestReview_CompositionalReportNamesDomainRejection(t *testing.T) {
 	r := capped("rev_comp", repairToZero, func(s State, n Var) State { return rawState(s, n, 3) })
-	_, rep, err := r.BuildCompositional()
+	_, rep, err := r.BuildCompositional(TrustClosureFootprints())
 	if err == nil {
 		t.Fatal("BuildCompositional accepted")
 	}
@@ -169,7 +169,7 @@ func TestReview_DeterministicMessages(t *testing.T) {
 	var first, firstC string
 	for i := 0; i < 50; i++ {
 		_, _, err := mk().Build()
-		_, _, errC := mk().BuildCompositional()
+		_, _, errC := mk().BuildCompositional(TrustClosureFootprints())
 		if i == 0 {
 			first, firstC = err.Error(), errC.Error()
 			continue
@@ -206,7 +206,7 @@ func TestReview_NoFalseRejects(t *testing.T) {
 	if _, _, err = r.Build(); err != nil {
 		t.Errorf("Build false reject: %v", err)
 	}
-	m, _, err := r.BuildCompositional()
+	m, _, err := r.BuildCompositional(TrustClosureFootprints())
 	if err != nil {
 		t.Fatalf("BuildCompositional false reject: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestReview_LazyApplyGuardFalseOutOfDomainInput(t *testing.T) {
 	n := r.Int("n", 0, 2)
 	r.Event("noop").Writes(n).Guard(func(s State) bool { return false }).
 		Apply(func(s State) State { return s.SetInt(n, 0) }).Add()
-	m, _, err := r.BuildCompositional()
+	m, _, err := r.BuildCompositional(TrustClosureFootprints())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestReview_LazyApplyForeignInputBlamesEffect(t *testing.T) {
 	r := NewRegistry("rev_blame")
 	n := r.Int("n", 0, 2)
 	r.Event("set2").Writes(n).Apply(func(s State) State { return s.SetInt(n, 2) }).Add()
-	m, _, err := r.BuildCompositional()
+	m, _, err := r.BuildCompositional(TrustClosureFootprints())
 	if err != nil {
 		t.Fatal(err)
 	}

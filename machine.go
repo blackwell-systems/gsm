@@ -35,6 +35,9 @@ type Machine struct {
 	lazy       bool
 	invariants []invariantDef
 	eventDefs  []eventDef
+	// repairBound is the most repair steps Normalize may take on a lazy machine: the
+	// sum of each component's deepest verified repair chain (see lazyRepairBoundError).
+	repairBound int
 }
 
 // Name returns the machine's name.
@@ -102,7 +105,11 @@ func (m *Machine) Apply(s State, event string) State {
 // Normalize returns the normal form of a state.
 // If the state is already valid, returns it unchanged. The input must be a state of this
 // machine, as for Apply. On a lazy machine it checks the input, runs the repairs, and
-// panics on an input or a result outside the machine, as Apply does.
+// panics on an input or a result outside the machine, as Apply does. It also panics,
+// rather than looping forever, when the repairs take more steps than BuildCompositional
+// verified any repair chain can (the sum of each component's deepest chain), which
+// happens only when a rule breaks its declared footprint or is not deterministic; Apply
+// normalizes the same way.
 func (m *Machine) Normalize(s State) State {
 	if m.lazy {
 		m.mustBeInput("Normalize", s)
@@ -156,10 +163,15 @@ func (m *Machine) mustBeState(kind, name, part string, in, out State) State {
 }
 
 func (m *Machine) lazyNormalize(s State) State {
-	for !m.allHold(s) {
+	in, last := s, ""
+	for steps := 0; !m.allHold(s); steps++ {
+		if steps == m.repairBound {
+			panic(m.lazyRepairBoundError(in, s, last, m.repairBound))
+		}
 		for _, inv := range m.invariants {
 			if !inv.check(s) {
 				s = m.mustBeState("invariant", inv.name, "repair", s, inv.repair(s))
+				last = inv.name
 				break
 			}
 		}

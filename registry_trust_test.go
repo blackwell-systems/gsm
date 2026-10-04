@@ -141,7 +141,7 @@ func TestApply_NormalizesInvalidStart(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	r2, bad2 := invalidStartRegistry()
-	lm, _, err := r2.BuildCompositional()
+	lm, _, err := r2.BuildCompositional(TrustClosureFootprints())
 	if err != nil {
 		t.Fatalf("BuildCompositional: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestForeignVar_WritesWatches(t *testing.T) {
 		}
 		for name, build := range map[string]func(*Registry) error{
 			"Build":              func(r *Registry) error { _, _, err := r.Build(); return err },
-			"BuildCompositional": func(r *Registry) error { _, _, err := r.BuildCompositional(); return err },
+			"BuildCompositional": func(r *Registry) error { _, _, err := r.BuildCompositional(TrustClosureFootprints()); return err },
 			"Synthesize":         func(r *Registry) error { _, err := r.Synthesize(); return err },
 		} {
 			func() {
@@ -410,7 +410,7 @@ func TestForeignVar_WritesWatches(t *testing.T) {
 	_ = r.Bool("x3")
 	x4 := r.Bool("x4")
 	r.Event("e").Writes(sameIndex).Apply(func(s State) State { return s.SetBool(x4, true) }).Add()
-	if _, _, err := r.BuildCompositional(); err == nil || !strings.Contains(err.Error(), `"o4"`) {
+	if _, _, err := r.BuildCompositional(TrustClosureFootprints()); err == nil || !strings.Contains(err.Error(), `"o4"`) {
 		t.Fatalf("BuildCompositional: %v", err)
 	}
 }
