@@ -118,8 +118,8 @@ There is no exemption for a package that makes machines.
 What the gate certifies: each listed machine (a registry, including each
 component of a federation) has the property `Build` checks, decided by the
 checkers extracted from the proof. Federation-level checks (morphisms,
-resolvers, acyclicity, the monotone-cycle check) are done by `Build`, not by an
-extracted checker.
+resolvers, the event-order checks C1 and C2, acyclicity, the monotone-cycle
+check) are done by `Build`, not by an extracted checker.
 
 To run it locally, with the checkers built:
 

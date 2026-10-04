@@ -9,14 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.13.0] - Unreleased
 
-A trust-point release. Each condition a developer could get wrong in the v0.12.0 trust audit is now
-a check gsm runs, a default it picks, or an obligation the report names: event order across
-federated registries, declared-only pairs, invalid start states, closure footprints in
+A trust-point release. Every condition a developer could get wrong in the v0.12.0 trust audit is
+now a check gsm runs, a default it picks, or an obligation the report names and explains: event
+order across federated registries (C1) and between two events of one target under the morphism
+repair (C2), declared-only pairs, duplicate delivery, invalid start states, closure footprints in
 `BuildCompositional`, monotone cycles over the states the Kleene iteration visits, certificate
-tables, projection staleness, resolver conflicts and the cycle opt-in scope. Merged from #19, #20,
-#21, #22, #23 and #24.
+tables, projection staleness, resolver conflicts and the cycle opt-in scope. And a certified
+sub-federation now executes the verified tables it was certified with, rather than the closures
+they were checked against. Merged from #19, #20, #21, #22, #23, #24, #26 and #27.
 
-### Upgrading from v0.12.0
+### Breaking / behavior changes (upgrading from v0.12.0)
+
+No exported identifier is removed. One signature gains variadic options (`BuildCompositional`),
+which keeps existing calls compiling. What can start failing, or behave differently, and what to do:
 
 - **BREAKING: `BuildCompositional` rejects closure rules by default (#22).** A registry with any
   closure rule (`Holds`, `Repair`, `Apply` or `Guard` written as a Go function) now fails with an
@@ -26,53 +31,108 @@ tables, projection staleness, resolver conflicts and the cycle opt-in scope. Mer
   `TrustClosureFootprints()`: `r.BuildCompositional(gsm.TrustClosureFootprints())`. With the option
   the report's assurance is the new `AssuranceOracleComponentsTested` instead of
   `AssuranceOracleComponents`; update code that compares it.
-- **`Export` writes format version 2 (#23).** The JSON `version` field is now `2`, and
-  `verification` gains `pairs` (the event pairs CC was checked for, by name) and `all_pairs`.
-  Version 2 only adds fields; readers that reject an unknown version must accept 2.
-- **Federations that read a shared variable in a target event are rejected (#19).** A target
-  event whose guard, effect or repair depends on a morphism-controlled (`Shared()`) variable no
-  longer builds; `Federation.Build`, `BuildCoordinated` and `Certify` return a
-  `*CrossOrderError` naming the event, the morphism and both results.
+- **Federations whose events race a morphism are rejected (#19, #26).** `Federation.Build`,
+  `BuildCoordinated` and `Certify` now check event order across the network and return an error
+  for a federation that may diverge:
+  - C1, cross-registry CC (#19): a target event that does not commute with a change of its
+    shared component a source can cause (typically its guard, effect or the target's repair reads
+    a `Shared()` variable) returns a `*CrossOrderError` naming the morphism, the source normal
+    forms, the target event and state, and both results.
+  - C2, repaired CC (#26): two target events that commute on the target alone but not with the
+    morphism repair between them (one writes a shared variable the repair overwrites before the
+    other reads it) return a `*SameTargetOrderError` naming both events, the target, the source
+    and target states, and both results. Only pairs the target's own CC covers are checked (every
+    pair, or the declared `Independent` pairs).
+  Both are static checks over every valid source state, so the witness may be a state a given
+  run never reaches; the message says the federation *may* diverge. To fix one, record the fact
+  locally and let an invariant derive the outcome, or move the dependency into the morphism.
 - **The cycle opt-in no longer carries over (#23).** `Embed` and `EmbedCertified` do not copy a
   sub-federation's `AllowMonotoneCycles` to the parent. A parent with a cycle must call
   `AllowMonotoneCycles` itself; `Build`'s cycle error names the opted-in sub.
 - **A second resolver for a target panics (#23)** in `Resolve`, `Embed` and `EmbedCertified`,
-  instead of silently replacing the first.
+  instead of silently replacing the first. Declare one resolver per target.
 - **`AllowMonotoneCycles` checks more states (#20).** Monotonicity, source-determinacy, the
-  write mask and image validity are checked over every state the iteration can visit, not only
-  valid ones, so some cyclic federations that built under v0.12.0 are now rejected.
-- **Certificates with incomplete or forged tables are rejected (#21)** by `Certificate.Verify` and
-  `EmbedCertified`, and `EmbedCertified` rejects an internal closure that does not match its
-  certificate over the whole verified domain.
+  write mask and image validity are checked over every state the iteration can visit (each valid
+  local part with every in-domain shared value), not only valid states, so some cyclic federations
+  that built under v0.12.0 are now rejected. They could depend on morphism declaration order.
+- **Certificates are checked harder (#21).** `Certificate.Verify` and `EmbedCertified` reject
+  incomplete or forged tables (a missing or duplicate row, an invalid source id, a source that is
+  not a provided component, two tables for one target, non-monotone tables on a cyclic `Monotone`
+  certificate), and `EmbedCertified` rejects an internal closure that does not match its table on
+  every valid source and target state. Re-issue with `Certify` if one is refused.
+- **`EmbedCertified` refuses wiring its certificate does not describe (#27):** an outer morphism
+  between two components of the same certified sub, and an outer `Resolve` for a target whose
+  sources are all inside the sub. Both used to build and were left unverified. Put the wiring in
+  the sub and re-certify, or use `Embed`.
+- **A certified sub's closures no longer run at run time (#27).** `Apply`, `Normalize`, `IsValid`
+  and `SharedProjection` repair a certified sub's internal targets by a lookup in the certificate's
+  verified table, so a side effect in its `Map` or `Resolver` (logging, a metric, a counter) does
+  not happen. Results are unchanged on every certified state. Closures still run on a cyclic
+  network, on a certified target that also has an outer writer, and for `SharedProjection` along a
+  morphism into a resolved target; `FedReport.Runtime` says which.
+- **A foreign `FedState` panics on a certified sub (#27).** A component state outside the certified
+  domain (valid source and target states) makes `Normalize` and `Apply` panic, naming the
+  component, the state and the sub; `IsValid` returns false and `SharedProjection` an error. Before,
+  a closure ran on it. Only states from this machine's `NewState`, `Apply` or `Normalize` are in
+  the domain.
 - **`Int(min, max)` panics at declaration (#24)** when the range has more values than an int can
-  count (for example `Int(0, math.MaxInt)`).
+  count (for example `Int(0, math.MaxInt)`), naming the variable. Narrow the range.
 - **`Machine.Apply` normalizes an invalid input first (#24).** `Apply(s, e)` now equals
-  `Apply(Normalize(s), e)` for a state that violates an invariant.
-- **Runtime panics (#20, #21, #22).** A lazy `BuildCompositional` machine panics when a repair
-  chain exceeds the bound `Build` measured; `FedMachine` panics when a Map or Resolver writes a
-  non-shared variable, or when the monotone-cycle iteration reaches its cap or an invalid fixed
-  point. Each means a closure behaved differently at run time than when it was checked.
-- **Report text changed.** New lines: undeclared pairs and "GUARANTEED under causal delivery",
-  "Delivery: exactly once", "Saturation:", "Coordinated input", `REPAIR SYNTHESIZED`, and the
-  federation `Assurance` and checks.
+  `Apply(Normalize(s), e)` for a state that violates an invariant (restored from storage, or built
+  with `Set`); the zero state is applied as it is. Code that relied on applying an event to an
+  invalid state as is sees the normalized result.
+- **Runtime panics replace silent misbehavior (#20, #21, #22).** A lazy `BuildCompositional`
+  machine panics when a repair chain exceeds the bound `Build` measured; `FedMachine` panics when a
+  `Map` or `Resolver` writes a non-shared variable, or when the monotone-cycle iteration reaches its
+  cap or an invalid fixed point. Each means a closure behaved differently at run time than when it
+  was checked (impure or nondeterministic).
+- **`BuildCompositional` fails fast on huge domains (#22):** a variable whose domain does not fit
+  its bit field, or a closure perturbation test above 2^28 calls, is rejected before any check
+  (it used to hang, for example on `Int(0, math.MaxInt)`).
+- **A foreign `Var` in `Writes` or `Watches` is an error (#24)** naming the rule and the variable,
+  on every build path, instead of an index panic (or silent acceptance when the index was in
+  range).
+- **`Export` writes format version 2 (#23).** The JSON `version` field is now `2`, and
+  `verification` gains `pairs` (the event pairs CC was checked for, by name) and `all_pairs`.
+  Version 2 only adds fields; readers that reject an unknown version must accept 2.
+- **Report text changed.** New `Report` lines: undeclared pairs and "GUARANTEED under causal
+  delivery", "Delivery: exactly once", "Saturation:", "Coordinated input"; `Synthesis` opens with
+  `REPAIR SYNTHESIZED` when it substituted the repairs; `FedReport` prints its `Assurance`, the
+  federation checks (now including C1 and C2) and the certified-runtime lines. Code that parses
+  report text should switch to the fields.
 
 ### Added
+- **Repaired CC (C2) for federations (#26).** `Federation.Build` checks that every pair of target
+  events the target's own CC covers still commutes when the morphism or resolver repair runs after
+  each of them, over every image its sources produce and every consistent target state. New
+  `SameTargetOrderError` (`Federation`, `Morphism`, `Target`, `First`, `Second`, `State`,
+  `Source`, `FirstThenSecond`, `SecondThenFirst`). `FedReport.Checks` lists `cross-registry CC
+  (C1)` and `repaired CC (C2)`. Static C1 + C2 are sufficient for every interleaving of independent
+  events to converge in an acyclic federation (normalization-confluence `FederationEvents.v`,
+  `fed_events_commute`; `FederationEventsConverse.v`, `static_c1_c2_gc`).
+- **Cross-registry CC (C1) (#19).** `Federation.Build` checks that every target event commutes
+  with every change of the target's shared component that its sources can cause, along chains and
+  for resolved targets. New `CrossOrderError`.
+- **Certified execution (#27).** A `FedMachine` with `EmbedCertified` subs runs the certificate's
+  verified tables for their internal morphisms and resolvers. `Build` deep-copies the tables,
+  checks their digest against the certificate and against the live closures, re-checks the copy and
+  compiles that copy, so a `Certificate` changed during or after `Build` cannot reach the machine.
+  New `FedReport.Runtime`, printed by `String()`, states per certified sub whether its internal
+  targets execute tables, and if not all of them, how many and why.
 - **Undeclared pairs are checked and reported (#24).** In declared-only mode (`Independent`),
   `Build` checks every undeclared pair on the step tables without failing on it, and lists each
   pair that does not commute in `Report.CausalOrderRequired` with a witness. New
   `Report.PairsUndeclared`. The convergence line reads "GUARANTEED under causal delivery of the N
   undeclared pair(s) above".
 - **`Report.NotIdempotent` (#24):** events whose second application changes the state, printed as
-  "Delivery: exactly once for ...". The multiset assumption is documented at `Machine.Apply`.
+  "Delivery: exactly once for ...". These need deduplication under at-least-once delivery. The
+  multiset assumption is documented at `Machine.Apply`.
 - **`Report.Saturations` (#24):** rules whose write was clamped into a variable's range, printed
   as a "Saturation:" line.
 - **`Report.Coordinated` (#24):** `BuildCoordinated` records each removed edge on its target
   component's report, printed as a "Coordinated input" obligation.
 - **`TrustClosureFootprints()` and `AssuranceOracleComponentsTested` (#22).**
   `BuildCompositional` takes variadic `CompositionalOption`s; existing calls compile unchanged.
-- **Cross-registry CC (#19).** `Federation.Build` checks that every target event commutes with
-  every change of the target's shared component that its sources can cause, along chains and for
-  resolved targets. New `CrossOrderError`.
 - **Versioned projections (#21).** `Projection.Version`, `Machine.MergeProjectionAfter(s, p, last)`
   and `ErrStaleProjection`: a stale, unversioned or misaddressed projection is refused.
   `MergeProjection` is unchanged.
@@ -96,20 +156,32 @@ tables, projection staleness, resolver conflicts and the cycle opt-in scope. Mer
   with every in-domain shared value), in the new `verifyMonotoneVisited`, after the existing
   valid-state check.
 - **`EmbedCertified` binds internal closures (#21):** each internal Map or Resolver is run over
-  every valid source (combination) and valid target state, as `Embed` does. It no longer saves
-  verification time over `Embed` for internal morphisms.
+  every valid source (combination) and valid target state, as `Embed` does. Since #27 the runtime
+  does not depend on this binding; it is kept as an early mismatch diagnostic and so that the
+  build-time checks that evaluate closures (C1, C2, the monotone checks) speak for the tables.
 - **`Certificate.Verify` table checks (#21):** every table source is a provided component, one
   valid source id per source per row, no duplicate rows, one row per valid source state
   (combination), at most one table per target, and monotone tables for a cyclic `Monotone`
   certificate. Docs state the digest binds integrity, not authorship.
-- **`BuildCompositional` fails fast on huge domains (#22):** a variable whose domain does not fit
-  its bit field, or a closure perturbation test above 2^28 calls, is rejected before any check.
-- **Docs.** `Independent`, `SetInt`, `Int`, `MergeProjection`, the monotone-cycle paragraphs and
-  the federation contract state the new checks and obligations.
+- **`BuildCompositional` fails fast on huge domains (#22)** (see above).
+- **Docs.** The README, THEORY, CONCEPTS, FEDERATION-CONCEPTS, ARCHITECTURE, EXPLAINER,
+  CERTIFICATE-DESIGN and HOLONOMY-COORDINATION-DESIGN documents match this release: C1 and C2 are
+  both checked and statically sufficient (the exact condition quantifies over reachable states);
+  the delivery obligations (which events need deduplication, and that a redelivered copy must not
+  overtake a causal successor of its event); op-based CRDTs as exactly the compensation-free
+  fragment under causal delivery; convergence for any well-founded repair potential; the
+  mechanized soundness of the holonomy-minimal coordination plan, and that such a plan must name
+  its authority root. Two examples that did not converge as written were corrected (EXPLAINER's
+  order machine and a CONCEPTS fix suggestion), and stale claims were removed (EXPLAINER called
+  `CoordinationPlan` minimal; CERTIFICATE-DESIGN described a fallback to full re-verification that
+  `Build` does not do).
 
 ### Fixed
 - **Cross-registry event order was never checked (#19).** A target event reading a shared
   variable could diverge against a source event, and `Federation.Build` accepted it.
+- **Two target events could diverge through the morphism repair (#26)** although each registry's
+  CC and the cross-registry check passed (normalization-confluence `c2_counterexample`).
+- **An outer morphism or resolver inside a certified sub was accepted unverified (#27).**
 - **Declared-only mode hid non-commuting pairs (#24)** behind "Convergence: GUARANTEED".
 - **A hand-built invalid start state voided order independence (#24).**
 - **Monotone cycles could depend on declaration order (#20):** a Map non-monotone only on an
@@ -122,9 +194,20 @@ tables, projection staleness, resolver conflicts and the cycle opt-in scope. Mer
 - **`EmbedCertified` checked internal closures at one target state only (#21)**, and the runtime
   image check did not catch a write to a non-shared variable (#21).
 - **`Certificate.Verify` accepted truncated or forged tables (#21).**
-- **A foreign `Var` in `Writes` or `Watches` panicked with an index error (#24);** every build
-  path now returns an error naming the rule and the variable.
+- **A foreign `Var` in `Writes` or `Watches` panicked with an index error (#24).**
 - **A second resolver silently replaced the first (#23).**
+
+### Performance
+- **Certified repair is a table lookup (#27).** Apple M1 Pro, tables vs closures: a single-source
+  repair 6.8 ns vs 39.7 ns, a two-source resolver 8.1 ns vs 184 ns (0 allocations vs 2), and a
+  whole `FedMachine.Apply` 96 ns vs 276 ns (resolver sub) and 102 ns vs 168 ns (three-component
+  chain). The compiled tables take one `uint64` per row plus one `int32` per encoding of each
+  source component.
+- **C2 costs** 4 table lookups per checked pair per consistent target state, within a constant of
+  the target's own CC check (#26); C1 stays within the existing M1 enumeration bound (#19).
+- **`Build` is about 10% slower** on `BenchmarkBuild_WideCounters10` (the idempotence pass and
+  saturation recording), and `Machine.Apply` about 0.5 ns slower (the normal-form lookup for an
+  invalid input) (#24). `EmbedCertified` costs what `Embed` spends on internal morphisms (#21).
 
 ## [0.12.0] - 2026-10-03
 
