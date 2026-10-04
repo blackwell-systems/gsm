@@ -55,7 +55,7 @@ func TestPayShip_NotCertified(t *testing.T) {
 // TestPayShip_CompositionalRejects: BuildCompositional rejects pay/ship on the
 // footprint check (ship's guard reads paid, outside its declared footprint).
 func TestPayShip_CompositionalRejects(t *testing.T) {
-	_, _, err := payShip().BuildCompositional()
+	_, _, err := payShip().BuildCompositional(TrustClosureFootprints())
 	if err == nil {
 		t.Fatal("BuildCompositional certified the non-convergent pay/ship machine")
 	}
@@ -98,7 +98,7 @@ func TestWriteWrite_NotCertified(t *testing.T) {
 	if _, rep, err := writeWrite().Build(); err == nil {
 		t.Fatalf("Build certified two events overwriting the same variable:\n%s", rep)
 	}
-	_, rep, err := writeWrite().BuildCompositional()
+	_, rep, err := writeWrite().BuildCompositional(TrustClosureFootprints())
 	if err == nil {
 		t.Fatalf("BuildCompositional certified two events overwriting the same variable:\n%s", rep)
 	}
@@ -112,7 +112,7 @@ func TestWriteWrite_NotCertified(t *testing.T) {
 // cause, and WFC and CC are shown as not evaluated (the build stopped before
 // either ran), never as "WFC: FAIL".
 func TestCompositionalReport_FootprintViolation(t *testing.T) {
-	_, rep, err := payShip().BuildCompositional()
+	_, rep, err := payShip().BuildCompositional(TrustClosureFootprints())
 	if err == nil {
 		t.Fatal("BuildCompositional certified pay/ship")
 	}
@@ -143,7 +143,7 @@ func TestCompositionalReport_FootprintViolation(t *testing.T) {
 
 // TestCompositionalReport_Pass pins the success report's structure.
 func TestCompositionalReport_Pass(t *testing.T) {
-	_, rep, err := wideCounters(3).BuildCompositional()
+	_, rep, err := wideCounters(3).BuildCompositional(TrustClosureFootprints())
 	if err != nil {
 		t.Fatalf("BuildCompositional: %v\n%s", err, rep)
 	}
@@ -157,7 +157,8 @@ func TestCompositionalReport_Pass(t *testing.T) {
 		"  CC (Compensation Commutativity): PASS (3 pairs: 3 disjoint, 0 brute-force)\n" +
 		"\n" +
 		"  Convergence: GUARANTEED\n" +
-		"  Assurance: component tables certified by the verified table oracle; cross-component independence by gsm's footprint check\n"
+		"  Assurance: component tables certified by the verified table oracle; cross-component independence by gsm's footprint check, " +
+		"which for closure rules is a perturbation test, not exact\n"
 	if got := rep.String(); got != want {
 		t.Fatalf("report text:\n%s\nwant:\n%s", got, want)
 	}
@@ -179,7 +180,7 @@ func TestCompositional_TwoVariableGuard(t *testing.T) {
 	if _, _, err := r.Build(); err == nil {
 		t.Fatal("Build certified a non-convergent machine")
 	}
-	_, rep, err := r.BuildCompositional()
+	_, rep, err := r.BuildCompositional(TrustClosureFootprints())
 	if err == nil {
 		t.Fatal("BuildCompositional certified a guard over two outside variables")
 	}
@@ -212,10 +213,10 @@ func TestCompositional_CombinatorReadsExact(t *testing.T) {
 // bit 64 are frozen at 0. BuildCompositional used to certify such a machine (an
 // increment on the last counter had no effect); it must refuse it.
 func TestCompositional_RejectsBeyond64Bits(t *testing.T) {
-	if _, _, err := wideCounters(32).BuildCompositional(); err != nil {
+	if _, _, err := wideCounters(32).BuildCompositional(TrustClosureFootprints()); err != nil {
 		t.Fatalf("64-bit machine rejected: %v", err)
 	}
-	_, _, err := wideCounters(33).BuildCompositional()
+	_, _, err := wideCounters(33).BuildCompositional(TrustClosureFootprints())
 	if err == nil || !strings.Contains(err.Error(), "66 bits") {
 		t.Fatalf("want a 66-bit rejection, got %v", err)
 	}

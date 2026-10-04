@@ -26,7 +26,7 @@ func TestFootprint_RejectsUndeclaredWrite(t *testing.T) {
 			return s.SetInt(b, s.GetInt(b)+1)
 		}).Add()
 
-	_, _, err := r.BuildCompositional()
+	_, _, err := r.BuildCompositional(gsm.TrustClosureFootprints())
 	if err == nil {
 		t.Fatal("expected rejection: event writes undeclared variable b")
 	}
@@ -51,7 +51,7 @@ func TestFootprint_RejectsUndeclaredRead(t *testing.T) {
 	r.Event("copyb").Writes(a).
 		Apply(func(s gsm.State) gsm.State { return s.SetInt(a, s.GetInt(b)) }).Add()
 
-	_, _, err := r.BuildCompositional()
+	_, _, err := r.BuildCompositional(gsm.TrustClosureFootprints())
 	if err == nil {
 		t.Fatal("expected rejection: event reads undeclared variable b")
 	}
@@ -75,7 +75,7 @@ func TestFootprint_AcceptsConformingClosures(t *testing.T) {
 	r.Event("inca").Writes(a).Apply(func(s gsm.State) gsm.State { return s.SetInt(a, s.GetInt(a)+1) }).Add()
 	r.Event("incb").Writes(b).Apply(func(s gsm.State) gsm.State { return s.SetInt(b, s.GetInt(b)+1) }).Add()
 
-	_, rep, err := r.BuildCompositional()
+	_, rep, err := r.BuildCompositional(gsm.TrustClosureFootprints())
 	if err != nil {
 		t.Fatalf("conforming machine rejected: %v", err)
 	}

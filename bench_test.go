@@ -125,7 +125,7 @@ func benchCompositional(b *testing.B, n int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, rep, err := r.BuildCompositional(); err != nil {
+		if _, rep, err := r.BuildCompositional(TrustClosureFootprints()); err != nil {
 			b.Fatalf("BuildCompositional: %v\n%s", err, rep)
 		}
 	}
@@ -159,7 +159,7 @@ func tightCounters(n int) *Registry {
 
 func benchLazyApply(b *testing.B, r *Registry) {
 	b.Helper()
-	m, rep, err := r.BuildCompositional()
+	m, rep, err := r.BuildCompositional(TrustClosureFootprints())
 	if err != nil {
 		b.Fatalf("BuildCompositional: %v\n%s", err, rep)
 	}
@@ -178,7 +178,7 @@ func BenchmarkBuildCompositional_TightCounters32(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, rep, err := r.BuildCompositional(); err != nil {
+		if _, rep, err := r.BuildCompositional(TrustClosureFootprints()); err != nil {
 			b.Fatalf("BuildCompositional: %v\n%s", err, rep)
 		}
 	}
