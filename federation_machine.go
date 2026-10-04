@@ -132,6 +132,14 @@ func (m *FedMachine) mustBeTarget(j int, what func() string, dst, out State) Sta
 // Kleene iteration: reset every shared component to bottom, then apply repair until a fixed
 // point. Monotonicity (verified at Build) guarantees this ascending iteration converges to
 // the least fixed point, order-independently — the Monotone Convergence Despite Cycles result.
+//
+// Build verifies monotonicity, source-determinacy and validity of every image over the states
+// this iteration visits (valid local parts with any shared values; see verifyMonotoneVisited),
+// so every round that changes something strictly raises the sum of the shared raw values and
+// kleeneCap rounds always suffice. Reaching the cap, or a fixed point that is not valid, means a
+// closure behaved differently at run time than when Build checked it (it is impure or
+// nondeterministic). That is never returned silently: it panics, as Apply does for an
+// out-of-domain image.
 func (m *FedMachine) normalizeCyclic(out FedState) FedState {
 	for j, vars := range m.sharedVar {
 		for _, vi := range vars {
@@ -150,10 +158,20 @@ func (m *FedMachine) normalizeCyclic(out FedState) FedState {
 			}
 		}
 		if !changed {
+			for i, c := range m.comps {
+				if !c.IsValid(out.states[i]) {
+					panic(fmt.Sprintf("gsm: federation %q: monotone-cycle iteration reached a fixed point where "+
+						"component %q is invalid (%s); Build verified every image is valid, so a Map or "+
+						"Resolver returned something different at run time (closures must be pure)",
+						m.name, c.name, out.states[i]))
+				}
+			}
 			return out // fixed point
 		}
 	}
-	return out // safety net; monotonicity guarantees convergence within kleeneCap
+	panic(fmt.Sprintf("gsm: federation %q: monotone-cycle iteration did not reach a fixed point within %d "+
+		"rounds; with the monotone repair Build verified it must, so a Map or Resolver behaved differently "+
+		"at run time than at Build (closures must be pure and deterministic)", m.name, m.kleeneCap))
 }
 
 // sourcesOf gathers the (finalized) states of a target's source registries, keyed by source

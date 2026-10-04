@@ -264,7 +264,9 @@ const monotoneGuard = 1024
 // Cycles theorem. Source-determinacy (already verified) lets us evaluate each target's shared
 // image against a fixed target state, so monotonicity reduces to: over all pairs of valid
 // source combinations P ⊑ P', the shared image is ⊑-ordered too. A non-monotone repair (e.g.
-// the negation counterexample) is rejected.
+// the negation counterexample) is rejected. The iteration also evaluates repair on states
+// that are not valid, so verifyMonotoneVisited then repeats the checks over those (see
+// federation_monotone.go).
 func (f *Federation) verifyMonotone() error {
 	inEdges := make([][]edgeDef, len(f.comps))
 	for _, e := range f.edges {
@@ -338,7 +340,7 @@ func (f *Federation) verifyMonotone() error {
 			}
 		}
 	}
-	return nil
+	return f.verifyMonotoneVisited()
 }
 
 // resolverInputs collects the distinct source registries (in edge order) and the union of shared
