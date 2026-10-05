@@ -309,7 +309,7 @@ Event order on a monotone cycle is certified by the same per-target C1 and C2 ch
 
 The opt-in belongs to the federation it is called on: embedding a sub-federation that opted in (with `Embed` or `EmbedCertified`) does not opt the parent in, so a parent with a cycle must call `AllowMonotoneCycles` itself (`Build`'s cycle error names the opted-in sub).
 
-A monotone cycle deployed as separate nodes that merge projections, instead of one `FedMachine`, can settle on the wrong fixed point (a "ghost"); see [Deployment](deployment.md#cycles-ghosts-and-reset-epochs).
+A monotone cycle deployed as separate nodes that merge projections, instead of one `FedMachine`, can settle on the wrong fixed point (a "ghost"), so `Build` reports such a deployment as not certified. Barrier reset epochs are the general fix. Without resets, given cyclic C1 and C2, the deployment agrees with the `FedMachine` exactly when it flushes and has no reachable ghost (`lens_noreset_iff`, `lens_noreset_fair_iff` in normalization-confluence [`coq/docs/distributed.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/docs/distributed.md#the-no-reset-model-on-monotone-cycles-exactly-distributedcyclesexactv)); the cheap sufficient checks are inflationary events (per event) or a unique fixed point (global), and otherwise it takes a global search. gsm implements neither route. See [Deployment](deployment.md#cycles-ghosts-and-reset-epochs).
 
 ### Escape hatch 3: coordinate the obstruction
 

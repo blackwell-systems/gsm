@@ -213,11 +213,14 @@ func (m *Machine) lazyApply(ev eventDef, s State) State {
 // Cyclic networks: on a monotone cycle, nodes that merge projections have no shared reset, so a
 // feedback loop can settle on a fixed point larger than the FedMachine's least one and stay
 // there (dist_cyc_ghost in normalization-confluence coq/DistributedCycles.v); Build reports such
-// a federation as not certified. The certified options are reset epochs (a barrier at which
-// every node resets its shared values to bottom, then propagation to quiescence with no events
-// inside the epoch: epoch_conv_iff, lens_epoch) or, without resets, inflationary events
-// (infl_evlow) or a repair with a unique fixed point for every assignment of the locals
-// (uniq_agree). gsm does not implement epochs. The FedMachine is unaffected: it resets the shared
+// a federation as not certified. Reset epochs are the general fix (a barrier at which every node
+// resets its shared values to bottom, then propagation to quiescence with no events inside the
+// epoch: epoch_conv_iff, lens_epoch). Without resets, a deployment agrees with the FedMachine
+// exactly when it flushes and has no reachable ghost (lens_noreset_iff, lens_noreset_fair_iff in
+// coq/DistributedCyclesExact.v); the cheap sufficient checks are inflationary events, per event
+// (infl_evsound, evlow_lowr), or a unique fixed point for every assignment of the locals, a global
+// check (uniq_agree, unique_or_low_noghost), and otherwise it is a global reachability search. gsm
+// implements neither route. The FedMachine is unaffected: it resets the shared
 // values to bottom itself before each Kleene iteration. See Federation.RequireProjectionSafe.
 //
 // It returns s unchanged and an error if s is not a state of this machine (see EffectFunc),

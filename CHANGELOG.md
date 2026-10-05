@@ -34,6 +34,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Cyclic projection deployments without resets: the exact condition.** Docs only; no behavior
+  change, and the cyclic "not certified" reason string is unchanged (gsm still implements neither
+  route). The doc comments of `Machine.MergeProjection`, `MergeProjectionAfter`,
+  `FedMachine.SharedProjection` and `Federation.RequireProjectionSafe`, `docs/deployment.md`, the
+  ghost paragraph of `docs/federation.md` and `docs/theory.md` 11.4 now state the no-reset route as
+  exact, per normalization-confluence `coq/DistributedCyclesExact.v` (PR #64): given cyclic C1 and
+  C2 over a covering value set, a deployment without resets agrees with the `FedMachine` exactly
+  when it flushes and has no reachable ghost (`lens_noreset_iff`, `lens_noreset_fair_iff`;
+  `flush_agree_iff`, `fair_agree_iff`). Flushing is reaching a sound state
+  (`fair_flush_sound_iff`); no reachable ghost is `noghost_event_iff`, and with every reachable
+  state sound it is staying at or below the least fixed point, checkable per event
+  (`noghost_soundr_iff`, `lowr_post_iff`). Inflationary events (per event: `infl_evsound`,
+  `evlow_lowr`) and a unique fixed point (global: `uniq_agree`, `unique_or_low_noghost`) are the
+  cheap sufficient checks, and otherwise it is a global search; barrier reset epochs remain the
+  general fix. A clear on an unpinned feedback loop cannot be certified without resets
+  (`ghost_exact`). Convergence among runs alone, without agreement with the `FedMachine`, is open
+  (normalization-confluence gap 14) and does not affect gsm, which would certify agreement.
 - **Projection docs.** `Machine.MergeProjection`, `MergeProjectionAfter`,
   `FedMachine.SharedProjection` and `FedMachine.Component` now state that projection-based
   deployment is proved convergent under XU (`dist_interleavings_converge`) and that `Build`'s C1
