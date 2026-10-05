@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   morphism (`Build` does not check an edge into a multi-source target against M1), and validity is
   not convergence. README (Federated Registries), FEDERATION-CONCEPTS.md and THEORY.md (11.4,
   replacing the stale "partial synchronization: future work" note) describe the two models.
+- **README framing (#32, #33).** The README opens with the theory's claim as an exact regime map
+  (in every regime, a machine-checked exact condition, a hardness result showing no efficient one
+  exists, or a gap stated in the open, linked to normalization-confluence's `REGIME-AUDIT.md`) and
+  names the idea, convergence by compensation. The federation paragraph states the split between
+  repair (a unique federated normal form) and event order (the C1 and C2 checks `Build` runs).
 
 ## [0.13.0] - 2026-10-04
 
