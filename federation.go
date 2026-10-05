@@ -316,7 +316,8 @@ type FedState struct {
 //
 // C1 and C2 are checked statically, over every valid source state, so together they are
 // sufficient for every interleaving of independent events to converge in an acyclic
-// federation; a failure means the federation may diverge from the reported state, which a
+// federation, and, unchanged, on an AllowMonotoneCycles network (cyc_check_gc_lfp of
+// normalization-confluence's FederationEventsCyclesCheck.v; see verifyCrossOrder); a failure means the federation may diverge from the reported state, which a
 // particular run need not reach.
 //
 // This is the federated analogue of gsm's single-registry contract: a FedMachine only
@@ -502,7 +503,24 @@ func (f *Federation) checksRun(cyclic bool) []string {
 		"repaired CC (C2): every target event pair its own CC covers commutes with the morphism repair between the two events",
 	}
 	if cyclic {
-		checks = append(checks, "monotone cycles: every morphism and resolver is monotone (AllowMonotoneCycles); normal form by Kleene iteration")
+		checks = append(checks,
+			"monotone cycles: every morphism and resolver is monotone (AllowMonotoneCycles); normal form by Kleene iteration",
+			"event order on the cycle: certified by the per-target C1 and C2 checks above, comparing locals after the final "+
+				"overwrite, with each target's image set taken over every valid source state (cyc_check_gc_lfp, "+
+				"normalization-confluence FederationEventsCyclesCheck.v)")
+		inDeg := map[*Registry]int{}
+		multi := 0
+		for _, e := range f.edges {
+			if inDeg[e.dst]++; inDeg[e.dst] == 2 {
+				multi++
+			}
+		}
+		if multi > 0 {
+			checks = append(checks, fmt.Sprintf("event order on the cycle, %d multi-source target(s): C1 and C2 checked "+
+				"against the joint image set of all incoming edges (the resolver's image R over every combination of valid "+
+				"source states, not each edge's own image), which is C1cyc for the whole shared part directly; the per-edge "+
+				"route (multi_edge_c1, multi_edge_gc, FederationEventsCyclesMulti.v) is not relied on", multi))
+		}
 	} else {
 		checks = append(checks, "acyclicity: the network has a topological order")
 	}
