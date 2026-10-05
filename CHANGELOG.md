@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-05
+
+A distributed-deployment release. `Federation.Build` now checks XU, the condition under which
+nodes that each run their own component `Machine` and merge projections as they arrive converge to
+the `FedMachine` run of the same events (normalization-confluence `dist_interleavings_converge`).
+The result is reported (`FedReport.ProjectionSafe`) and, with the new opt-in
+`RequireProjectionSafe`, enforced. The docs now say exactly what cyclic projection deployments
+need (barrier reset epochs, or flushing with no reachable ghost), and the README is a short front
+page over a restructured `docs/`. No exported identifier is removed or changed; nothing that built on v0.13.0
+fails to build. Merged from #32, #33, #34, #35, #36, #37, #38 and #39.
+
 ### Added
 
 - **XU check for distributed projection merging.** `Federation.Build` now checks XU
@@ -94,6 +105,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   location. The README's sample report now shows the `Rules oracle:` line `Build` prints for a
   closure machine. `TestDocSnippets` checks the new pages (EXPLAINER's blocks, previously
   unchecked, are merged into checked pages or replaced by links to the README example).
+- **`Build` godoc (#38).** The doc comment of `Federation.Build` now covers resolvers and monotone
+  cycles, not only single-source morphisms.
+
+### Breaking / behavior changes (upgrading from v0.13.0)
+
+None that break a build. What can differ:
+
+- **`FedReport.Checks` gains a final line** for distributed projection merging (`certified (XU)`
+  or `not certified: ...`). Code that parses the report text should parse the fields
+  (`ProjectionSafe`, `ProjectionLine`, `ProjectionWitnesses`) instead.
+- **`Build` does a little more work on acyclic federations:** the XU check costs events x valid
+  target states x (images + 1) table lookups per target, reusing the images C1 computes, with no
+  extra closure calls.
+- **`RequireProjectionSafe()` is opt-in.** Without it, a federation that fails XU still builds,
+  exactly as on v0.13.0; `Build`'s guarantee remains the `FedMachine` model.
 
 ## [0.13.0] - 2026-10-04
 
@@ -1017,7 +1043,8 @@ Federated registry networks: gsm now composes multiple registries connected by d
 - Full test suite covering WFC, CC, compensation, and failures
 - Documentation with usage examples, API reference, and design rationale
 
-[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/blackwell-systems/gsm/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/blackwell-systems/gsm/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/blackwell-systems/gsm/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/blackwell-systems/gsm/compare/v0.10.0...v0.11.0
