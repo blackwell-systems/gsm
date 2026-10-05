@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **XU check for distributed projection merging.** `Federation.Build` now checks XU
+  (normalization-confluence `coq/FederationEvents.v`) on every target of an acyclic federation:
+  `ow(ρ_B(e(ow(b, v))), v) = ow(ρ_B(e(b)), v)` for every target event `e`, every image `v` of a
+  valid source state (or source combination), and every valid target state `b`, not only those
+  whose shared component is an image (that restriction is C1). XU, with each component's CC, is
+  the hypothesis of `dist_interleavings_converge`: nodes that each run their own component
+  `Machine`, apply local events, and merge projections (`SharedProjection`, `MergeProjection`,
+  `MergeProjectionAfter`) whenever they arrive converge, once propagation completes, to the
+  `FedMachine` run of the same events. C1 and C2 alone do not give that
+  (`fed_grs_c1_c2_insufficient`). Cost per target: events x valid target states x (images + 1)
+  table lookups, reusing the images C1 computes (no extra closure calls).
+- **`FedReport.ProjectionSafe`, `ProjectionLine`, `ProjectionWitnesses`.** The result is reported,
+  not required: `Build`'s guarantee remains the `FedMachine` model, where C1 and C2 are exact.
+  `FedReport.Checks` ends with `distributed projection merging (...): certified (XU)` or `not
+  certified: <witnesses and reasons>`. Each witness is a `*ProjectionOrderError` naming the
+  target, event, valid state, source, and the merge-first and event-first results. A cyclic
+  network, and a network with a multi-source target (its `SharedProjection` is one edge's `Map`
+  image, not the resolver's merge), are reported as not certified.
+- **`Federation.RequireProjectionSafe()`.** Opt-in that makes an uncertified federation a build
+  error: the first `*ProjectionOrderError`, or an error naming the structural reason; both wrap
+  the new `ErrProjectionNotCertified`. Like `AllowMonotoneCycles`, it belongs to the federation it
+  is called on.
+
+### Changed
+
+- **Projection docs.** `Machine.MergeProjection`, `MergeProjectionAfter`,
+  `FedMachine.SharedProjection` and `FedMachine.Component` now state that projection-based
+  deployment is proved convergent under XU (`dist_interleavings_converge`) and that `Build`'s C1
+  and C2 certify the `FedMachine` model only, pointing to `FedReport.ProjectionSafe` and
+  `RequireProjectionSafe`. `MergeProjection`'s claim that merging "preserves local validity by the
+  M1 guarantee, so no re-normalization is required" is narrowed to what M1 gives: a valid state
+  stays valid when the projection is the image of a valid source state along a single-source
+  morphism (`Build` does not check an edge into a multi-source target against M1), and validity is
+  not convergence. README (Federated Registries), FEDERATION-CONCEPTS.md and THEORY.md (11.4,
+  replacing the stale "partial synchronization: future work" note) describe the two models.
+
 ## [0.13.0] - 2026-10-04
 
 A trust-point release. Every condition a developer could get wrong in the v0.12.0 trust audit is

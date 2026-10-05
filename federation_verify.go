@@ -538,24 +538,49 @@ func (e *CrossOrderError) Error() string {
 // can be dropped: check_rejects_latch (an event that copies a shared flag into a local fails
 // C1) and c1_localcc_insufficient (C1 and each registry's own CC hold, C2 fails, and two
 // orders diverge) are regression tests in federation_cycle_events_test.go.
-func (f *Federation) verifyCrossOrder(comps []*Machine) error {
+func (f *Federation) verifyCrossOrder(comps []*Machine) ([]*targetImages, error) {
 	inEdges := make([][]edgeDef, len(f.comps))
 	for _, e := range f.edges {
 		di := f.idx[e.dst]
 		inEdges[di] = append(inEdges[di], e)
 	}
+	imgs := make([]*targetImages, len(f.comps))
 	for ti, edges := range inEdges {
 		if len(edges) == 0 {
 			continue
 		}
-		if err := f.verifyCrossOrderTarget(f.comps[ti], comps[ti], edges); err != nil {
-			return err
+		ti2, err := f.verifyCrossOrderTarget(f.comps[ti], comps[ti], edges)
+		if err != nil {
+			return nil, err
 		}
+		imgs[ti] = ti2
 	}
-	return nil
+	return imgs, nil
 }
 
-func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges []edgeDef) error {
+// targetImages is what verifyCrossOrderTarget computed for one target, kept for the projection
+// check (verifyProjectionMerge), which quantifies over the same images and the target's valid
+// states without calling the morphism or resolver closures again.
+type targetImages struct {
+	target   *Registry
+	tm       *Machine
+	morphism string            // "morphism src→dst", or "resolver for \"dst\""
+	resolved bool              // a multi-source target, repaired by its resolver
+	mask     uint64            // the target's shared bits (union over its incoming edges)
+	images   []uint64          // Img: the shared images over every valid source state (or combination)
+	witness  map[uint64]string // a source normal form (or combination) producing each image
+	valid    []State           // every valid target state, as states of tm
+}
+
+// ow overwrites s's shared component with the packed image img.
+func (ti *targetImages) ow(s State, img uint64) State {
+	return State{packed: (s.packed &^ ti.mask) | img, vars: ti.tm.vars}
+}
+
+// verifyCrossOrderTarget checks C1 and C2 on one target and returns its image set for the
+// projection check. A nil result with a nil error means no valid source state (or source
+// combination) exists, so nothing is ever propagated into the target.
+func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges []edgeDef) (*targetImages, error) {
 	resolver, resolved := f.resolvers[target]
 	sources, sharedVars := resolverInputs(edges)
 	morphism := fmt.Sprintf("morphism %s→%s", edges[0].src.name, target.name)
@@ -591,10 +616,10 @@ func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges
 		for i, s := range sources {
 			srcValids[i] = s.validStates()
 			if len(srcValids[i]) == 0 {
-				return nil // no valid source combination: nothing to propagate
+				return nil, nil // no valid source combination: nothing to propagate
 			}
 			if total > maxStateSpace/len(srcValids[i]) {
-				return fmt.Errorf("gsm: resolver for %q: cross-registry order check space exceeds %d source combinations",
+				return nil, fmt.Errorf("gsm: resolver for %q: cross-registry order check space exceeds %d source combinations",
 					target.name, maxStateSpace)
 			}
 			total *= len(srcValids[i])
@@ -612,44 +637,47 @@ func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges
 			return addImage(resolver(rep, combo), resolverName(target.name), desc+"}")
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		e := edges[0]
 		for _, sa := range e.src.validStates() {
 			if err := addImage(e.mapFn(sa, rep), e.describe, sa.String()); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 	if len(images) == 0 {
-		return nil // no valid source state: nothing is ever propagated
+		return nil, nil // no valid source state: nothing is ever propagated
 	}
 
+	ti := &targetImages{target: target, tm: tm, morphism: morphism, resolved: resolved, mask: mask,
+		images: images, witness: witness}
 	inImg := make(map[uint64]bool, len(images))
 	for _, img := range images {
 		inImg[img] = true
 	}
 	var consistent []State
 	for _, b := range target.validStates() {
+		s := State{packed: b.packed, vars: tm.vars}
+		ti.valid = append(ti.valid, s)
 		if inImg[b.packed&mask] {
-			consistent = append(consistent, State{packed: b.packed, vars: tm.vars})
+			consistent = append(consistent, s)
 		}
 	}
-	ow := func(s State, img uint64) State { return State{packed: (s.packed &^ mask) | img, vars: tm.vars} }
 
 	// C2 runs even when the shared component has a single image: the repair between two target
 	// events can erase what the first one wrote into a shared variable although no source moves.
-	if err := f.verifyRepairedCC(target, tm, morphism, consistent, mask, witness, ow); err != nil {
-		return err
+	if err := f.verifyRepairedCC(target, tm, morphism, consistent, mask, witness, ti.ow); err != nil {
+		return nil, err
 	}
 	if len(images) < 2 {
-		return nil // the shared component never changes, so no source change can race with an event
+		return ti, nil // the shared component never changes, so no source change can race with an event
 	}
 
 	events := tm.Events()
 	if len(consistent) > 0 && len(images) > maxStateSpace/len(consistent) {
-		return fmt.Errorf("gsm: %s: cross-registry order check space (%d images x %d target states) exceeds %d",
+		return nil, fmt.Errorf("gsm: %s: cross-registry order check space (%d images x %d target states) exceeds %d",
 			morphism, len(images), len(consistent), maxStateSpace)
 	}
 
@@ -657,10 +685,10 @@ func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges
 		for _, b := range consistent {
 			after := tm.Apply(b, ev) // ρ_B(e(b)), computed once per (event, state)
 			for _, v2 := range images {
-				eventFirst := ow(after, v2)
-				sourceFirst := ow(tm.Apply(ow(b, v2), ev), v2)
+				eventFirst := ti.ow(after, v2)
+				sourceFirst := ti.ow(tm.Apply(ti.ow(b, v2), ev), v2)
 				if sourceFirst.packed != eventFirst.packed {
-					return &CrossOrderError{
+					return nil, &CrossOrderError{
 						Federation:  f.name,
 						Morphism:    morphism,
 						Target:      target.name,
@@ -675,7 +703,7 @@ func (f *Federation) verifyCrossOrderTarget(target *Registry, tm *Machine, edges
 			}
 		}
 	}
-	return nil
+	return ti, nil
 }
 
 // SameTargetOrderError reports two events of one target registry that its own CC check
