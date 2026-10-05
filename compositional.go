@@ -9,12 +9,25 @@ import (
 //
 // Build verifies WFC and CC by enumerating the whole state space, which caps it
 // at small machines. But the convergence conditions are LOCAL: an invariant's
-// repair and an event's effect touch only their declared footprint, and events
-// with disjoint footprints commute (proved: normalization-confluence coq/Gsm.v,
-// disjoint_events_commute). So a machine splits into footprint-connected
-// COMPONENTS that do not interact, and it suffices to verify each component over
-// the subspace of ITS OWN variables. Certification cost is then exponential in
-// the largest component, not in the whole machine.
+// repair and an event's effect touch only their declared footprint, so a machine
+// splits into footprint-connected COMPONENTS (sets of state variables) that do not
+// interact, and it suffices to verify each component over the subspace of ITS OWN
+// variables. Certification cost is then exponential in the largest component, not
+// in the whole machine.
+//
+// Why a cross-component pair needs no check. Two events in different components
+// read and write disjoint state variables, so their raw effects commute
+// (normalization-confluence coq/Gsm.v, disjoint_events_commute), and normalization
+// acts on each component separately. CC1 for the pair then holds at every VALID
+// state (coq/Calculus.v, calc_components_cc1_valid). It need not hold at an invalid
+// state: there it holds iff each event absorbs its own component's repair
+// (calc_components_cc1_iff), which an event may not do. gsm never reaches that case,
+// because Machine.Apply normalizes an invalid input before applying the event, so
+// every order of events starts from a valid state. The disjointness here is of state
+// variables. Disjoint INVARIANT footprints (the sets of invariants an event can
+// affect) with repair locality are not enough for CC1 (coq/Calculus.v,
+// base_thm_footprint_cc1_refuted), and gsm does not rely on them: an invariant whose
+// footprint meets an event's writes is in that event's component.
 //
 // Footprint conformance is checked before the disjointness certificate is used:
 // verifyFootprints (footprint.go) confirms that each event (guard and effect)
@@ -304,9 +317,12 @@ func (r *Registry) buildCompositional(o compositionalOptions) (_ *Machine, rep *
 		}
 	}
 
-	// Cross-component pairs commute by construction, provided every closure respects
-	// its declared footprint (verified per component below; any violation aborts the
-	// build, so no cross-component pair is trusted unless every component passed).
+	// Cross-component pairs commute from every valid state by construction
+	// (calc_components_cc1_valid; see the comment at the top of this file), provided
+	// every closure respects its declared footprint (verified per component below; any
+	// violation aborts the build, so no cross-component pair is trusted unless every
+	// component passed). Apply normalizes an invalid input first, so no order starts
+	// anywhere else.
 	//
 	// The test is component membership, not overlap of per-event footprints. A
 	// component is closed under everything that can link two events: shared write

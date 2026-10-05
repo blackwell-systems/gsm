@@ -192,14 +192,15 @@ implementation:
   violated for another authority value, so a plan sound for every root value must still coordinate
   it; only the "no consistent state at all" reading of `unbalanced_blocks` is lost.
 
-**Follow-up (gsm, not implemented).** Today's `Federation.CoordinationPlan` returns a list of
-`CoordinationPoint`s (`Src`, `Dst`, `Shared`) and reports no authority root. That is consistent
-with what it does (it removes a feedback edge set and every remaining source is an authority, as in
-any acyclic federation), but the edges it cuts come from a depth-first search in component order,
-so which registries end up authoritative is implicit. Any implementation of this design
-(`HolonomyPlan` / `BuildHolonomy`) must report the root per component, and the report and
-`FedReport` should name it, as `root_choice_matters` requires. Reporting the implied authorities of
-today's plan is a smaller follow-up worth considering in the same change.
+**Follow-up (gsm).** `Federation.CoordinationPlan` removes a feedback edge set, and every
+remaining source is an authority, as in any acyclic federation. The edges it cuts come from a
+depth-first search in component order, so which registries end up authoritative used to be
+implicit. Each `CoordinationPoint` now names it: `Authority` is the point's target, the registry
+whose coordinated shared variables the cycles it breaks are driven from, and the component report
+names it on its "Coordinated input" line (`TestCoordinationPlan_NamesAuthority` checks the
+copy-back loop rooted at A and at B, reaching different normal forms, as `root_choice_matters`
+says). Any implementation of this design (`HolonomyPlan` / `BuildHolonomy`, not implemented) must
+likewise report the root per component, and `FedReport` should name it.
 
 ## Tests and examples to ship with v1
 

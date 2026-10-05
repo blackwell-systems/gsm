@@ -162,7 +162,7 @@ This is a genuine **circular dependency**, not a bookkeeping annoyance. It might
 
 Here is the one idea that decides a cycle. Give it a plain name: **holonomy**. It means: *start somewhere, walk all the way around the loop applying each arrow's repair in turn, and see whether you come back to where you started.*
 
-If walking the loop leaves the shared values unchanged, the loop is **consistent**: those values are a setting every arrow is happy with. If walking the loop keeps *changing* the values and they never stop changing, the loop is a **contradiction**: the shared state drifts forever in a repeating pattern, called an **orbit**. Either the values settle to a fixed point, or they orbit. Two worked examples make the split concrete.
+If walking the loop leaves the shared values unchanged, those values are a **consistent** setting: one every arrow is happy with. If walking the loop keeps *changing* the values and they never stop changing, the shared state drifts forever in a repeating pattern, called an **orbit**. From any one start, the values either settle to a fixed point or orbit. The loop is a **contradiction** only when *every* start orbits: one orbiting start does not rule out a consistent setting somewhere else (Example 3). Three worked examples make the split concrete.
 
 ### Example 1: a loop that settles
 
@@ -208,23 +208,29 @@ Start again from `fa=0, fb=0` and walk:
   ... the shared values never stop flipping: an orbit
 ```
 
-Walking the loop never returns you to a stable point. The composite around the loop is a **flip**, and a flip on `{0,1}` has no fixed point: whatever you feed in comes out the other value. There is no global setting every arrow accepts, so the network cannot converge. The endless sequence is the **orbit witness**: proof that the loop is a contradiction.
+Walking the loop never returns you to a stable point. The composite around the loop is a **flip**, and a flip on `{0,1}` has no fixed point: whatever you feed in comes out the other value, from either start. There is no global setting every arrow accepts, so the network cannot converge. The endless sequence is the **orbit witness** for the zero seed; what makes the loop a contradiction is that no start settles.
+
+### Example 3: a seed that orbits, a loop that does not contradict
+
+Widen both variables to `{0,1,2}`. A copies to B; B copies back through a **swap** that exchanges 0 and 1 and leaves 2 alone. (This is `TestDiagnoseCycle_SeedOrbitsButSectionExists`.) From the zero seed the walk is Example 2 again: 0 and 1 trade places forever. But start from `fa=2, fb=2` and nothing moves: 2 is a consistent setting. So an orbit from one seed is not proof of a contradiction. The exact statement (machine-checked in normalization-confluence, `CohomologyGeneral.v`: `c15_definitive_claim_false`, `c15_exact_refuter`) is that a loop has no consistent setting iff **no** seed reaches a fixed point.
 
 ### This is exactly what DiagnoseCycle computes
 
-gsm has this walk built in. `Federation.DiagnoseCycle` finds a directed cycle in your network, then iterates the loop's repair from the zero seed on a finite space (so it must either settle or repeat), and reports which:
+gsm has this walk built in. `Federation.DiagnoseCycle` finds a directed cycle in your network, then iterates the loop's repair from the zero seed on a finite space (so it must either settle or repeat), and reports which. When the zero seed orbits, it also checks every other seed (every combination of the cycle components' valid states) for a consistent setting:
 
 <!-- gocheck: check federation -->
 ```go
 d, err := fed.DiagnoseCycle()
 if d != nil {
-    fmt.Println(d.Cycle)      // the loop, in order: e.g. ["A", "B"]
-    fmt.Println(d.Converges)  // true if it settled, false if it orbits
-    fmt.Println(d.Orbit)      // if !Converges, the repeating configurations (the witness)
+    fmt.Println(d.Cycle)         // the loop, in order: e.g. ["A", "B"]
+    fmt.Println(d.Converges)     // true if the zero seed settled, false if it orbits
+    fmt.Println(d.Orbit)         // if !Converges, the zero seed's repeating configurations
+    fmt.Println(d.SectionExists) // whether some seed is a consistent setting
+    fmt.Println(d.Obstructed())  // true only if every seed was checked and none settles
 }
 ```
 
-For the negation loop above, `CycleDiagnostic.Converges` is `false` and `CycleDiagnostic.Orbit` holds the repeating sequence of shared configurations. For the copy-around loop, `Converges` is `true` (the loop is still named for reference). One caution the code itself flags: `Converges == true` from the zero seed means *this* seed settles; it names the cycle but does not by itself prove the whole network converges, since another local state might still oscillate. A `false`, though, is a definitive obstruction: an orbit exists, so the cycle cannot converge.
+For the negation loop above, `Converges` is `false`, `Orbit` holds the repeating sequence of shared configurations, and `Obstructed()` is `true`: all four seeds were checked and none is consistent. For the swap loop of Example 3, `Converges` is `false` but `SectionExists` is `true` (`Section` shows `fa=fb=2`), so it is not an obstruction. For the copy-around loop, `Converges` is `true` (the loop is still named for reference). Two cautions: `Converges == true` means *this* seed settles, which proves a consistent setting exists but not that every start reaches one; and when the cycle's seeds are too many to check (`AllSeeds == false`), a `false` `Converges` says only that the zero seed orbits.
 
 ---
 
@@ -258,8 +264,8 @@ Each of the following sentences is a real API behavior you can call.
 
 - **`Build` rejects cycles by default.** With no opt-in, the network must be acyclic. If it finds a loop, `Build` refuses and its error *names the offending loop* (`A -> B -> A`), pointing you at `DiagnoseCycle`.
 - **`AllowMonotoneCycles` opts into loops.** Call `Federation.AllowMonotoneCycles()` and `Build` stops requiring acyclicity. Instead it runs the monotonicity check (escape hatch 2): it verifies, by enumeration, that every morphism and resolver only pushes shared values one direction on the ladder. The check covers every state the climb can pass through, not just valid ones: the climb starts with every shared value on the bottom rung, which can be a state your invariants forbid, so gsm checks each valid local part with every shared value, and also requires each image there to depend only on its sources and to leave the target valid. A network that passes converges by Kleene iteration to the least fixed point. A non-monotone cyclic network (the negation counterexample) is still rejected even with the opt-in. Event order on the loop is certified by the same C1 and C2 checks. The climb starts by resetting every shared value to the bottom rung, so whatever an event writes into a shared variable is wiped, and only what it does to its own local variables survives. C1 and C2 compare exactly that, the locals after the final overwrite, with each target's image set taken over every valid source state, and that is enough for every interleaving of independent events to converge ([`FederationEventsCyclesCheck.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/FederationEventsCyclesCheck.v), `cyc_check_gc_lfp`). A target fed by several sources is checked against the joint images of all of them at once (its resolver's output over every combination of valid source states, called R in the proof), so nothing relies on stitching per-edge checks together (`multi_edge_c1`, `multi_edge_gc` in `FederationEventsCyclesMulti.v`). Checking each edge's own images instead would not be enough for a resolver: with `r = plus` and edge images `{0, 1}`, the resolver can write `2` (`resolver_edge_insufficient`). Both checks earn their place: an event that copies a shared flag into a local alarm fails C1 (`check_rejects_latch`), and two events that commute on their own registry but not across the reset fail C2 (`c1_localcc_insufficient`).
-- **`DiagnoseCycle` explains a rejected cycle.** When you hit a cycle rejection, `Federation.DiagnoseCycle` walks the loop from the zero seed and hands back a `CycleDiagnostic`: the `Cycle` (loop order), whether it `Converges`, and if not, the `Orbit` witness (the settle-or-orbit verdict from the [holonomy section](#holonomy-walk-the-loop-and-see)).
-- **`CoordinationPlan` names what to coordinate, and `BuildCoordinated` accepts it (escape hatch 3).** `Federation.CoordinationPlan()` returns the arrows (shared variables) to place under an external single writer or consensus so the network converges; `Federation.BuildCoordinated(plan)` then builds it, treating those variables as external inputs and converging on everything else. This turns a rejection into a deployable mixed-consistency plan.
+- **`DiagnoseCycle` explains a rejected cycle.** When you hit a cycle rejection, `Federation.DiagnoseCycle` walks the loop from the zero seed and hands back a `CycleDiagnostic`: the `Cycle` (loop order), whether it `Converges`, and if not, the `Orbit` witness, plus whether any other seed is consistent (`SectionExists`) and whether the loop is a proven contradiction (`Obstructed()`), as in the [holonomy section](#holonomy-walk-the-loop-and-see).
+- **`CoordinationPlan` names what to coordinate, and `BuildCoordinated` accepts it (escape hatch 3).** `Federation.CoordinationPlan()` returns the arrows (shared variables) to place under an external single writer or consensus so the network converges; `Federation.BuildCoordinated(plan)` then builds it, treating those variables as external inputs and converging on everything else. This turns a rejection into a deployable mixed-consistency plan. Each point names its `Authority` (the registry whose coordinated variables the cycle is now driven from), because the plan's choice of edge is a choice of root: cutting `B→A` in a copy-back loop makes A the authority and cutting `A→B` makes B the authority, and from the same state the two reach different normal forms (`CoordinatedCycles.v`, `root_choice_matters`). Given the plan, the normal form is unique.
 
 So the flow is: build acyclic and it just works; if you need a loop, opt in with `AllowMonotoneCycles` and gsm proves the repair climbs one direction; if a build is rejected for a cycle, `DiagnoseCycle` shows you whether that loop settles or orbits; and if it orbits and you still need it, `CoordinationPlan` + `BuildCoordinated` accept it by coordinating the few obstructing variables. The full loop, start with something that cannot converge, get the exact adjustment, apply it, and watch it converge, is a worked example in the test suite (`Example_acceptWithCoordination`).
 
@@ -289,9 +295,10 @@ These names are the rigorous version of the pictures in this doc, nothing more. 
 | **Resolver** | `Federation.Resolve(target, fn)` | How a multi-source target merges its incoming arrows (AND/OR/priority) |
 | **Monotone-cycle opt-in** | `Federation.AllowMonotoneCycles()` | Permit loops when every repair is monotone (climbs one direction) |
 | **Build the network** | `Federation.Build()` | Prove the whole network converges, or refuse and say why |
-| **Cycle diagnosis** | `Federation.DiagnoseCycle()` | Walk a loop from the zero seed; report settle vs orbit |
-| **Settle-or-orbit verdict** | `CycleDiagnostic.Converges` / `.Orbit` | `true` = loop settled; `false` = orbit witness (definitive obstruction) |
-| **Coordination plan** | `Federation.CoordinationPlan()` | The arrows (shared variables) to coordinate so the network converges (a correct feedback edge set) |
+| **Cycle diagnosis** | `Federation.DiagnoseCycle()` | Walk a loop from the zero seed; report settle vs orbit; if it orbits, check every seed |
+| **Settle-or-orbit result** | `CycleDiagnostic.Converges` / `.Orbit` | `true` = the zero seed settled (a consistent state exists); `false` = the zero seed orbits (the witness), not by itself an obstruction |
+| **Obstruction** | `CycleDiagnostic.Obstructed()` / `.SectionExists` | `Obstructed()` = every seed checked and none consistent: the loop cannot converge |
+| **Coordination plan** | `Federation.CoordinationPlan()` | The arrows (shared variables) to coordinate so the network converges (a correct feedback edge set); each point names its `Authority`, the root the cycle's normal form is driven from |
 | **Accept with coordination** | `Federation.BuildCoordinated(plan)` | Build the network given that coordination: coordinated variables become external inputs; the rest converges |
 | **Coordination point** | `CoordinationPoint` | One arrow to coordinate: its `Src`, `Dst`, and the `Shared` variables it controls |
 | **Acyclic sweep** | topological order in `Build` | Resolve sources first, each arrow once, no iteration |

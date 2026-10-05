@@ -2,6 +2,7 @@ package gsm
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -94,6 +95,7 @@ func Example_acceptWithCoordination() {
 	// 2. The exact adjustment.
 	plan := fed.CoordinationPlan()
 	fmt.Println("coordinate:", plan)
+	fmt.Println("authority:", plan[0].Authority) // the root the coordinated cycle is driven from
 
 	// 3. Make it, then 4. watch it converge.
 	m, _, err := fed.BuildCoordinated(plan)
@@ -109,5 +111,88 @@ func Example_acceptWithCoordination() {
 	// build: rejected (non-monotone cycle)
 	// diagnose: converges = false
 	// coordinate: [mirror->primary[v]]
+	// authority: primary
 	// after set: primary=1 mirror=1 valid=true
+}
+
+// TestCoordinationPlan_NamesAuthority mirrors root_choice_matters and copyback_without_authority
+// (normalization-confluence coq/CoordinatedCycles.v) on the copy-back loop A <-> B (each copies
+// the other's bit). Build rejects it: with both edges kept as writers there is no authority, and
+// two consistent states (A = B = 0 and A = B = 1) compete. CoordinationPlan cuts one edge, and the
+// target of the cut edge is the root: given the plan the normal form is unique, but it depends on
+// which edge was cut. From the same start A = 0, B = 1, rooting at A reaches A = B = 0 and rooting
+// at B reaches A = B = 1. The plan and the report name that root (Authority).
+func TestCoordinationPlan_NamesAuthority(t *testing.T) {
+	type loop struct {
+		fed  *Federation
+		a, b *Registry
+		fa   Var
+		fb   Var
+	}
+	mk := func(aFirst bool) loop {
+		a := NewRegistry("A")
+		fa := a.Int("fa", 0, 1)
+		b := NewRegistry("B")
+		fb := b.Int("fb", 0, 1)
+		ab := func(f *Federation) *Federation {
+			return f.Morphism(a, b).Shared(fb).Map(func(s, d State) State { return d.SetInt(fb, s.GetInt(fa)) }).Add()
+		}
+		ba := func(f *Federation) *Federation {
+			return f.Morphism(b, a).Shared(fa).Map(func(s, d State) State { return d.SetInt(fa, s.GetInt(fb)) }).Add()
+		}
+		f := NewFederation("copyback")
+		if aFirst {
+			f = ba(ab(f))
+		} else {
+			f = ab(ba(f))
+		}
+		return loop{f, a, b, fa, fb}
+	}
+
+	for _, tc := range []struct {
+		aFirst bool
+		root   string
+		want   int // the common value of A and B in the normal form from A = 0, B = 1
+	}{
+		{aFirst: true, root: "A", want: 0},
+		{aFirst: false, root: "B", want: 1},
+	} {
+		l := mk(tc.aFirst)
+		if _, _, err := l.fed.Build(); err == nil {
+			t.Fatal("expected Build to reject the copy-back cycle (no authority)")
+		}
+		plan := l.fed.CoordinationPlan()
+		if len(plan) != 1 || plan[0].Authority != tc.root || plan[0].Dst != tc.root {
+			t.Fatalf("aFirst=%v: want one point rooted at %s, got %+v", tc.aFirst, tc.root, plan)
+		}
+		m, rep, err := l.fed.BuildCoordinated(plan)
+		if err != nil {
+			t.Fatalf("BuildCoordinated(%v): %v", plan, err)
+		}
+		if !strings.Contains(rep.String(), tc.root+" is the authority") {
+			t.Fatalf("report should name the authority %s:\n%s", tc.root, rep)
+		}
+
+		fs := m.NewState()
+		fs.states[m.idx[l.a]] = fs.states[m.idx[l.a]].SetInt(l.fa, 0)
+		fs.states[m.idx[l.b]] = fs.states[m.idx[l.b]].SetInt(l.fb, 1)
+		nf := m.Normalize(fs)
+		if ga, gb := m.Of(nf, l.a).GetInt(l.fa), m.Of(nf, l.b).GetInt(l.fb); ga != tc.want || gb != tc.want {
+			t.Fatalf("rooted at %s: want A = B = %d, got A = %d, B = %d", tc.root, tc.want, ga, gb)
+		}
+		if again := m.Normalize(nf); again.states[0].ID() != nf.states[0].ID() || again.states[1].ID() != nf.states[1].ID() {
+			t.Fatalf("rooted at %s: the normal form is not a fixed point of Normalize", tc.root)
+		}
+	}
+
+	// An authority other than the target cannot be honored by removing that edge.
+	l := mk(true)
+	_, _, err := l.fed.BuildCoordinated([]CoordinationPoint{{Src: "B", Dst: "A", Shared: []string{"fa"}, Authority: "B"}})
+	if err == nil || !strings.Contains(err.Error(), `authority "B" is not the target "A"`) {
+		t.Fatalf("want a rejection of an authority that is not the target, got %v", err)
+	}
+	// The root is a choice the caller can make: cutting A->B instead roots the same network at B.
+	if _, _, err := l.fed.BuildCoordinated([]CoordinationPoint{{Src: "A", Dst: "B", Shared: []string{"fb"}}}); err != nil {
+		t.Fatalf("cutting the other edge should build too: %v", err)
+	}
 }
