@@ -9,6 +9,8 @@
 
 **Send in any order. Converge on the rules.**
 
+gsm is the checker for [normalization confluence](https://github.com/blackwell-systems/normalization-confluence): a complete, mechanized map of when governed concurrent state converges, with exact conditions in every regime and a checker for the practical ones. The idea is **convergence by compensation**: operations may conflict and break invariants, and replicas still converge because repair is well-founded and commutes with events.
+
 What if distributed systems don't have to coordinate - because they agree on the rules ahead of time, so ordering and compensations are deterministic? The underlying theory - normalization confluence - proves that compensation is sufficient for convergence when two algebraic properties hold, without the expressiveness limits of CRDTs or the latency cost of consensus.
 
 `gsm` is a Go library for constructing state machines where events may arrive out of order and violate business rules, but automatic compensation ensures all replicas converge to the same valid state. Convergence is **verified at build time**: `Build` enumerates the state space (O(1) table-lookup runtime), and for machines too large to enumerate, `BuildCompositional` verifies each **footprint component** independently, so certification cost scales with the largest component rather than the whole machine.
@@ -19,7 +21,7 @@ And gsm's own verification is **checked again by the proof itself, in-process**.
 
 CRDTs solve convergence by requiring operations to commute. But when your operations can violate business invariants - shipping an unpaid order, overdrawing an account - commutativity alone isn't enough. `gsm` provides convergence through **compensation**: declare what valid means and how to repair violations, and the library proves that all event orderings converge to the same valid state.
 
-Registries also **federate**: connect independently-governed machines with directed morphisms that encode cross-organizational constraints - a manufacturer's status constrains a supplier's listing, a regulator's rules constrain a bank - and `gsm` proves the *whole network* converges. Same build-time guarantee, now across organizational boundaries. See [Federated Registries](#federated-registries).
+Registries also **federate**: connect independently-governed machines with directed morphisms that encode cross-organizational constraints - a manufacturer's status constrains a supplier's listing, a regulator's rules constrain a bank - and `gsm` proves the *whole network* converges. Repair composes freely: the federated normal form is unique on acyclic networks and monotone cycles. Event order across registries costs two local checks per edge, C1 and C2, which `Build` runs and which are proved sufficient (and exact at reachable states). Same build-time guarantee, now across organizational boundaries. See [Federated Registries](#federated-registries).
 
 ## Example: Order Fulfillment
 
