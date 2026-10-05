@@ -360,7 +360,8 @@ func TestProjection_StaticWitnessUnreachable(t *testing.T) {
 }
 
 // TestProjection_StructuralReasons: a cyclic network and a multi-source target are reported as
-// not certified (the theorem is for acyclic networks, and SharedProjection does not send the
+// not certified (the theorem is for acyclic networks, and on a cycle nodes without a shared reset
+// can settle on a ghost fixed point, dist_cyc_ghost; SharedProjection does not send the
 // resolver's merge), and RequireProjectionSafe makes each a build error wrapping
 // ErrProjectionNotCertified.
 func TestProjection_StructuralReasons(t *testing.T) {
@@ -374,6 +375,7 @@ func TestProjection_StructuralReasons(t *testing.T) {
 		want string
 	}{
 		{"cyclic", cyc, "the network is cyclic"},
+		{"cyclic ghost", cyc, "can settle on a larger fixed point than the FedMachine's least one (dist_cyc_ghost"},
 		{"multi-source", func() *Federation { return resolvedDoor(false) }, `multi-source target(s) ["door"]`},
 	}
 	for _, c := range cases {

@@ -18,6 +18,7 @@ If you're looking for:
 - [When It Gets Hard: Cycles](#when-it-gets-hard-cycles)
 - [Holonomy: Walk the Loop and See](#holonomy-walk-the-loop-and-see)
 - [The Escape Hatches](#the-escape-hatches)
+- [Ghosts: a Monotone Loop Without a Referee](#ghosts-a-monotone-loop-without-a-referee)
 - [What gsm Does About It](#what-gsm-does-about-it)
 - [The Real Names (Bridge to Rigor)](#the-real-names-bridge-to-rigor)
 - [Glossary: Federation Terms → Code](#glossary-federation-terms--code)
@@ -260,6 +261,39 @@ The payoff is a *mixed-consistency* system: strong consistency (consensus) only 
 
 ---
 
+## Ghosts: a Monotone Loop Without a Referee
+
+Escape hatch 2 has a fine print that only matters when you deploy the federation as separate nodes that send each other projections (`SharedProjection`, `MergeProjection`) instead of running one `FedMachine`.
+
+"The climb halts at the same top no matter which value you nudge first" is true *when the climb starts from the bottom rung*. The `FedMachine` makes sure it does: every time it normalizes a cycle, it first pushes every shared value back down to the bottom rung and then climbs. Separate nodes have no such referee. Each one just overwrites its shared values with whatever its sources currently say, and a value that is already high can stay high.
+
+Here is the smallest loop where that bites. Two nodes, A and B. Each has a local `alarm`, and each has a shared `flag` that its partner fills in:
+
+```
+   A.flag = B.alarm OR B.flag
+   B.flag = A.alarm OR A.flag
+```
+
+Both arrows are an `OR`, so they only ever push a flag up: the loop is monotone, and gsm accepts it. Now run these four steps on separate nodes:
+
+1. A raises its alarm.
+2. B hears from A: `B.flag = true OR false = true`.
+3. A hears from B: `A.flag = false OR true = true`.
+4. A clears its alarm.
+
+Both flags are now `true`, and both alarms are `false`. Ask each node to re-check: `A.flag = B.alarm OR B.flag = false OR true = true`, and `B.flag = A.alarm OR A.flag = false OR true = true`. Nothing changes. The two flags hold each other up, with no alarm anywhere behind them. That is a **ghost**: a resting point of the loop, just not the lowest one. The `FedMachine` with the same four events gives both flags `false`, because it resets them to the bottom rung before it climbs, and with both alarms clear the climb never leaves the bottom. No amount of further propagation brings the nodes there: from the ghost, every re-check says "still true."
+
+The ghost survives every check gsm runs on the loop: cyclic C1 and C2, monotonicity, the cyclic form of XU, and convergence of the `FedMachine` itself (`dist_cyc_ghost` in [`DistributedCycles.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/DistributedCycles.v), which lands with [normalization-confluence PR #62](https://github.com/blackwell-systems/normalization-confluence/pull/62)). That is why gsm reports projection merging on any cyclic network as not certified.
+
+Two ways out are proved:
+
+- **Reset epochs.** Every so often, all nodes stop together (a barrier), push every shared value back to the bottom rung, and re-propagate until nothing changes, with no events allowed in the middle. That is exactly what the `FedMachine` does on every step, done occasionally and collectively. After each epoch every node holds the `FedMachine`'s answer for the events so far, whatever order they arrived in (`epoch_agree_iff`, `epoch_conv_iff`, `lens_epoch`). It has to be all nodes at once: if A resets while B still holds the ghost, A's next re-check reads B's `true` and the ghost is back in one step (`dist_cyc_epoch_fix`).
+- **Events that cannot strand a value.** Without resets, the loop is safe when no ghost can form: every event only raises things (an alarm that can be raised but never cleared, `infl_evlow`), or the loop has just one resting point for every setting of the alarms (`uniq_agree`). The flag loop fails both because "clear the alarm" is a step down with a feedback loop to remember the old value.
+
+gsm does not implement epochs as an API. If you run the `FedMachine` itself (for example one `FedMachine` fed by a shared, totally ordered log), none of this applies: its reset happens on every normalization.
+
+---
+
 ## What gsm Does About It
 
 Each of the following sentences is a real API behavior you can call.
@@ -268,7 +302,7 @@ Each of the following sentences is a real API behavior you can call.
 - **`AllowMonotoneCycles` opts into loops.** Call `Federation.AllowMonotoneCycles()` and `Build` stops requiring acyclicity. Instead it runs the monotonicity check (escape hatch 2): it verifies, by enumeration, that every morphism and resolver only pushes shared values one direction on the ladder. The check covers every state the climb can pass through, not just valid ones: the climb starts with every shared value on the bottom rung, which can be a state your invariants forbid, so gsm checks each valid local part with every shared value, and also requires each image there to depend only on its sources and to leave the target valid. A network that passes converges by Kleene iteration to the least fixed point. A non-monotone cyclic network (the negation counterexample) is still rejected even with the opt-in. Event order on the loop is certified by the same C1 and C2 checks. The climb starts by resetting every shared value to the bottom rung, so whatever an event writes into a shared variable is wiped, and only what it does to its own local variables survives. C1 and C2 compare exactly that, the locals after the final overwrite, with each target's image set taken over every valid source state, and that is enough for every interleaving of independent events to converge ([`FederationEventsCyclesCheck.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/FederationEventsCyclesCheck.v), `cyc_check_gc_lfp`). A target fed by several sources is checked against the joint images of all of them at once (its resolver's output over every combination of valid source states, called R in the proof), so nothing relies on stitching per-edge checks together (`multi_edge_c1`, `multi_edge_gc` in `FederationEventsCyclesMulti.v`). Checking each edge's own images instead would not be enough for a resolver: with `r = plus` and edge images `{0, 1}`, the resolver can write `2` (`resolver_edge_insufficient`). Both checks earn their place: an event that copies a shared flag into a local alarm fails C1 (`check_rejects_latch`), and two events that commute on their own registry but not across the reset fail C2 (`c1_localcc_insufficient`).
 - **`DiagnoseCycle` explains a rejected cycle.** When you hit a cycle rejection, `Federation.DiagnoseCycle` walks the loop from the zero seed and hands back a `CycleDiagnostic`: the `Cycle` (loop order), whether it `Converges`, and if not, the `Orbit` witness, plus whether any other seed is consistent (`SectionExists`) and whether the loop is a proven contradiction (`Obstructed()`), as in the [holonomy section](#holonomy-walk-the-loop-and-see).
 - **`CoordinationPlan` names what to coordinate, and `BuildCoordinated` accepts it (escape hatch 3).** `Federation.CoordinationPlan()` returns the arrows (shared variables) to place under an external single writer or consensus so the network converges; `Federation.BuildCoordinated(plan)` then builds it, treating those variables as external inputs and converging on everything else. This turns a rejection into a deployable mixed-consistency plan. Each point names its `Authority` (the registry whose coordinated variables the cycle is now driven from), because the plan's choice of edge is a choice of root: cutting `B→A` in a copy-back loop makes A the authority and cutting `A→B` makes B the authority, and from the same state the two reach different normal forms (`CoordinatedCycles.v`, `root_choice_matters`). Given the plan, the normal form is unique.
-- **`RequireProjectionSafe` certifies distributed deployment.** By default `Build` certifies the `FedMachine` and only reports whether nodes that merge projections on their own (`SharedProjection`, `MergeProjection`) are certified too (`FedReport.ProjectionSafe`, condition XU). With `Federation.RequireProjectionSafe()`, a federation that is not certified for that deployment is a build error: a `ProjectionOrderError` naming the target, the event, the state and the two results, or the structural reason (a cycle, or a multi-source target, whose projections are not the resolver's merge).
+- **`RequireProjectionSafe` certifies distributed deployment.** By default `Build` certifies the `FedMachine` and only reports whether nodes that merge projections on their own (`SharedProjection`, `MergeProjection`) are certified too (`FedReport.ProjectionSafe`, condition XU). With `Federation.RequireProjectionSafe()`, a federation that is not certified for that deployment is a build error: a `ProjectionOrderError` naming the target, the event, the state and the two results, or the structural reason (a cycle, where nodes without a shared reset can settle on a [ghost](#ghosts-a-monotone-loop-without-a-referee), or a multi-source target, whose projections are not the resolver's merge).
 
 So the flow is: build acyclic and it just works; if you need a loop, opt in with `AllowMonotoneCycles` and gsm proves the repair climbs one direction; if a build is rejected for a cycle, `DiagnoseCycle` shows you whether that loop settles or orbits; and if it orbits and you still need it, `CoordinationPlan` + `BuildCoordinated` accept it by coordinating the few obstructing variables. The full loop, start with something that cannot converge, get the exact adjustment, apply it, and watch it converge, is a worked example in the test suite (`Example_acceptWithCoordination`).
 

@@ -32,6 +32,23 @@ var ErrProjectionNotCertified = errors.New("gsm: distributed projection merging 
 // *ProjectionOrderError naming the target, event, state and the two diverging results when XU
 // fails, or an error naming the structural reason. Both wrap ErrProjectionNotCertified.
 //
+// Cyclic networks (AllowMonotoneCycles) are always reported as not certified, and with this
+// opt-in they fail Build. That is required, not conservative: projection nodes have no shared
+// reset, so after a raise-then-clear event a feedback loop can hold itself at a fixed point
+// larger than the least one the FedMachine computes, and no propagation leaves it, even when
+// cyclic C1, C2, monotonicity and FedMachine convergence all hold (dist_cyc_ghost in
+// normalization-confluence coq/DistributedCycles.v). Two deployments are certified on a cycle,
+// and gsm implements neither as an API. Reset epochs: at a barrier every node resets its shared
+// values to bottom, then the nodes propagate to quiescence with no events inside the epoch; after
+// the epoch every node holds the FedMachine state for the events so far (epoch_conv_iff,
+// lens_epoch), and a staggered reset re-creates the ghost, so the reset must be a barrier
+// (dist_cyc_epoch_fix). No resets: certified only when no larger fixed point can arise, because
+// every event is inflationary (it raises locals in an order the morphisms are monotone in and
+// never raises a shared value: evlow_lowr, infl_evlow) or the repair has a unique fixed point for
+// every assignment of the locals (uniq_agree). The FedMachine is unaffected: normalizeCyclic
+// resets every shared value to bottom before its Kleene iteration, so a deployment that runs one
+// FedMachine (for example over a shared, totally ordered log) always gets the least fixed point.
+//
 // The opt-in belongs to the federation it is called on; embedding a sub-federation that opted
 // in does not opt the parent in.
 func (f *Federation) RequireProjectionSafe() *Federation {
@@ -119,7 +136,11 @@ func (f *Federation) verifyProjectionMerge(imgs []*targetImages, cyclic bool) pr
 	var res projectionResult
 	if cyclic {
 		res.reasons = append(res.reasons, "the network is cyclic, and the distributed-propagation theorem "+
-			"(dist_interleavings_converge) covers acyclic federations only")
+			"(dist_interleavings_converge) covers acyclic federations only: on a monotone cycle, nodes that "+
+			"merge projections without a shared reset can settle on a larger fixed point than the FedMachine's "+
+			"least one (dist_cyc_ghost in normalization-confluence coq/DistributedCycles.v); see "+
+			"RequireProjectionSafe for the certified options (barrier reset epochs, or inflationary events or "+
+			"a unique fixed point)")
 		return res.finish()
 	}
 	var multi []string

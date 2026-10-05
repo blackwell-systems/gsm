@@ -49,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exists, or a gap stated in the open, linked to normalization-confluence's `REGIME-AUDIT.md`) and
   names the idea, convergence by compensation. The federation paragraph states the split between
   repair (a unique federated normal form) and event order (the C1 and C2 checks `Build` runs).
+- **Cyclic projection deployments: why "not certified", and what would certify them.** No
+  behavior change; the cyclic reason in `FedReport.ProjectionLine` (and the
+  `RequireProjectionSafe` build error) now explains that, on a monotone cycle, nodes that merge
+  projections without a shared reset can settle on a larger fixed point than the `FedMachine`'s
+  least one (`dist_cyc_ghost` in normalization-confluence `coq/DistributedCycles.v`, PR #62), and
+  points to `RequireProjectionSafe`. Its doc comment, and those of `MergeProjection`,
+  `MergeProjectionAfter` and `SharedProjection`, give the two certified options: barrier reset
+  epochs (`epoch_agree_iff`, `epoch_conv_iff`, `lens_epoch`; a staggered reset is not enough,
+  `dist_cyc_epoch_fix`), or, without resets, inflationary events (`evlow_lowr`, `infl_evlow`) or a
+  unique fixed point for every locals assignment (`uniq_agree`). gsm does not implement epochs. A
+  deployment that runs the `FedMachine` is unaffected (`normalizeCyclic` resets the shared values
+  to bottom on every normalization). README (Federated Registries), FEDERATION-CONCEPTS.md (a new
+  "Ghosts" section with the flag-cycle example) and THEORY.md 11.4 cover the same ground.
 
 ## [0.13.0] - 2026-10-04
 
