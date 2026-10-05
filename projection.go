@@ -33,11 +33,14 @@ var ErrStaleProjection = errors.New("gsm: stale projection")
 // Cyclic networks: freshness does not prevent a ghost. On a monotone cycle a feedback loop can
 // hold itself at a fixed point larger than the FedMachine's least one even when every projection
 // is fresh (dist_cyc_ghost in normalization-confluence coq/DistributedCycles.v), so Build reports
-// a cyclic federation as not certified. The certified options are barrier reset epochs (every
-// node resets its shared values to bottom, then propagation to quiescence with no events inside
-// the epoch: epoch_conv_iff, lens_epoch) or, without resets, inflationary events (infl_evlow) or
-// a repair with a unique fixed point for every assignment of the locals (uniq_agree); gsm does
-// not implement epochs. The FedMachine is unaffected, since it resets the shared values to bottom
+// a cyclic federation as not certified. Barrier reset epochs are the general fix (every node
+// resets its shared values to bottom, then propagation to quiescence with no events inside the
+// epoch: epoch_conv_iff, lens_epoch). Without resets, a deployment agrees with the FedMachine
+// exactly when it flushes and has no reachable ghost (lens_noreset_iff, lens_noreset_fair_iff in
+// coq/DistributedCyclesExact.v); the cheap sufficient checks are inflationary events, per event
+// (infl_evsound, evlow_lowr), or a unique fixed point for every assignment of the locals, a global
+// check (uniq_agree, unique_or_low_noghost), and otherwise it is a global reachability search. gsm
+// implements neither route. The FedMachine is unaffected, since it resets the shared values to bottom
 // before each Kleene iteration. See Federation.RequireProjectionSafe.
 func (m *Machine) MergeProjectionAfter(s State, p Projection, last uint64) (State, error) {
 	if p.To != "" && p.To != m.name {

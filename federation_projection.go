@@ -38,14 +38,24 @@ var ErrProjectionNotCertified = errors.New("gsm: distributed projection merging 
 // larger than the least one the FedMachine computes, and no propagation leaves it, even when
 // cyclic C1, C2, monotonicity and FedMachine convergence all hold (dist_cyc_ghost in
 // normalization-confluence coq/DistributedCycles.v). Two deployments are certified on a cycle,
-// and gsm implements neither as an API. Reset epochs: at a barrier every node resets its shared
-// values to bottom, then the nodes propagate to quiescence with no events inside the epoch; after
-// the epoch every node holds the FedMachine state for the events so far (epoch_conv_iff,
-// lens_epoch), and a staggered reset re-creates the ghost, so the reset must be a barrier
-// (dist_cyc_epoch_fix). No resets: certified only when no larger fixed point can arise, because
-// every event is inflationary (it raises locals in an order the morphisms are monotone in and
-// never raises a shared value: evlow_lowr, infl_evlow) or the repair has a unique fixed point for
-// every assignment of the locals (uniq_agree). The FedMachine is unaffected: normalizeCyclic
+// and gsm implements neither as an API. Reset epochs, the general fix: at a barrier every node
+// resets its shared values to bottom, then the nodes propagate to quiescence with no events
+// inside the epoch; after the epoch every node holds the FedMachine state for the events so far
+// (epoch_conv_iff, lens_epoch), and a staggered reset re-creates the ghost, so the reset must be
+// a barrier (dist_cyc_epoch_fix). No resets: given cyclic C1 and C2 over a value set covering the
+// reachable shared values, the deployment agrees with the FedMachine exactly when it flushes and
+// has no reachable ghost (lens_noreset_iff, lens_noreset_fair_iff; flush_agree_iff,
+// fair_agree_iff in normalization-confluence coq/DistributedCyclesExact.v). A fair run flushes iff
+// it reaches a sound state (fair_flush_sound_iff); no reachable ghost holds iff the start and
+// every post-event state are ghost-free (noghost_event_iff), and when every reachable state is
+// sound that is staying at or below the least fixed point, checkable per event
+// (noghost_soundr_iff, lowr_post_iff). The cheap sufficient checks are inflationary events, per
+// event (each raises locals in an order the morphisms are monotone in and never raises a shared
+// value: infl_evsound, evlow_lowr), or a unique fixed point of the repair for every assignment of
+// the locals, a global check that rules out ghosts (uniq_agree, unique_or_low_noghost; flushing
+// still needs its own argument); otherwise both conditions take a global reachability search. A
+// clear event on an unpinned feedback loop cannot be certified without resets (ghost_exact). See
+// normalization-confluence coq/docs/distributed.md. The FedMachine is unaffected: normalizeCyclic
 // resets every shared value to bottom before its Kleene iteration, so a deployment that runs one
 // FedMachine (for example over a shared, totally ordered log) always gets the least fixed point.
 //
