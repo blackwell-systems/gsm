@@ -21,9 +21,14 @@ var ErrStaleProjection = errors.New("gsm: stale projection")
 //   - p.To is set and does not name this machine (a projection meant for another target);
 //   - or any of MergeProjection's checks fails.
 //
-// The merge preserves local validity by M1 only when p is the morphism image of a valid source
-// state (as SharedProjection computes it); the values are checked against the variables'
-// domains, not against the morphism's image set.
+// The merge preserves local validity by M1 only when s is valid and p is the image of a valid
+// source state along a single-source morphism (as SharedProjection computes it); the values are
+// checked against the variables' domains, not against the morphism's image set. Freshness keeps
+// an older projection from overwriting a newer one; it does not make a deployment converge.
+// Projection-based deployment is proved convergent under XU (dist_interleavings_converge in
+// normalization-confluence coq/FederationEvents.v), which Build reports in
+// FedReport.ProjectionSafe and requires only under Federation.RequireProjectionSafe; Build's C1
+// and C2 certify the FedMachine model only. See MergeProjection.
 func (m *Machine) MergeProjectionAfter(s State, p Projection, last uint64) (State, error) {
 	if p.To != "" && p.To != m.name {
 		return s, fmt.Errorf("gsm: MergeProjectionAfter: projection %s→%s is addressed to %q, not machine %q",

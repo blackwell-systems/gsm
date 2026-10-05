@@ -254,6 +254,8 @@ func (m *FedMachine) ApplyNamed(fs FedState, registry, event string) (FedState, 
 // Component returns the built single-registry Machine for r. In a distributed deployment
 // each node runs just its own component's Machine, applies local events to it, and exchanges
 // shared projections with its tree neighbours — no node needs the FedMachine or full state.
+// That deployment converges under XU, which Build reports in FedReport.ProjectionSafe but
+// requires only under Federation.RequireProjectionSafe (see SharedProjection).
 func (m *FedMachine) Component(r *Registry) *Machine {
 	i, ok := m.idx[r]
 	if !ok {
@@ -282,6 +284,18 @@ type Projection struct {
 // along their morphism, given the source's current state. Because Build verifies the image
 // depends only on the source (source-determinacy), the result is well-defined without the
 // target's state. Returns an error if there is no morphism src→dst.
+//
+// What Build certifies for a deployment built on projections: Build's C1 and C2 certify the
+// FedMachine model only (the repair runs after every event). Projection-based deployment, where
+// each node applies local events and merges projections (MergeProjection, MergeProjectionAfter)
+// as separate steps in any interleaving, is proved convergent once propagation completes under
+// XU, C1 at every valid target state, in an acyclic federation (dist_interleavings_converge in
+// normalization-confluence coq/FederationEvents.v); C1 and C2 alone do not suffice
+// (fed_grs_c1_c2_insufficient). Build reports XU in FedReport.ProjectionSafe (witnesses in
+// ProjectionWitnesses), and Federation.RequireProjectionSafe makes it a build requirement. For a
+// target with several sources the projection is this edge's Map image, which Build does not
+// verify (it verifies the resolver, whose merge over all sources is the step the theorem
+// covers), so ProjectionSafe is false for a federation with a multi-source target.
 func (m *FedMachine) SharedProjection(srcState State, src, dst *Registry) (Projection, error) {
 	si, ok := m.idx[src]
 	if !ok {

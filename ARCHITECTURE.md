@@ -498,7 +498,12 @@ variables, M1 for each morphism (R1/R2 for resolvers), cross-registry CC (C1: a 
 commutes with every source-driven change of its shared component, `CrossOrderError`), repaired CC
 (C2: two target events commute with the morphism repair between them, `SameTargetOrderError`), and
 acyclicity, or under `AllowMonotoneCycles` monotonicity over every state the Kleene iteration can
-visit. `FedReport.Checks` lists what ran and `FedReport.Assurance` says it is Go-checked.
+visit. On an acyclic network it then checks XU (`federation_projection.go`: C1 at every valid
+target state, the condition under which nodes that merge projections as separate steps converge,
+`dist_interleavings_converge`), reusing C1's image set; the result goes to
+`FedReport.ProjectionSafe` and `ProjectionWitnesses` and fails the build only under
+`RequireProjectionSafe`. `FedReport.Checks` lists what ran and `FedReport.Assurance` says it is
+Go-checked.
 
 The runtime `FedMachine` holds one component `State` per registry. `Apply` runs the component's
 table step, then repairs the shared components in topological order (or by Kleene iteration on a

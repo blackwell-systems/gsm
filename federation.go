@@ -19,7 +19,10 @@ import (
 // (normalization-confluence coq/FederationGRS.v, fed_thm_fed_convergence_refuted). Event
 // orders converge under the cross-registry conditions C1 and C2 in addition
 // (fed_thm_fed_convergence_guarded; coq/FederationEvents.v, fed_events_commute), which Build
-// also checks. The federated normal form is *constructive*: normalize each source
+// also checks. That is convergence of the FedMachine model, where the repair runs after every
+// event; a deployment that propagates by projections as separate steps (SharedProjection,
+// MergeProjection) needs the stronger XU (dist_interleavings_converge), which Build reports and
+// RequireProjectionSafe requires. The federated normal form is *constructive*: normalize each source
 // independently, then propagate shared components through morphisms/resolvers in topological
 // order. We never materialize the product machine, so federation sidesteps the
 // single-registry ceiling.
@@ -36,6 +39,10 @@ type Federation struct {
 	resolvers   map[*Registry]Resolver
 	allowCycles bool
 	certified   []*certifiedEmbed // sub-federations embedded on certificate (see certificate.go)
+
+	// requireProjection makes Build fail unless distributed projection merging is certified
+	// (RequireProjectionSafe).
+	requireProjection bool
 
 	// monotoneSubs names embedded sub-federations that opted in to AllowMonotoneCycles. The
 	// opt-in does not carry over to f; Build names them when it rejects a cycle, so the parent
@@ -231,9 +238,31 @@ type FedReport struct {
 	// Build returned a machine.
 	Assurance string
 
-	// Checks lists the federation-level checks Build ran and passed, in order. Empty unless
-	// Build returned a machine.
+	// Checks lists the federation-level checks Build ran and passed, in order, then one line
+	// stating whether distributed projection merging is certified (ProjectionLine), which Build
+	// reports but does not require unless RequireProjectionSafe was called. Empty unless Build
+	// returned a machine.
 	Checks []string
+
+	// ProjectionSafe reports whether distributed projection merging is certified: a deployment in
+	// which each node runs its own component Machine, applies local events, and merges its
+	// sources' projections (SharedProjection, MergeProjection, MergeProjectionAfter) whenever they
+	// arrive converges, once propagation completes, to the FedMachine run of the same events. It
+	// holds when the network is acyclic, has no multi-source target, and every target satisfies XU
+	// (dist_interleavings_converge in normalization-confluence coq/FederationEvents.v; see
+	// RequireProjectionSafe). Build's C1 and C2 certify the FedMachine model only, so a federation
+	// Build accepts can have ProjectionSafe false. Set whenever Build got far enough to check it
+	// (every other check passed), including when RequireProjectionSafe made it fail.
+	ProjectionSafe bool
+
+	// ProjectionLine states the projection result in one line: "certified (XU)", or "not
+	// certified" with the witnesses and reasons. It is also the last line of Checks.
+	ProjectionLine string
+
+	// ProjectionWitnesses holds, for each target where XU fails, the first failure found: a valid
+	// target state, a target event and a source image at which merging before and after the event
+	// give different states. Empty when XU holds everywhere it was checked.
+	ProjectionWitnesses []*ProjectionOrderError
 
 	// Runtime states, for each sub-federation embedded with EmbedCertified, what its internal
 	// morphisms and resolvers run at Apply time: the certificate's verified tables (the usual
@@ -328,6 +357,13 @@ type FedState struct {
 //
 // This is the federated analogue of gsm's single-registry contract: a FedMachine only
 // exists if convergence is guaranteed.
+//
+// That guarantee is for the FedMachine model, where the morphism repair runs after every event.
+// A distributed deployment that propagates by projections (SharedProjection, MergeProjection)
+// interleaves repair with local events as separate steps, which needs the stronger condition
+// XU (C1 at every valid target state); Build checks it on an acyclic network and reports the
+// result in FedReport.ProjectionSafe, ProjectionLine and ProjectionWitnesses, but does not
+// require it unless RequireProjectionSafe was called.
 //
 // Build verifies and builds the federation as it was when Build was called: a morphism,
 // component, or resolver added to f while Build runs (from inside a morphism closure, say) is not
@@ -446,7 +482,8 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	// Cross-registry CC (C1): every target event commutes with every source-driven change of the
 	// target's shared component. Repaired CC (C2): every pair of target events covered by the
 	// target's CC commutes with the repair between them. Both run per target, in one pass.
-	if err := f.verifyCrossOrder(m.comps); err != nil {
+	imgs, err := f.verifyCrossOrder(m.comps)
+	if err != nil {
 		return nil, report, err
 	}
 
@@ -486,9 +523,21 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 		m.topo = topo
 	}
 
+	// Distributed projection merging (XU): reported, and required only under
+	// RequireProjectionSafe, since Build's guarantee is the FedMachine model.
+	proj := f.verifyProjectionMerge(imgs, m.cyclic)
+	report.ProjectionSafe = proj.safe
+	report.ProjectionLine = proj.line
+	report.ProjectionWitnesses = proj.witnesses
+	if f.requireProjection {
+		if err := proj.err(f.name); err != nil {
+			return nil, report, err
+		}
+	}
+
 	report.Runtime = f.certRuntime(m, certSnaps, subOf)
 	report.Assurance = fedAssurance
-	report.Checks = f.checksRun(m.cyclic)
+	report.Checks = append(f.checksRun(m.cyclic), proj.line)
 	return m, report, nil
 }
 

@@ -190,10 +190,25 @@ func (m *Machine) lazyApply(ev eventDef, s State) State {
 // MergeProjection overwrites, on state s, the target variables named in a shared projection
 // received from a parent registry, returning the merged state. A distributed target node
 // uses it to incorporate its parent's shared component without holding the parent's state or
-// the federated machine. (Merging shared variables preserves local validity by the M1
-// guarantee, so no re-normalization is required, provided p is the morphism image of a valid
-// source state, as SharedProjection computes it.) It does not check order: a stale projection
-// merged after a newer one wins. Use MergeProjectionAfter when the transport can reorder.
+// the federated machine. It does not check order: a stale projection merged after a newer one
+// wins. Use MergeProjectionAfter when the transport can reorder.
+//
+// Validity: when s is valid and p is the image of a valid source state along a single-source
+// morphism (as SharedProjection computes it), the merged state is valid, because Build verifies
+// M1 for that morphism over every valid source and target state; no re-normalization is needed
+// for validity. That is all M1 gives. It does not hold for a morphism into a multi-source
+// (resolved) target, whose Map Build does not check against M1 (it checks the resolver's merge,
+// R2, and SharedProjection does not send that merge), and a merge does not repair an invalid s.
+//
+// Convergence: projection-based deployment (each node applies local events and merges its
+// sources' projections whenever they arrive, separate steps interleaved with the events) is
+// proved convergent, once propagation completes, only under XU: C1 at every valid target state,
+// not only those whose shared component is an image, in an acyclic federation
+// (dist_interleavings_converge in normalization-confluence coq/FederationEvents.v). Build's C1
+// and C2 certify the FedMachine model only, where the repair runs after every event, and C1 and
+// C2 alone do not make projection merging converge (fed_grs_c1_c2_insufficient). Build reports
+// XU in FedReport.ProjectionSafe (witnesses in ProjectionWitnesses); call
+// Federation.RequireProjectionSafe to make an uncertified federation a build error.
 //
 // It returns s unchanged and an error if s is not a state of this machine (see EffectFunc),
 // if the projection names a variable this machine does not have, or if a value is outside

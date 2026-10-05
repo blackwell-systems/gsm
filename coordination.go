@@ -234,7 +234,8 @@ func (f *Federation) withoutEdges(remove map[int]bool) *Federation {
 		allowCycles: f.allowCycles,
 		certified:   f.certified,
 
-		monotoneSubs: f.monotoneSubs,
+		monotoneSubs:      f.monotoneSubs,
+		requireProjection: f.requireProjection,
 	}
 	for _, r := range f.comps {
 		g.register(r)
