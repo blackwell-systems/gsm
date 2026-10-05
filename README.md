@@ -9,7 +9,7 @@
 
 **Send in any order. Converge on the rules.**
 
-gsm is the checker for [normalization confluence](https://github.com/blackwell-systems/normalization-confluence): a complete, mechanized map of when governed concurrent state converges, with exact conditions in every regime and a checker for the practical ones. The idea is **convergence by compensation**: operations may conflict and break invariants, and replicas still converge because repair is well-founded and commutes with events.
+gsm is the checker for [normalization confluence](https://github.com/blackwell-systems/normalization-confluence): an exact regime map of governed concurrent state. In every regime there is a machine-checked exact condition, a hardness result showing no efficient one exists, or a gap stated in the open ([regime audit](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)), and gsm checks the practical ones. The idea is **convergence by compensation**: operations may conflict and break invariants, and replicas still converge because repair is well-founded and commutes with events.
 
 What if distributed systems don't have to coordinate - because they agree on the rules ahead of time, so ordering and compensations are deterministic? The underlying theory - normalization confluence - proves that compensation is sufficient for convergence when two algebraic properties hold, without the expressiveness limits of CRDTs or the latency cost of consensus.
 
