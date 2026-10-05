@@ -16,7 +16,9 @@ repair (C2), declared-only pairs, duplicate delivery, invalid start states, clos
 `BuildCompositional`, monotone cycles over the states the Kleene iteration visits, certificate
 tables, projection staleness, resolver conflicts and the cycle opt-in scope. And a certified
 sub-federation now executes the verified tables it was certified with, rather than the closures
-they were checked against. Merged from #19, #20, #21, #22, #23, #24, #26 and #27.
+they were checked against. Event order on monotone cycles is now certified by the same C1 and C2
+checks, backed by a mechanized theorem. Merged from #19, #20, #21, #22, #23, #24, #26, #27, #28
+and #29.
 
 ### Breaking / behavior changes (upgrading from v0.12.0)
 
@@ -95,6 +97,12 @@ which keeps existing calls compiling. What can start failing, or behave differen
 - **`Export` writes format version 2 (#23).** The JSON `version` field is now `2`, and
   `verification` gains `pairs` (the event pairs CC was checked for, by name) and `all_pairs`.
   Version 2 only adds fields; readers that reject an unknown version must accept 2.
+- **`DiagnoseCycle` no longer reports an obstruction from one seed (#29).** When the zero seed
+  does not settle, it now tests every seed of the cycle's finite fiber. `Converges` keeps its
+  meaning (the zero seed settles); use the new `Obstructed()` for "no consistent state exists".
+  Code that read `Converges == false` as a proven contradiction should switch to `Obstructed()`.
+- **`BuildCoordinated` rejects a `CoordinationPoint.Authority` other than `Dst` (#29).** An empty
+  `Authority` is still accepted.
 - **Report text changed.** New `Report` lines: undeclared pairs and "GUARANTEED under causal
   delivery", "Delivery: exactly once", "Saturation:", "Coordinated input"; `Synthesis` opens with
   `REPAIR SYNTHESIZED` when it substituted the repairs; `FedReport` prints its `Assurance`, the
@@ -143,6 +151,23 @@ which keeps existing calls compiling. What can start failing, or behave differen
   repairs.
 - **Export format version 2 (#23):** `verification.pairs` and `verification.all_pairs`.
 
+- **`CycleDiagnostic.AllSeeds`, `Seeds`, `SectionExists`, `Section` and `Obstructed()` (#29).**
+  A section exists iff some seed reaches a fixed point (`CohomologyGeneral.v`,
+  `thm_obstruction_reachable`, `c15_exact_refuter`). Above 2^20 seed combinations the search is
+  skipped and the diagnostic says only that the zero seed does not settle.
+- **`CoordinationPoint.Authority` (#29):** the registry each coordinated cycle is driven from. The
+  normal form is unique given the plan, but a different cut picks a different root and a different
+  normal form (`CoordinatedCycles.v`, `root_choice_matters`); the report's "Coordinated input"
+  line names it.
+- **Event order on monotone cycles is certified (#28).** On `AllowMonotoneCycles` networks, the
+  per-target C1 and C2 checks already compared locals after the final overwrite over each target's
+  full image set, which is exactly the hypothesis of `cyc_check_gc_lfp`
+  (`FederationEventsCyclesCheck.v`); `FedReport.Checks` now says event order on the cycle is
+  certified. A multi-source target is checked against its resolver's joint image, so the result
+  does not depend on M1 or on combining per-edge checks (`FederationEventsCyclesMulti.v`). New
+  regression tests: the latch (fails C1), the shared-write instance (builds), the Swap/Audit cycle
+  (fails C2), and a resolver `x + y` whose per-edge images miss the value 2.
+
 ### Changed
 - **BREAKING: `BuildCompositional` rejects closure rules unless `TrustClosureFootprints()` is
   passed (#22).** Combinator-only machines need no option.
@@ -174,9 +199,22 @@ which keeps existing calls compiling. What can start failing, or behave differen
   its authority root. Two examples that did not converge as written were corrected (EXPLAINER's
   order machine and a CONCEPTS fix suggestion), and stale claims were removed (EXPLAINER called
   `CoordinationPlan` minimal; CERTIFICATE-DESIGN described a fallback to full re-verification that
-  `Build` does not do).
+  `Build` does not do). `BuildCompositional`'s cross-component claim now cites
+  `calc_components_cc1_valid` (sound at valid states, which is all `Apply` reaches) and notes that
+  the refuted invariant-footprint theorem is not used (#29). Cycle docs cite `cyc_check_gc_lfp`
+  instead of saying C1 and C2 are unproved on cycles (#28).
 
 ### Fixed
+- **`DiagnoseCycle` called a cycle obstructed when only the zero seed failed to settle (#29).** On
+  the loop "copy, then swap 0 and 1" over {0,1,2}, the zero seed orbits but 2 is a consistent
+  value; v0.12 reported no reachable fixed point (`c15_definitive_claim_false`).
+- **The `Export` runtime contract applied events to unnormalized states (#29).** The documented
+  foreign-runtime recipe and the Python example looked up `step[e][state]` directly; on a registry
+  where an invalid state is reachable by hand they diverged from `Machine.Apply`. Both now look up
+  `nf[state]` first, as `Machine.Apply` does.
+- **Federation docs stated the refuted claim that M1 alone gives federated convergence (#29).**
+  M1 gives a terminating, valid repair; event order also needs C1 and C2
+  (`fed_thm_fed_convergence_refuted`, `fed_thm_fed_convergence_guarded`).
 - **Cross-registry event order was never checked (#19).** A target event reading a shared
   variable could diverge against a source event, and `Federation.Build` accepted it.
 - **Two target events could diverge through the morphism repair (#26)** although each registry's
