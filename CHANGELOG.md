@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.13.0] - Unreleased
+## [0.13.0] - 2026-10-04
 
 A trust-point release. Every condition a developer could get wrong in the v0.12.0 trust audit is
 now a check gsm runs, a default it picks, or an obligation the report names and explains: event
