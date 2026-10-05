@@ -494,10 +494,45 @@ func (e *CrossOrderError) Error() string {
 // For a single-source target |Img| <= |valid(src)|, so this is within the M1 enumeration
 // bound verifyEdge already enforces.
 //
-// The same checks (C1 and C2) run on AllowMonotoneCycles networks. There they rule out the same
-// races between a target event and a change of its shared component, but the argument above is
-// for the acyclic sweep: on a cycle a target's local state can also feed back into its own
-// sources, which this check does not model.
+// The same checks (C1 and C2), unchanged, certify event order on AllowMonotoneCycles networks.
+// The argument above is for the acyclic sweep; on a cycle the reason is different and is
+// mechanized in normalization-confluence coq/FederationEventsCyclesCheck.v (cyc_check_gc for any
+// normalizer whose shared part is a function of the locals, cyc_check_gc_lfp for normalizeCyclic's
+// Kleene iteration). normalizeCyclic resets every controlled variable to bottom before the
+// sweeps, so an event's shared writes are erased and only its local outcome survives
+// (cyc_check_step). With H_j the set of shared values the repair can write into target j from
+// valid states, the theorem's two hypotheses are
+//
+//	C1cyc: for every event e of j, every valid (x, h) with h in H_j and every h' in H_j,
+//	       the locals of ρ_j(e(x, h')) equal the locals of ρ_j(e(x, h));
+//	C2cyc: for every pair (a, b) j's CC covers and every valid (x, h) with h in H_j,
+//	       the locals of ρ_j(a(locals of ρ_j(b(x, h)), h)) and of ρ_j(b(locals of ρ_j(a(x, h)), h)) agree;
+//
+// and together they imply GC (every interleaving of independent events converges) from every
+// normal form. The checks here are exactly these:
+//
+//   - Img is H_j. It is the image of the morphism over every valid source state (the source's
+//     shared part included, since on a cycle a source can itself be a target), or, for a
+//     multi-source target, of the resolver over every combination of valid source states. A
+//     multi-source target is therefore checked against the joint image of all its incoming
+//     edges, which is the theorem's per-registry H_j directly: no lemma combining per-edge
+//     checks into the whole-target condition is used. Img contains every normal form's shared
+//     part, because normal forms are valid (verifyMonotoneVisited) and each target's shared
+//     part at the least fixed point is the image of its sources there (Hs_img in the theorem).
+//   - consistent is the valid target states with shared part in Img, the theorem's (x, h).
+//   - ow(·, v2) at the end of both sides of C1, and ow(·, v) at the end of both sides of C2, fix
+//     the controlled bits, so comparing the packed states compares the locals only, after the
+//     final overwrite, as C1cyc and C2cyc do. The controlled bits (mask) are the variables
+//     normalizeCyclic resets.
+//   - The checked pairs are the target's own CC pairs (all pairs, or the declared Independent
+//     ones), the theorem's I.
+//
+// The remaining hypotheses of cyc_check_gc_lfp (monotone repair and valid images on every
+// visited state, component steps that end valid, phase 1 fixing valid states) are what
+// verifyMonotone, verifyMonotoneVisited and Registry.Build establish. Neither C1cyc nor C2cyc
+// can be dropped: check_rejects_latch (an event that copies a shared flag into a local fails
+// C1) and c1_localcc_insufficient (C1 and each registry's own CC hold, C2 fails, and two
+// orders diverge) are regression tests in federation_cycle_events_test.go.
 func (f *Federation) verifyCrossOrder(comps []*Machine) error {
 	inEdges := make([][]edgeDef, len(f.comps))
 	for _, e := range f.edges {
@@ -688,7 +723,8 @@ func (e *SameTargetOrderError) Error() string {
 // CC gives e1(e2(b)) = e2(e1(b)) without the repair, and C1 (verifyCrossOrder) says an event
 // does not care whether the source moved before it; neither implies C2 (c2_counterexample),
 // and C1 + C2 together make every interleaving of federated-independent events converge in
-// an acyclic federation (fed_events_commute). A pair outside the checked set is not declared
+// an acyclic federation (fed_events_commute) and on a monotone cycle (cyc_check_gc_lfp; see
+// verifyCrossOrder). A pair outside the checked set is not declared
 // independent, so the federation, like the component, makes no promise about its order.
 //
 // Cost per target: 4 x |pairs| x |consistent| machine table lookups, where |consistent| is
