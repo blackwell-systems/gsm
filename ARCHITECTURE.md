@@ -360,7 +360,10 @@ The Phase 1 and Phase 3 algorithms above enumerate the **global** state space, w
 `Build` at the 20-bit ceiling. But WFC and CC are local properties when every rule reads and writes
 only its declared footprint: events that read and write disjoint variables commute by structure
 (the mechanized `disjoint_events_commute` result, whose precondition is exactly that an event reads
-only its own footprint). So a registry partitions into footprint-connected **components** that
+only its own footprint), and with normalization acting per component the pair satisfies CC1 at
+every valid state (`calc_components_cc1_valid`). At an invalid state it need not
+(`calc_components_cc1_iff`), which is why `Machine.Apply` normalizes an invalid input before the
+event. So a registry partitions into footprint-connected **components** (of state variables) that
 never interact, and it suffices to verify each component over the subspace of its own variables.
 
 `Registry.BuildCompositional` does exactly this:

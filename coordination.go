@@ -9,9 +9,17 @@ import (
 // external coordination (a single writer, a lock, or a consensus round) so that the network's
 // convergence obstruction is broken. Coordinating the point means the target's shared variables are
 // set by that external mechanism rather than driven by this morphism.
+//
+// Authority names the registry whose coordinated shared variables become the root of every cycle
+// the point breaks: with the edge removed, the residual network drives the rest of each such cycle
+// from those values, so they are the authority values the cycle's normal form depends on. It is
+// always Dst. A normal form is unique only given such an authority (normalization-confluence
+// coq/CoordinatedCycles.v, copyback_without_authority), and a different choice of root changes it
+// (root_choice_matters), so the plan names it rather than leave it implicit in the edge.
 type CoordinationPoint struct {
-	Src, Dst string   // the morphism src -> dst
-	Shared   []string // the shared variable names it controls
+	Src, Dst  string   // the morphism src -> dst
+	Shared    []string // the shared variable names it controls
+	Authority string   // the registry that is the root of the cycles this point breaks (Dst); may be left empty in a plan passed to BuildCoordinated
 }
 
 func (c CoordinationPoint) String() string {
@@ -29,6 +37,16 @@ func (c CoordinationPoint) String() string {
 // most the number of independent cycles, but not necessarily the minimum. The exact minimum is the
 // group feedback edge set problem, NP-hard in general (see CATEGORICAL-STRUCTURE.md in the papers
 // repo); this plan is the always-correct upper bound.
+//
+// The plan fixes the authorities. BuildCoordinated's residual is acyclic, so given the values of
+// the coordinated shared variables (and of the residual's source registries) its normal form is
+// unique and every order of propagation reaches it. Which edges are cut decides which registries
+// hold those values: cutting B->A in a copy-back loop A <-> B makes A the root, cutting A->B makes
+// B the root, and from the same state the two reach different normal forms (A = B = A's value
+// versus A = B = B's value; coq/CoordinatedCycles.v, root_choice_matters). The search visits
+// components in the order they were added to the federation and edges in declaration order, so
+// the plan is deterministic, and each point names its root in Authority. To choose a different
+// root, pass BuildCoordinated a plan that cuts a different edge of the cycle.
 func (f *Federation) CoordinationPlan() []CoordinationPoint {
 	n := len(f.comps)
 	type outEdge struct{ to, ei int }
@@ -70,12 +88,7 @@ func (f *Federation) CoordinationPlan() []CoordinationPoint {
 		if !backSet[ei] {
 			continue
 		}
-		e := f.edges[ei]
-		cp := CoordinationPoint{Src: e.src.name, Dst: e.dst.name}
-		for _, v := range e.shared {
-			cp.Shared = append(cp.Shared, v.name)
-		}
-		plan = append(plan, cp)
+		plan = append(plan, pointOf(f.edges[ei]))
 	}
 	return plan
 }
@@ -97,9 +110,17 @@ func (f *Federation) CoordinationPlan() []CoordinationPoint {
 // (parallel morphisms between two registries are separate points). A point that matches none
 // is an error, which says so when a Src->Dst morphism exists but shares other variables,
 // rather than coordinate something other than what the caller named.
+// Authority may be left empty; when set it must be Dst, the only registry a removed edge can make
+// a root, and any other value is an error.
 func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *FedReport, error) {
 	remove := map[int]bool{}
 	for _, cp := range plan {
+		if cp.Authority != "" && cp.Authority != cp.Dst {
+			return nil, &FedReport{Name: f.name, Edges: len(f.edges)}, fmt.Errorf("gsm: coordination point %s: authority %q is not "+
+				"the target %q; removing %s->%s makes %s's shared variables the external input, so %s is the root of "+
+				"the cycles it breaks (to make another registry the root, coordinate an edge into it)",
+				cp, cp.Authority, cp.Dst, cp.Src, cp.Dst, cp.Dst, cp.Dst)
+		}
 		// A point removes every morphism it names by Src, Dst and shared variable set (there
 		// may be parallel morphisms between two registries, each its own point). The set is
 		// what is coordinated, so a point that matches no morphism on all three is an error,
@@ -149,16 +170,22 @@ func recordCoordinated(rep *FedReport, edges []edgeDef, remove map[int]bool) {
 		if !remove[ei] {
 			continue
 		}
-		cp := CoordinationPoint{Src: e.src.name, Dst: e.dst.name}
-		for _, v := range e.shared {
-			cp.Shared = append(cp.Shared, v.name)
-		}
+		cp := pointOf(e)
 		for _, c := range rep.Components {
 			if c != nil && c.Name == e.dst.name {
 				c.Coordinated = append(c.Coordinated, cp)
 			}
 		}
 	}
+}
+
+// pointOf returns the coordination point that names edge e, with its authority (the target).
+func pointOf(e edgeDef) CoordinationPoint {
+	cp := CoordinationPoint{Src: e.src.name, Dst: e.dst.name, Authority: e.dst.name}
+	for _, v := range e.shared {
+		cp.Shared = append(cp.Shared, v.name)
+	}
+	return cp
 }
 
 // sortedNames returns a sorted copy of names.

@@ -292,7 +292,12 @@ type verifyInfo struct {
 //
 // Runtime libraries only need to:
 //  1. Load the JSON
-//  2. Implement Apply(state, event) as step[events[event]][state]
+//  2. Implement Apply(state, event) as step[events[event]][s], where s is state normalized
+//     first (nf[state]) unless state is 0, exactly as Machine.Apply does. The step table
+//     at an invalid state is the raw "event, then repair" result, and CC was verified only
+//     from valid states and the zero state: two orders of the same events from an invalid
+//     state (one restored from storage, say) can disagree when the runtime skips that
+//     lookup.
 //
 // Example runtime (Python):
 //
@@ -303,7 +308,10 @@ type verifyInfo struct {
 //	            d = json.load(f)
 //	        self.events = {n: i for i, n in enumerate(d['events'])}
 //	        self.step = d['step']
+//	        self.nf = d['nf']
 //	    def apply(self, state, event):
+//	        if state != 0:
+//	            state = self.nf[state]  # normalize an invalid input first
 //	        return self.step[self.events[event]][state]
 func (m *Machine) Export(path string) error {
 	if m.lazy {

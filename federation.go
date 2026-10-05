@@ -11,17 +11,23 @@ import (
 // Per "Normalization Confluence in Federated Registry Networks" (Blackwell, 2026), §8:
 // a federation is itself a registry — the federated state space is the product of the
 // component spaces, morphism-consistency conditions are extra invariants, and morphism
-// repair is extra compensation. Convergence therefore follows from the single-registry
-// theorem for any acyclic network in which every single-source morphism preserves validity
-// under shared-component overwrite (M1) and every multi-source target has a Resolver
-// satisfying source-determinacy (R1) and validity-preservation (R2). The federated normal
-// form is *constructive* (Corollary 8.10): normalize each source independently, then
-// propagate shared components through morphisms/resolvers in topological order. We never
-// materialize the product machine, so federation sidesteps the single-registry ceiling.
+// repair is extra compensation. In an acyclic network in which every single-source morphism
+// preserves validity under shared-component overwrite (M1) and every multi-source target has
+// a Resolver satisfying source-determinacy (R1) and validity-preservation (R2), the federated
+// repair terminates in a valid state. That is not convergence of event orders: the paper's
+// theorem that M1 (or R1/R2) and component WFC + CC suffice is false as stated
+// (normalization-confluence coq/FederationGRS.v, fed_thm_fed_convergence_refuted). Event
+// orders converge under the cross-registry conditions C1 and C2 in addition
+// (fed_thm_fed_convergence_guarded; coq/FederationEvents.v, fed_events_commute), which Build
+// also checks. The federated normal form is *constructive*: normalize each source
+// independently, then propagate shared components through morphisms/resolvers in topological
+// order. We never materialize the product machine, so federation sidesteps the
+// single-registry ceiling.
 //
-// Build enforces the theorems' preconditions: components converge (WFC + CC), the network is
-// acyclic, single-source morphisms satisfy M1, and resolvers satisfy R1/R2 — all by finite
-// enumeration. A FedMachine exists only if the whole network is proven convergent.
+// Build enforces the corrected theorem's preconditions: components converge (WFC + CC), the
+// network is acyclic, single-source morphisms satisfy M1, resolvers satisfy R1/R2, and target
+// events satisfy C1 and C2, all by finite enumeration. A FedMachine exists only if the whole
+// network is proven convergent.
 type Federation struct {
 	name        string
 	comps       []*Registry

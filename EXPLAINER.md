@@ -82,7 +82,7 @@ Some systems genuinely cannot converge on their own. The classic shape is a cycl
 
 ```go
 if _, _, err := fed.Build(); err != nil { /* rejected: non-monotone cycle */ }
-d, _ := fed.DiagnoseCycle()   // d.Converges == false, and it tells you why
+d, _ := fed.DiagnoseCycle()   // d.Obstructed() == true: no starting value settles, and the orbit shows why
 ```
 
 Instead of failing there, it computes a coordination plan: a set of connection points to put a coordination barrier on so the rest can run free. The set is always correct and never larger than the number of independent loops; the true minimum is NP-hard in general, so gsm does not promise it.

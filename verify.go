@@ -60,7 +60,9 @@ type Report struct {
 	// into it that BuildCoordinated removed: their shared variables are external
 	// inputs that the coordination mechanism (a single writer, a lock, a consensus
 	// round) must serialize, and each write must leave the component valid
-	// (Normalize after writing). gsm does not check that coordination.
+	// (Normalize after writing). gsm does not check that coordination. Each point's
+	// Authority is this component: its coordinated values are the root the normal form
+	// of every cycle the removed edge broke is driven from.
 	Coordinated []CoordinationPoint
 
 	// Compositional (BuildCompositional) results
@@ -234,7 +236,8 @@ func (r *Report) obligations() string {
 	}
 	for _, cp := range r.Coordinated {
 		fmt.Fprintf(&b, "  Coordinated input: %s is set by external coordination, not by a morphism; "+
-			"serialize its writes and Normalize after each (not checked by gsm)\n", cp)
+			"%s is the authority the normal form of the cycles it breaks depends on; "+
+			"serialize its writes and Normalize after each (not checked by gsm)\n", cp, cp.Authority)
 	}
 	return b.String()
 }
