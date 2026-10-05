@@ -339,10 +339,12 @@ type FedState struct {
 // It refuses any network that the paper proves cannot converge:
 //
 //   - each component must satisfy WFC + CC (via Registry.Build);
-//   - the network must be a tree/forest — no cycles (Prop 8.13) and at most one incoming
-//     morphism per registry (multi-source is out of scope, Remark 8.15);
-//   - each morphism must satisfy M1, validity preservation under shared-component overwrite
-//     (Prop 8.14), and its Map must touch only the declared Shared() variables.
+//   - the network must be acyclic (Prop 8.13), unless AllowMonotoneCycles is set and every
+//     morphism and resolver is verified monotone over the states the iteration visits;
+//   - a registry with one incoming morphism is driven by that morphism, which must satisfy M1
+//     (validity preservation under shared-component overwrite, Prop 8.14) and touch only the
+//     declared Shared() variables; a registry with several incoming morphisms must have a
+//     Resolver, verified source-determined (R1) and validity-preserving (R2);
 //   - every target event must commute with every change of the target's shared component that
 //     its source(s) can cause (cross-registry CC, C1; a failure is a *CrossOrderError);
 //   - every pair of target events the target's own CC covers must still commute when the
