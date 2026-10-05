@@ -34,7 +34,7 @@ jobs:
       run: go vet ./...
 
     - name: Check doc snippets
-      # Every Go block in the top-level docs type-checks, and every README example
+      # Every Go block in the docs (README.md, docs/) type-checks, and every README example
       # marked `run` executes (and so Builds its machine). Also part of go test above;
       # run on its own so a doc failure is visible by name.
       if: matrix.os == 'ubuntu-latest'

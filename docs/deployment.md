@@ -1,0 +1,128 @@
+# Deployment
+
+`Build`'s guarantee is about a model: which events arrive, how often, in what order, and where
+the repair runs. Some of what that model assumes is about your runtime, not your rules, so `Build`
+cannot enforce it. It measures what it can and names the rest in the report. This page lists each
+obligation, what the report says about it, and what to do.
+
+- [Delivery](#delivery): each event once, and causal order for undeclared pairs.
+- [Running a federation as one machine](#running-a-federation-as-one-machine): the `FedMachine`, for example over a shared log.
+- [Projection deployments](#projection-deployments): one node per registry, merging projections.
+- [Cycles: ghosts and reset epochs](#cycles-ghosts-and-reset-epochs): why projection deployments on a cycle are not certified, and what would certify them.
+
+To run a built machine outside Go, see the [export format](reference.md#multi-language-runtime).
+
+---
+
+## Delivery
+
+### Duplicates and redelivery
+
+The guarantee is about orderings of one multiset of events: each event applied once. If your
+transport can redeliver (an at-least-once queue, a client retry), check `Report.NotIdempotent`.
+It lists every event whose second application changes the state, and the report prints:
+
+```
+  Delivery: exactly once for withdraw (applying one twice differs from once); deduplicate redelivered events
+```
+
+Those events need an event id and a dedupe set (or equivalent) in front of `Apply`. A non-idempotent
+event delivered twice always diverges from delivering it once, while an idempotent one is absorbed
+when it commutes with what arrived between the copies (normalization-confluence
+[`AtLeastOnce.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/AtLeastOnce.v): `non_idempotent_diverges`, `alo_absorbed`). A counter
+increment is the typical case that needs deduplication; setting a flag is not.
+
+Under causal delivery (declared-only mode, [below](#causal-order-for-undeclared-pairs)) there is one more rule: a redelivered copy must not
+arrive after an event that causally follows the original. Idempotence does not cover that case
+(`late_duplicate_diverges`: `add`, `remove`, then a late duplicate `add` leaves a flag set that
+exactly-once delivery clears).
+
+The formal account, including when every at-least-once delivery reaches the exactly-once result,
+is [Theory §7.8](theory.md#78-delivery-duplicates-and-redelivery).
+
+### Causal order for undeclared pairs
+
+When you declare some pairs `Independent` ([Getting started](getting-started.md#independence-declarations)),
+**every undeclared pair must be delivered in causal order.** Declared-only mode is sound only if each pair you did not declare reaches every replica in one fixed order (normalization-confluence `coq/Trace.v` `run_tequiv`, `coq/CausalReplay.v` `causal_tequiv`). gsm cannot see your delivery order, so `Build` still checks every undeclared pair on its step tables (two lookups per state, no closure calls) and does not fail on them, but lists each one that does not commute in `Report.CausalOrderRequired`, with a witness state. The report then reads:
+
+```
+  Undeclared pairs: 5 checked, 3 do not commute: each must be causally ordered (not independent), delivered in the same order at every replica
+    (close, deposit) from {open=true, bal=0, notified=false}: close→deposit gives ..., deposit→close gives ...
+  Convergence: GUARANTEED under causal delivery of the 3 undeclared pair(s) above
+```
+
+If your runtime can reorder a listed pair, it is not causally ordered: declare it `Independent` (and fix the rules until it commutes) instead. An empty list means every pair commutes and the declarations cost nothing.
+
+---
+
+## Running a federation as one machine
+
+A `FedMachine` (from `Federation.Build`) runs the morphism repair after every event, so a target
+never acts on a shared value its source has not approved. That is the model C1 and C2 certify
+([Federation](federation.md#event-order-across-registries-c1-and-c2)). A deployment that runs the
+`FedMachine` itself (for example one `FedMachine` over a shared, totally ordered log) gets that
+guarantee directly, on acyclic networks and monotone cycles alike: on a cycle, `normalizeCyclic`
+performs the reset to bottom on every normalization, so nothing in
+[the cycle section below](#cycles-ghosts-and-reset-epochs) applies.
+
+---
+
+## Projection deployments
+
+Instead of running the `FedMachine`, each node can run only its own component (`FedMachine.Component`): it applies local events to its own `Machine`, its sources send `FedMachine.SharedProjection` messages, and it merges them with `Machine.MergeProjection` (or `MergeProjectionAfter`, which refuses stale or misaddressed projections) whenever they arrive. That is a different model from the one C1 and C2 certify. In the `FedMachine` the morphism repair runs after every event; on a node, a local event can write a shared variable and a second event can run before the next projection repairs it, and the next local event then reads a value no source would ever send. C1 does not cover that state, because C1 only looks at targets whose shared value is something a source can produce.
+
+The formal counterexample (`fed_grs_c1_c2_insufficient` in [`FederationGRS.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/FederationGRS.v)) has a target with a shared `flag` that its source always sets to `false`, and two events that each flip `flag` and fold the old `flag` into a local `acc`. C1 and C2 hold, and every `FedMachine` order converges. But node A merges between the two flips and ends with `acc = false`, while node B flips twice before merging and ends with `acc = true`: two nodes that see the same events but merge at different times end in different states.
+
+**XU.** The projection model is proved convergent, once propagation completes, under the stronger condition **XU**: C1 at *every* valid target state, not only those whose shared component is an image, in an acyclic federation ([`FederationEvents.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/FederationEvents.v): `dist_interleavings_converge`, `propagation_flush`; `xu_implies_c1_c2`). Under XU (and each registry's own CC), every interleaving of local events and merges converges once propagation completes. `Build` does not require XU, since its guarantee is the `FedMachine`. It checks XU on every target (cost per target: events x valid target states x (images + 1) table lookups, no closure calls) and reports it without requiring it:
+
+- `FedReport.ProjectionSafe`;
+- a `FedReport.Checks` line (`distributed projection merging ...: certified (XU)` or `not certified: <witness or reason>`), also in `FedReport.ProjectionLine`;
+- `FedReport.ProjectionWitnesses`, one `*ProjectionOrderError` per failing target.
+
+**`RequireProjectionSafe` certifies distributed deployment.** `Federation.RequireProjectionSafe()` makes XU a build requirement: `Build` then returns the `*ProjectionOrderError` (target, event, state, and the two diverging results), or an error naming the structural reason, both wrapping `ErrProjectionNotCertified`. Call it if your deployment merges projections and you want `Build` to refuse a federation that is not certified for it. Like `AllowMonotoneCycles`, it belongs to the federation it is called on.
+
+**What is not certified.** `ProjectionSafe` is false on a cyclic network (the theorem is for acyclic ones; [why that is required](#cycles-ghosts-and-reset-epochs)) and on a network with a multi-source target (`SharedProjection` sends one edge's `Map` image, not the resolver's merge the theorem covers). Like C1 and C2, XU is static: a witness is a valid state that a given deployment need not reach. M1 guarantees each merge keeps a valid node valid; it does not make the nodes converge.
+
+**Ordering projections.** A projection carries no ordering by itself. A transport that can reorder
+or redeliver projections should stamp `Projection.Version` (strictly increasing per source-target
+edge, assigned by the source node; `SharedProjection` leaves it 0) and merge with
+`MergeProjectionAfter`, which refuses a projection that is not newer than the last one applied
+from that edge (wrapping `ErrStaleProjection`) or that names another target. Freshness keeps an
+older projection from overwriting a newer one; it does not make a deployment converge. XU does.
+
+---
+
+## Cycles: ghosts and reset epochs
+
+The "not certified" on a cyclic network is required, not conservative. On a monotone cycle the repair equations can have several fixed points, and the `FedMachine` picks the least one because `normalizeCyclic` resets every shared value to bottom before its Kleene iteration. Projection nodes have no such reset.
+
+In the ladder picture of [monotone cycles](federation.md#escape-hatch-2-monotone-cycles), "the climb halts at the same top no matter which value you nudge first" is true *when the climb starts from the bottom rung*. The `FedMachine` makes sure it does: every time it normalizes a cycle, it first pushes every shared value back down to the bottom rung and then climbs. Separate nodes have no such referee. Each one just overwrites its shared values with whatever its sources currently say, and a value that is already high can stay high.
+
+### A ghost
+
+Here is the smallest loop where that bites. Two nodes, A and B. Each has a local `alarm`, and each has a shared `flag` that its partner fills in:
+
+```
+   A.flag = B.alarm OR B.flag
+   B.flag = A.alarm OR A.flag
+```
+
+Both arrows are an `OR`, so they only ever push a flag up: the loop is monotone, and gsm accepts it. Now run these four steps on separate nodes:
+
+1. A raises its alarm.
+2. B hears from A: `B.flag = true OR false = true`.
+3. A hears from B: `A.flag = false OR true = true`.
+4. A clears its alarm.
+
+Both flags are now `true`, and both alarms are `false`. Ask each node to re-check: `A.flag = B.alarm OR B.flag = false OR true = true`, and `B.flag = A.alarm OR A.flag = false OR true = true`. Nothing changes. The two flags hold each other up, with no alarm anywhere behind them. That is a **ghost**: a resting point of the loop, just not the lowest one, a quiescent state that no propagation leaves. The `FedMachine` with the same four events gives both flags `false`, because it resets them to the bottom rung before it climbs, and with both alarms clear the climb never leaves the bottom. No amount of further propagation brings the nodes there: from the ghost, every re-check says "still true."
+
+The ghost survives every check gsm runs on the loop: cyclic C1 and C2, monotonicity, the cyclic form of XU (reachable XU), and convergence of the `FedMachine` itself (`dist_cyc_ghost` in [`DistributedCycles.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/DistributedCycles.v), which lands with [normalization-confluence PR #62](https://github.com/blackwell-systems/normalization-confluence/pull/62); see also `dist_schedule_dependence`, `dist_ring_livelock`, `q1_stuck`). That is why gsm reports projection merging on any cyclic network as not certified.
+
+### What would certify a cyclic projection deployment
+
+Two deployments are certified on a cycle, and gsm does not implement either as an API:
+
+- **Reset epochs.** At a barrier, every node resets its shared values to bottom; the nodes then propagate until quiescent (at most as many sweeps of every target as the `FedMachine`'s Kleene iteration takes), with no events applied inside the epoch. That is exactly what the `FedMachine` does on every step, done occasionally and collectively. After the epoch every node holds the `FedMachine` state for the events so far, whatever their interleaving. Exactly: agreement after a final epoch iff reachable cyclic XU (`epoch_agree_iff`), convergence iff that plus `FedMachine` convergence (`epoch_conv_iff`); gsm's per-target cyclic C1 and C2 suffice when their image set is widened by each slot's bottom value and the values events write (`lens_epoch`). The reset must be a barrier: if A resets while B still holds the ghost, A's next re-check reads B's `true` and the ghost is back in one propagation step (`dist_cyc_epoch_fix`). States between epochs are not certified.
+- **No resets, no ghosts.** Without resets a deployment is certified only when no larger fixed point can arise: every event is inflationary (it raises locals in an order the morphisms are monotone in and never raises a shared value, for example an alarm that can be raised but never cleared: `evlow_lowr`, `infl_evlow`), or the repair has a unique fixed point for every assignment of the locals (`uniq_agree`, `q1_unique_iff`). A clear event on a feedback loop fails both and needs epochs: the flag loop fails both because "clear the alarm" is a step down with a feedback loop to remember the old value.
+
+A deployment that runs the `FedMachine` itself (for example one `FedMachine` over a shared, totally ordered log) is unaffected: it performs the reset on every normalization. The formal model and the full statements are in [Theory §11.4](theory.md#114-multi-registry-systems).

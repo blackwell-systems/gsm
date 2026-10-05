@@ -17,7 +17,7 @@ import (
 	"testing"
 )
 
-// Doc-snippet check: every ```go block in the top-level docs compiles, and every
+// Doc-snippet check: every ```go block in the docs compiles, and every
 // block marked `run` executes successfully (README examples Build their machine
 // and panic on a verification error, so a non-convergent example fails here).
 //
@@ -33,11 +33,17 @@ import (
 // unchecked. Snippets see the gsm package both qualified (gsm.X) and dot-imported
 // (X), plus fmt, log, os, and strings.
 
-// docFiles are the top-level docs whose Go blocks are checked. EXPLAINER.md is
-// excluded pending its author's review (its blocks are untouched by this check).
+// docFiles are the docs whose Go blocks are checked. The former top-level
+// CONCEPTS.md, EXPLAINER.md, FEDERATION-CONCEPTS.md and THEORY.md are stubs that
+// point into docs/. docs/design/HOLONOMY-COORDINATION-DESIGN.md is excluded: its
+// one block sketches an API that does not exist.
 var docFiles = []string{
-	"README.md", "ARCHITECTURE.md", "CONCEPTS.md", "THEORY.md",
-	"FEDERATION-CONCEPTS.md", "CERTIFICATE-DESIGN.md", "CHANGELOG.md",
+	"README.md",
+	"docs/getting-started.md", "docs/concepts.md", "docs/federation.md",
+	"docs/deployment.md", "docs/verification.md", "docs/reference.md",
+	"docs/theory.md",
+	"docs/design/ARCHITECTURE.md", "docs/design/CERTIFICATE-DESIGN.md",
+	"CHANGELOG.md",
 }
 
 // preludes declare the variables a `check` snippet's surrounding prose has set up.

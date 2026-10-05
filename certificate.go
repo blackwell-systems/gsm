@@ -13,7 +13,7 @@ import (
 // EmbedCertified: the embedding skips re-verifying the subsystem's internal morphisms from their
 // closures, re-checks them from the certificate's tables instead, and rebuilds each component
 // with Build (so component convergence is re-checked, not trusted). A certificate is validated by
-// re-check, never trusted for its recorded verdict; see CERTIFICATE-DESIGN.md.
+// re-check, never trusted for its recorded verdict; see docs/design/CERTIFICATE-DESIGN.md.
 //
 // The digest covers each component's name, serializable policy (PolicyBytes) and the names and
 // declared pairs its rules are addressed by (PolicyNames), the extracted morphism tables (see
@@ -75,7 +75,7 @@ type PortRef struct {
 // source-determined (R1, verified at Build), every morphism closure has an exact finite table, so
 // the table captures the morphism's full semantics without the opaque Go function. A verifier
 // re-checks the federated conditions (validity preservation, M1/R2) from these tables against the
-// component registries, independently of the producer's morphism closures. See CERTIFICATE-DESIGN.md.
+// component registries, independently of the producer's morphism closures. See docs/design/CERTIFICATE-DESIGN.md.
 type MorphismTable struct {
 	Target  string     // target registry name
 	Sources []string   // source registry names (one entry = single-source morphism)
