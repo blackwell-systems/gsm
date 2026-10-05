@@ -296,6 +296,16 @@ type Projection struct {
 // target with several sources the projection is this edge's Map image, which Build does not
 // verify (it verifies the resolver, whose merge over all sources is the step the theorem
 // covers), so ProjectionSafe is false for a federation with a multi-source target.
+//
+// On a cyclic network ProjectionSafe is false too, and that is required: projection nodes have
+// no shared reset, so a monotone feedback loop can settle on a fixed point larger than the least
+// one this FedMachine computes and never leave it (dist_cyc_ghost in normalization-confluence
+// coq/DistributedCycles.v). The certified options are barrier reset epochs (every node resets
+// its shared values to bottom, then propagation to quiescence with no events inside the epoch:
+// epoch_conv_iff, lens_epoch) or, without resets, inflationary events (infl_evlow) or a repair
+// with a unique fixed point for every assignment of the locals (uniq_agree); gsm does not
+// implement epochs. Running the FedMachine itself is unaffected: normalizeCyclic resets the
+// shared values to bottom before its Kleene iteration. See Federation.RequireProjectionSafe.
 func (m *FedMachine) SharedProjection(srcState State, src, dst *Registry) (Projection, error) {
 	si, ok := m.idx[src]
 	if !ok {

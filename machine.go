@@ -210,6 +210,16 @@ func (m *Machine) lazyApply(ev eventDef, s State) State {
 // XU in FedReport.ProjectionSafe (witnesses in ProjectionWitnesses); call
 // Federation.RequireProjectionSafe to make an uncertified federation a build error.
 //
+// Cyclic networks: on a monotone cycle, nodes that merge projections have no shared reset, so a
+// feedback loop can settle on a fixed point larger than the FedMachine's least one and stay
+// there (dist_cyc_ghost in normalization-confluence coq/DistributedCycles.v); Build reports such
+// a federation as not certified. The certified options are reset epochs (a barrier at which
+// every node resets its shared values to bottom, then propagation to quiescence with no events
+// inside the epoch: epoch_conv_iff, lens_epoch) or, without resets, inflationary events
+// (infl_evlow) or a repair with a unique fixed point for every assignment of the locals
+// (uniq_agree). gsm does not implement epochs. The FedMachine is unaffected: it resets the shared
+// values to bottom itself before each Kleene iteration. See Federation.RequireProjectionSafe.
+//
 // It returns s unchanged and an error if s is not a state of this machine (see EffectFunc),
 // if the projection names a variable this machine does not have, or if a value is outside
 // its variable's domain (out of range, or wider than the variable's bit field). A projection
