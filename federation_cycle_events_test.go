@@ -254,3 +254,45 @@ func TestCycleEvents_MultiSourceJointImage(t *testing.T) {
 		t.Fatalf("Checks should report the joint image set:\n%s", joined)
 	}
 }
+
+// TestCycleEvents_ResolverImageNotPerEdge is resolver_edge_insufficient
+// (FederationEventsCyclesMulti.v) on a cycle: T's shared s is written by a resolver s := x + y
+// from two sources whose own edge images are {0, 1}. T's event reads s == 2, so its local outcome
+// is the same over each edge's image set but not over the resolver's image R = {0, 1, 2}. gsm takes
+// the image set through the resolver, so Build must reject it, at a state where s is 2.
+func TestCycleEvents_ResolverImageNotPerEdge(t *testing.T) {
+	T := NewRegistry("T")
+	s := T.Int("s", 0, 2)
+	l := T.Bool("full")
+	T.Event("check").Writes(l).Apply(func(st State) State { return st.SetBool(l, st.GetInt(s) == 2) }).Add()
+	X := NewRegistry("X")
+	x := X.Bool("x")
+	xs := X.Bool("seen")
+	Y := NewRegistry("Y")
+	y := Y.Bool("y")
+	b2i := func(b bool) int {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	f := NewFederation("plus").AllowMonotoneCycles()
+	f.Morphism(X, T).Shared(s).Map(func(src, d State) State { return d.SetInt(s, b2i(src.GetBool(x))) }).Add()
+	f.Morphism(Y, T).Shared(s).Map(func(src, d State) State { return d.SetInt(s, b2i(src.GetBool(y))) }).Add()
+	f.Resolve(T, func(d State, src map[string]State) State {
+		return d.SetInt(s, b2i(src["X"].GetBool(x))+b2i(src["Y"].GetBool(y)))
+	})
+	f.Morphism(T, X).Shared(xs).Map(func(src, d State) State { return d.SetBool(xs, src.GetBool(l)) }).Add()
+
+	_, _, err := f.Build()
+	var ce *CrossOrderError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *CrossOrderError (C1 fails over the resolver image), got %T: %v", err, err)
+	}
+	if ce.Target != "T" || ce.Event != "check" {
+		t.Fatalf("wrong failure: %+v", ce)
+	}
+	if ce.State.GetInt(s) != 2 && ce.SourceFirst.GetInt(s) != 2 {
+		t.Fatalf("the witness should involve the resolver-only value s = 2: %+v", ce)
+	}
+}

@@ -517,8 +517,9 @@ func (f *Federation) checksRun(cyclic bool) []string {
 		}
 		if multi > 0 {
 			checks = append(checks, fmt.Sprintf("event order on the cycle, %d multi-source target(s): C1 and C2 checked "+
-				"against the joint image set of all incoming edges (the resolver over every combination of valid source "+
-				"states), so no lemma combining per-edge checks is relied on", multi))
+				"against the joint image set of all incoming edges (the resolver's image R over every combination of valid "+
+				"source states, not each edge's own image), which is C1cyc for the whole shared part directly; the per-edge "+
+				"route (multi_edge_c1, multi_edge_gc, FederationEventsCyclesMulti.v) is not relied on", multi))
 		}
 	} else {
 		checks = append(checks, "acyclicity: the network has a topological order")

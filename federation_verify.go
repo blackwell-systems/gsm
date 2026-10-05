@@ -516,7 +516,12 @@ func (e *CrossOrderError) Error() string {
 //     multi-source target, of the resolver over every combination of valid source states. A
 //     multi-source target is therefore checked against the joint image of all its incoming
 //     edges, which is the theorem's per-registry H_j directly: no lemma combining per-edge
-//     checks into the whole-target condition is used. Img contains every normal form's shared
+//     checks into the whole-target condition is used. gsm always writes a multi-source
+//     target's shared variables through one resolver, so this set is the resolver's image
+//     R = { r(s1, ..., sn) : each si valid }, never the per-edge images; per-edge images do
+//     not suffice for a resolver (resolver_edge_insufficient in normalization-confluence
+//     coq/FederationEventsCyclesMulti.v, where the per-edge route is multi_edge_c1 /
+//     multi_edge_gc and needs M1, or the check over all local parts). Img contains every normal form's shared
 //     part, because normal forms are valid (verifyMonotoneVisited) and each target's shared
 //     part at the least fixed point is the image of its sources there (Hs_img in the theorem).
 //   - consistent is the valid target states with shared part in Img, the theorem's (x, h).
