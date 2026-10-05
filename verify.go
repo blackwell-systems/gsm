@@ -561,7 +561,7 @@ func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][
 
 // ccDomain is the CC domain: every valid state (its own normal form), plus the zero
 // state Machine.NewState returns, so a run started from NewState is covered even when
-// the zero state violates an invariant. This is CC1 as THEORY.md §6.3 states it (over
+// the zero state violates an invariant. This is CC1 as docs/theory.md §6.3 states it (over
 // valid states). Every step lands on a valid state, so commutation on this domain
 // makes any permutation of the checked events reach the same state from any valid
 // start or from NewState. Machine.Apply normalizes any other input first, so it

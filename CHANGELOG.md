@@ -62,6 +62,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deployment that runs the `FedMachine` is unaffected (`normalizeCyclic` resets the shared values
   to bottom on every normalization). README (Federated Registries), FEDERATION-CONCEPTS.md (a new
   "Ghosts" section with the flag-cycle example) and THEORY.md 11.4 cover the same ground.
+- **Documentation restructured.** No behavior change. The README (921 lines) is now a short
+  front page: what gsm is, the order example and its report, a table of what `Build` guarantees in
+  each setting, when to use it, install, a documentation map, citation and license. Its content
+  moved, with every caveat and theorem citation, into `docs/`: `getting-started.md` (tutorial, API
+  basics, combinators, independence declarations), `concepts.md` (CONCEPTS.md and EXPLAINER.md
+  merged), `federation.md` (the README's federation section and FEDERATION-CONCEPTS.md merged),
+  `deployment.md` (delivery obligations, shared logs, projection deployments, ghosts and reset
+  epochs), `verification.md` (the report, the extracted oracles, assurance levels, certificates,
+  compositional verification, synthesis, performance, limitations), `reference.md` (`Report` and
+  `FedReport` fields, errors, build options, the export format) and `theory.md` (THEORY.md, plus
+  the paper-to-code map). ARCHITECTURE.md, CERTIFICATE-DESIGN.md and HOLONOMY-COORDINATION-DESIGN.md
+  moved unchanged to `docs/design/`. The old top-level files are stubs that link to their new
+  location. The README's sample report now shows the `Rules oracle:` line `Build` prints for a
+  closure machine. `TestDocSnippets` checks the new pages (EXPLAINER's blocks, previously
+  unchecked, are merged into checked pages or replaced by links to the README example).
 
 ## [0.13.0] - 2026-10-04
 
