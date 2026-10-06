@@ -141,7 +141,10 @@ func TestCompositionalReport_FootprintViolation(t *testing.T) {
 	}
 }
 
-// TestCompositionalReport_Pass pins the success report's structure.
+// TestCompositionalReport_Pass pins the success report's structure. The repair depth is
+// the machine's longest chain, the sum of the components' (bound_sum): from a state with
+// every counter over its cap, the three repairs run one after another. The delivery and
+// saturation lines are the ones Build reports for the same machine.
 func TestCompositionalReport_Pass(t *testing.T) {
 	_, rep, err := wideCounters(3).BuildCompositional(TrustClosureFootprints())
 	if err != nil {
@@ -153,12 +156,18 @@ func TestCompositionalReport_Pass(t *testing.T) {
 		"  Events: 3\n" +
 		"\n" +
 		"  Footprint conformance: PASS (largest component: 4 states)\n" +
-		"  WFC: PASS (max repair depth: 1)\n" +
+		"  WFC: PASS (max repair depth: 3)\n" +
 		"  CC (Compensation Commutativity): PASS (3 pairs: 3 disjoint, 0 brute-force)\n" +
 		"\n" +
 		"  Convergence: GUARANTEED\n" +
+		"  Verified compositionally: 3 components (largest 4 states; 12 states checked instead of 64); 3 cross-component " +
+		"pairs need no check (disjoint footprints, reads included); footprints tested by perturbation (TrustClosureFootprints)\n" +
 		"  Assurance: component tables certified by the verified table oracle; cross-component independence by gsm's footprint check, " +
-		"which for closure rules is a perturbation test, not exact\n"
+		"which for closure rules is a perturbation test, not exact\n" +
+		"  Delivery: exactly once for inc0, inc1, inc2 (applying one twice differs from once); deduplicate redelivered events\n" +
+		"  Saturation: event \"inc0\" clamps \"c0\" into its range on 1 state(s) (silently; an invariant testing the bound never sees the overflow)\n" +
+		"  Saturation: event \"inc1\" clamps \"c1\" into its range on 1 state(s) (silently; an invariant testing the bound never sees the overflow)\n" +
+		"  Saturation: event \"inc2\" clamps \"c2\" into its range on 1 state(s) (silently; an invariant testing the bound never sees the overflow)\n"
 	if got := rep.String(); got != want {
 		t.Fatalf("report text:\n%s\nwant:\n%s", got, want)
 	}
@@ -189,9 +198,11 @@ func TestCompositional_TwoVariableGuard(t *testing.T) {
 	}
 }
 
-// TestCompositional_CombinatorReadsExact: combinator events are checked
-// syntactically, so a guard over any number of outside variables is caught
-// (closures are checked by perturbation, which covers one or two variables).
+// TestCompositional_CombinatorReadsExact: a combinator event's footprint is derived
+// from its trees, reads included, so a guard over any number of other variables puts
+// them in the event's component (closures are checked by perturbation, which covers one
+// or two variables). The four variables form one component, and the per-component
+// check fails the machine on the pair Build fails it on (ws_diverges, inside_merge).
 func TestCompositional_CombinatorReadsExact(t *testing.T) {
 	r := NewRegistry("three_var_guard")
 	a, b, c := r.Bool("a"), r.Bool("b"), r.Bool("c")
@@ -200,12 +211,21 @@ func TestCompositional_CombinatorReadsExact(t *testing.T) {
 	r.DeclEvent("set_b", Do(Set(b, Lit(1))))
 	r.DeclEvent("set_c", Do(Set(c, Lit(1))))
 	r.DeclEventGuarded("fire", And(Eq(V(a), Lit(1)), Eq(V(b), Lit(1)), Eq(V(c), Lit(1))), Do(Set(out, Lit(1))))
+	_, grep, gerr := r.Build()
+	if gerr == nil {
+		t.Fatal("Build certified a non-convergent machine")
+	}
 	_, rep, err := r.BuildCompositional()
 	if err == nil {
-		t.Fatal("BuildCompositional certified a guard over three outside variables")
+		t.Fatal("BuildCompositional certified a guard over three other variables")
 	}
-	if rep.FootprintViolation != `gsm: event "fire" reads variable "a" outside its declared footprint` {
-		t.Fatalf("FootprintViolation = %q", rep.FootprintViolation)
+	if rep.Components != 1 || rep.FootprintViolation != "" || rep.CCFailure == nil {
+		t.Fatalf("want one component and a CC failure, got %d components, violation %q:\n%s",
+			rep.Components, rep.FootprintViolation, rep)
+	}
+	if got, want := *rep.CCFailure, *grep.CCFailure; got.Event1 != want.Event1 || got.Event2 != want.Event2 ||
+		got.State.packed != want.State.packed || got.Result1.packed != want.Result1.packed {
+		t.Fatalf("per-component witness %+v differs from Build's %+v", got, want)
 	}
 }
 

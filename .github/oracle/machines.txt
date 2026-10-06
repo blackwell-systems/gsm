@@ -7,7 +7,11 @@
 #   `gocheck: run` block of a document (README.md#1).
 # verdict: certified         Build accepts it; both checkers verify it.
 #          certified-tables  Build accepts it; the table checker verifies it. Its
-#                            rules are closures, so the rules checker cannot run.
+#                            rules are closures, or it was verified by abstraction or
+#                            per footprint component, so the rules checker does not run.
+#
+# machine: the registry name; a machine Build checked per footprint component is
+#   listed once per component, as <name>/component<k>.
 #          rejected          Build rejects it (WFC or CC); every checker that can
 #                            run rejects it for the same reason.
 #          synthesized       a synthesized repair; the table checker verifies it.
@@ -23,7 +27,9 @@
 
 README.md#1                      order_fulfillment  certified-tables
 docs/getting-started.md#1        product            certified-tables
-docs/verification.md#1           inventory          certified-tables
+docs/verification.md#1           store/component1   certified-tables
+docs/verification.md#1           store/component2   certified-tables
+docs/verification.md#2           inventory          certified-tables
 
 Example                          counter            certified-tables
 ExampleRegistry_Build            counter            certified-tables
@@ -36,4 +42,6 @@ ExampleFederation                supplier           certified-tables
 Example_acceptWithCoordination   primary            certified-tables
 Example_acceptWithCoordination   mirror             certified
 ExampleNewCollection             product            certified-tables
+ExampleRegistry_Build_compositional  store/component1  certified-tables
+ExampleRegistry_Build_compositional  store/component2  certified-tables
 ExampleRegistry_Abstract         inventory          certified-tables

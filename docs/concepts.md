@@ -106,7 +106,7 @@ Each state is a unique assignment of values to all variables:
 - ...
 - State 35: `{status=shipped, paid=true, count=5}`
 
-**Why finite?** Because `Build` enumerates all states at build time to verify convergence exhaustively. Only variable *domains* need be finite: `BuildCompositional` verifies per footprint component instead of the global product, so the total state space can still be astronomically large.
+**Why finite?** Because `Build` enumerates all states at build time to verify convergence exhaustively. Only variable *domains* need be finite: for a machine too large to enumerate, `Build` (with combinator rules) and `BuildCompositional` verify per footprint component instead of the global product, so the total state space can still be astronomically large.
 
 **Internally**: States are bitpacked into a single `uint64`, enabling O(1) table lookups. See [ARCHITECTURE.md#state-representation](design/ARCHITECTURE.md#state-representation) for details.
 
@@ -366,10 +366,14 @@ Two events that write different variables do **not** automatically commute: the 
 reads `paid`, which `pay` writes, so `ship` and `pay` touch disjoint write sets and still diverge.
 Commutation by disjointness needs every event to *read* only its own footprint as well.
 
-- `Build` therefore checks every independent pair exhaustively; it never skips a pair by footprint.
-- `BuildCompositional` skips pairs whose events lie in different footprint components, but only
-  after checking that every rule reads and writes only its declared footprint, and it rejects the
-  guarded `ship` above with a footprint violation naming `paid`.
+- `Build`'s global check therefore checks every independent pair exhaustively; it never skips a
+  pair by footprint.
+- The per-component check (`Build` on a registry too large to enumerate, `BuildCompositional`)
+  skips pairs whose events lie in different footprint components, with every rule's reads in its
+  footprint. Written with combinators, the guarded `ship` above reads `paid`, so `paid` and
+  `shipped` land in one component and the check fails the pair, as the global check does; written
+  as a closure that declares only `Writes(shipped)`, `BuildCompositional` rejects it with a
+  footprint violation naming `paid`.
 
 <!-- gocheck: check registry -->
 ```go
@@ -377,8 +381,8 @@ r.Event("deposit").Writes(balance).    // reads and writes only balance
     Apply(func(s State) State { return s.SetInt(balance, s.GetInt(balance)+1) }).Add()
 r.Event("send_email").Writes(notified). // reads and writes only notified
     Apply(func(s State) State { return s.SetBool(notified, true) }).Add()
-// Different components, and neither reads the other's variable: BuildCompositional
-// can skip this pair. Build checks it anyway (it is cheap from the step tables).
+// Different components, and neither reads the other's variable: the per-component
+// check can skip this pair. Build's global check checks it anyway (cheap from the tables).
 ```
 
 #### In the Report
@@ -389,7 +393,7 @@ CC (Compensation Commutativity): PASS (10 pairs: 7 disjoint, 3 brute-force)
 
 This means:
 - 10 event pairs checked
-- 7 skipped because the events lie in different footprint components, after the footprint check (`BuildCompositional` only; `Build` always reports 0 disjoint)
+- 7 needed no check because the events lie in different footprint components (the per-component check only; `Build`'s global check always reports 0 disjoint)
 - 3 checked exhaustively, state by state
 
 ---
@@ -604,7 +608,7 @@ machine.Apply(s, "ship")  // O(1) table lookup: step[ship][s]
 ```
 
 No repair functions execute at runtime. Everything is baked into lookup tables during `Build()`.
-(The exception is a lazy `BuildCompositional` machine, which has no global tables and runs the
+(The exception is a lazy machine checked per footprint component, which has no global tables and runs the
 rules at `Apply` time; see [Compositional Verification](verification.md#compositional-verification).)
 
 ---
@@ -619,7 +623,7 @@ reordered, and every other pair must then be delivered in causal order. See
 
 ### "Finite state spaces are a limitation"
 
-**Narrower than it sounds**. The constraint is finite *per-variable domains* (no arbitrary strings or lists), which is what enables **exhaustive verification**. It is not a cap on the whole state space: `BuildCompositional` verifies each footprint component independently, so a machine whose global state space is astronomically large still certifies when it decomposes into small components. You trade unbounded domains for a mathematical proof of convergence you cannot get with infinite spaces.
+**Narrower than it sounds**. The constraint is finite *per-variable domains* (no arbitrary strings or lists), which is what enables **exhaustive verification**. It is not a cap on the whole state space: `Build` (with combinator rules) and `BuildCompositional` verify each footprint component independently, so a machine whose global state space is astronomically large still certifies when it decomposes into small components. You trade unbounded domains for a mathematical proof of convergence you cannot get with infinite spaces.
 
 The finiteness is a property of gsm's verification, not of the theory: the convergence theorem
 holds on infinite domains under any well-founded repair potential (mechanized in

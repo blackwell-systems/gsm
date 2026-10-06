@@ -25,7 +25,8 @@ state-space enumeration and CC machinery with `Build`.
 
 Two later sections cover paths that extend this core: [Compositional
 Verification](#compositional-verification-buildcompositional) verifies machines whose global
-state space is too large to enumerate by checking each footprint component independently, and
+state space is too large to enumerate by checking each footprint component independently (`Build`'s
+default for such a combinator registry, and `BuildCompositional`), and
 [Differential Testing via Extracted Oracles](#differential-testing-via-extracted-oracles)
 re-certifies a built machine against checkers extracted from an axiom-free Coq proof.
 
@@ -258,11 +259,13 @@ b.Invariant("cap").
 ```
 
 Repairs must only modify variables in the footprint, and checks and repairs must only read it.
-`Build` does not rely on this: it checks every event pair exhaustively from the step tables.
-`BuildCompositional` does rely on it, so it checks it first (`verifyFootprints`): exactly from the
-tree for combinator rules, and by perturbation for closures (every value of each outside variable
-and each pair of outside variables). Events must also read only their write set there. Only then
-does it skip event pairs that lie in different footprint components.
+`Build`'s global check does not rely on this: it checks every event pair exhaustively from the
+step tables. The per-component check (`Build` on a combinator registry too large to enumerate, and
+`BuildCompositional`) does rely on it. For combinator rules the footprints are derived from the
+trees, reads included (an event's guard reads, effect reads and writes), so they hold by
+construction; for closures it tests them first (`verifyFootprints`, by perturbation: every value of
+each outside variable and each pair of outside variables), and a closure event must read only its
+write set. Only then does it skip event pairs that lie in different footprint components.
 
 ### Idempotence on Valid States
 
@@ -366,13 +369,20 @@ every valid state (`calc_components_cc1_valid`). At an invalid state it need not
 event. So a registry partitions into footprint-connected **components** (of state variables) that
 never interact, and it suffices to verify each component over the subspace of its own variables.
 
-`Registry.BuildCompositional` does exactly this:
+`Build` does exactly this for a combinator registry too large to enumerate (when it splits into
+more than one component, each fits 20 bits, and the zero state is valid; otherwise it enumerates the
+whole machine and `Report.GlobalReason` says why), and `Registry.BuildCompositional` at any size.
+The theorems, exact per component, are normalization-confluence `CompositionalCheck.v`
+([Theory §11.10](../theory.md#1110-footprint-components-compositional-checking)):
 
 1. **Partition** variables into footprint-connected components using union-find: two variables
-   join the same component when some invariant footprint or event write set mentions both.
-2. **Check footprint conformance** (`verifyFootprints`). Every event's guard and effect must read
-   and write only its write set; every invariant's check and repair only its footprint. Combinator
-   rules are checked syntactically (exact). Closures are checked by perturbation: from every state
+   join the same component when some rule's footprint mentions both. A combinator rule's footprint
+   is derived from its trees, reads included (an event's guard reads, effect reads and writes; an
+   invariant's check reads and repair reads and writes); a closure's is its declaration (an event's
+   write set, an invariant's `Watches`).
+2. **Check footprint conformance** (`verifyFootprints`). A closure event's guard and effect must
+   read and write only its write set; a closure invariant's check and repair only its footprint.
+   Combinator footprints hold by construction. Closures are checked by perturbation: from every state
    of the component, every value of each outside variable and of each pair of outside variables.
    That catches dependence on one or two outside variables but not a joint dependence on three or
    more, so for closures the check is a test, not a proof, and `BuildCompositional` accepts closure
@@ -398,9 +408,9 @@ longer a single array lookup; it evaluates the rules for the touched component. 
 bounded by the sum of each component's deepest verified repair chain, and `Apply` panics past it
 (only a rule that breaks its footprint or is nondeterministic can get there).
 
-**Preconditions:** every invariant declares its footprint, every event declares its write set
-(both automatic when rules are written with the combinator vocabulary, see "Rule layers" below),
-every event reads only what it writes, the zero state is valid, every variable's range fits its
+**Preconditions:** every closure invariant declares its footprint and every closure event its
+write set, within which it must also read (combinator footprints are derived, reads included, see
+"Rule layers" below), the zero state is valid, every variable's range fits its
 bit field, and the machine fits in 64 bits of state (`State` is one `uint64`). No single component
 may exceed the enumeration budget, and a closure whose perturbation test would exceed 2^28 calls is
 rejected before any check runs.

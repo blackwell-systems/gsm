@@ -569,8 +569,10 @@ Footprint(e) = the least set F ⊇ Rₑ ∪ Wₑ such that Fᵢ ⊆ F for every 
 
 The closure is transitive: if e writes v, invᵢ watches v, and invᵢ's repair writes u, then any
 invariant watching u is reached too. gsm's footprint **components** (the union-find partition of
-variables over invariant footprints and event write sets) compute this closure; an event's
-footprint lies inside its component once its read set does.
+variables over every rule's footprint: an event's reads and writes, an invariant's check reads and
+repair reads and writes) compute this closure, so an event's footprint lies inside its component.
+For combinator rules gsm derives the read sets from the expression trees; for a closure event the
+read set must lie inside its declared write set, which gsm tests (§9.6).
 
 ### 8.5 Disjointness Theorem
 
@@ -606,10 +608,11 @@ not use it.
 
 ### 8.6 Where gsm uses it
 
-`Build` does not use the theorem: it checks every pair exhaustively from the step tables (§9.3),
-which costs two lookups per state per pair and needs no hypothesis about read sets.
-`BuildCompositional` uses it to skip pairs whose events lie in different components, after
-checking the hypotheses (§9.6).
+`Build`'s global check does not use the theorem: it checks every pair exhaustively from the step
+tables (§9.3), which costs two lookups per state per pair and needs no hypothesis about read sets.
+The per-component check (`Build` on a combinator registry too large to enumerate, and
+`BuildCompositional`) uses its exact per-component form, `cc1_cross` (§11.10), to skip pairs whose
+events lie in different components, with read sets in the footprints (§9.6).
 
 (Before the fix recorded in the CHANGELOG, `Build` skipped pairs using Footprint(e) =
 ⋃{Fᵢ | Wₑ ∩ Fᵢ ≠ ∅}, which leaves out Rₑ, leaves out Wₑ itself when no invariant watches it, and
@@ -724,18 +727,23 @@ to small machines. But WFC and CC are local when the hypotheses of §8.5 hold: e
 footprints are disjoint commute from every valid state (mechanized: `disjoint_events_commute` for
 the raw effects, `calc_components_cc1_valid` for CC1 after normalization). So a registry partitions
 into footprint-connected **components** that do not interact, and it suffices to verify each
-component over the subspace of its own variables. `Registry.BuildCompositional` does this:
-certification cost is exponential in the largest component, not in the whole machine, so a
-registry of many independent small invariants certifies even when |S| is astronomically large.
+component over the subspace of its own variables. `Build` does this by default for a combinator
+registry too large to enumerate, and `Registry.BuildCompositional` at any size: certification cost
+is exponential in the largest component, not in the whole machine, so a registry of many
+independent small invariants certifies even when |S| is astronomically large. The reduction is
+exact for WFC and for CC1 on valid states (§11.10).
 
-It relies on the hypotheses of §8.5, with each event's read set inside its write set, and checks
-them first (`verifyFootprints`). For combinator rules the check is syntactic and exact. For
-closures it is a perturbation test, run from every state of the component with all other
+It relies on the hypotheses of §8.5, with every rule's read set in its footprint. For combinator
+rules the footprints are derived from the expression trees (guard reads, effect reads and writes;
+check reads, repair reads and writes), which is exact. For a closure the footprint is its
+declaration (an event's write set, within which it must also read; an invariant's `Watches`), and
+`verifyFootprints` tests it by perturbation, run from every state of the component with all other
 variables at zero: every value of each outside variable, and every pair of values of each pair of
 outside variables. That detects dependence on one or two outside variables, but not a joint
-dependence on three or more, so for closures the hypotheses are tested rather than proved. It
-also requires the zero state to be valid and the machine to fit in 64 bits, and it returns a
-machine that applies events by computing at runtime rather than by table lookup.
+dependence on three or more, so for closures the hypotheses are tested rather than proved, and only
+`BuildCompositional` with `TrustClosureFootprints` accepts them. It also requires the zero state to
+be valid and the machine to fit in 64 bits, and it returns a machine that applies events by
+computing at runtime rather than by table lookup.
 
 ### 9.7 Machine-checked meta-theory
 
@@ -1194,6 +1202,121 @@ validity is the condition (`phi_cc1_exact`, `lin_exact`, `lin_frag_linear`), for
 solver to decide. gsm does not emit these formulas yet: gsm's `Int` writes saturate, which the
 formulas over the integers do not model as stated, and a generator would need a differential test
 against an extraction of the Coq construction.
+
+### 11.10 Footprint Components (Compositional Checking)
+
+**Implemented**: `Build` checks a registry too large to enumerate per footprint component when
+its rules are combinators, and `BuildCompositional` does so at any size
+([Verification](verification.md#compositional-verification)). The theory is
+normalization-confluence
+[`CompositionalCheck.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/CompositionalCheck.v)
+(axiom-free; the design notes are its `coq/docs/compositional.md`). It is a reduction for checking:
+the conditions are the ones `Build` always checks, WFC and CC1 on the valid states (§6.5), not CC2.
+
+**The model.** A registry over states with variables; events are guarded effects (a disabled event
+is the identity); invariants come in a declared order and one repair step fires the first violated
+one (`rho`). Each variable has a component, and so does each event and invariant. Every event has a
+read set and a write set, and every invariant a check read set and a repair read and write set.
+`Local R W f`: f changes only W, and its values on W depend only on R. `Inside k R W`: R lies in
+component k (or the shared variables), W in k. `Hyps` bundles these for every rule. The guarantee
+is `Conv B`: every permutation of a list of events from a valid state reaches the same state, where
+each step is the event followed by up to B repair steps (`WFCb B`: B steps reach a valid state from
+every state). `Sub k` is the subspace of component k (every other variable as in a background
+state), and the component's conditions over it are `WFCk` and `ConvK`.
+
+**How gsm's registries map onto it.**
+
+- **Components**: union-find over every rule's footprint, so `Inside` holds by construction. gsm
+  has no shared variables (`sh` is empty): a variable one rule writes and another reads joins their
+  components, as `inside_merge` requires.
+- **Footprints of combinator rules**: an event's read set is its guard's reads plus its effect's
+  reads plus its writes, its write set its assignments' targets; an invariant's check read set is
+  its predicate's variables, its repair's read and write sets those of its transform. These are the
+  theory's `readsP`, `readsT` and `writesT` (gsm's `vars`, `readVars` and `writeVars`), proved
+  sound for the combinator grammar of `AstChecker.v` (`ast_event_local`, `ast_check_local`,
+  `ast_repair_local`); `ast_hyps` gives `Hyps` for a component assignment that the decidable check `blocks_ok` (a definition) accepts,
+  which gsm's union-find satisfies by construction (every extracted footprint inside one component,
+  no shared variable). gsm also refuses a combinator rule that mentions a variable of another
+  registry.
+- **Footprints of closures** (`BuildCompositional` with `TrustClosureFootprints` only): the
+  declaration, tested by perturbation, not proved (§9.6). This is the trust boundary, and
+  `Report.Assurance` (`AssuranceOracleComponentsTested`) and the report line ("footprints tested by
+  perturbation") say so.
+- **The background**: gsm holds every other variable at zero and checks a component with the
+  registry's own rules. It requires the zero state to be valid; with no shared variables and a valid
+  background, the registry's validity, repair and step on `Sub k` are the component's
+  (`gsm_literal`, `gsm_literal_iter`, `gsm_literal_step`).
+- **The bound**: gsm repairs until valid, not for a fixed B steps; once B is a bound, neither
+  normalization nor the guarantee depends on it (`N_indep`, `conv_indep`). The lazy machine's bound
+  is the sum of the components' deepest chains.
+
+**What gsm checks, and the theorem per guarantee.**
+
+| gsm checks, per component over its subspace | Conclusion for the whole machine | Theorem |
+|---|---|---|
+| WFC from every state, recording the deepest chain d_k | WFC from every state, within Σ d_k steps (the machine's repair bound and `MaxRepairLen`) | `wfc_iff`, `term_iff`, `wfcb_iff`, `bound_sum` |
+| Nothing, for a pair of events in different components | CC1 at every valid state | `cc1_cross` (raw effects: `raw_cross_commute`) |
+| CC1 for each checked pair of the component's events at every valid state of the subspace | CC1 for the pair at every valid state of the machine | `cc1_same_iff`, `cc1_component` |
+| The two above, every pair | The guarantee, every order of the same events from a valid state reaching one state, iff it holds in every component | `conv_iff_cc1`, `compositional_exact`, `compositional_gsm` |
+| The enumerating check over the subspaces | Decides the above exactly, at the cost of the sum of the subspaces, not the product | `comp_check_exact`, `wfc_check_exact`, `cc1_check_exact`, `enum_length` |
+| The registry's rules with every other variable at zero | Are the component's own rules on the subspace | `gsm_literal`, `gsm_literal_step` |
+| Each component's tables: steps land on valid states, checked pairs commute on the valid states | Certified by the verified table oracle, per component | `check_tables_converges` |
+
+`enum_length` states the cost with one value domain for every variable; gsm's variables each have
+their own, and a component's subspace has the product of its variables' domain sizes.
+
+**Declared pairs, delivery and witnesses.** These use the per-pair and per-event decomposition,
+not a separately stated theorem:
+
+- **Declared-only mode** (`Independent`): the theory's guarantee is stated for every pair, and its
+  notes record that the CC1 decomposition holds pair by pair, so a check restricted to declared
+  pairs decomposes too. gsm checks the declared pairs, and the undeclared ones for
+  `CausalOrderRequired`, with `cc1_cross` and `cc1_same_iff` per pair; the convergence statement for
+  declared pairs is the one the global check uses (`run_tequiv`).
+- **Idempotence** (`NotIdempotent`): an event's step changes only its own component, and leaves
+  another component normalized (`G_own`, `G_other`, `NK_idem`), so an event is idempotent at a valid
+  state iff at the state's restriction to its component. gsm checks it per component.
+- **The witness** of a CC failure is the global check's: restricting a failing state to the pair's
+  component keeps the failure (`cc1_same_iff`) and lowers its encoding, so the first failing state
+  of the component is the first failing state of the machine.
+- **`MaxRepairLen`** is the sum of the components' deepest chains: each repair step is a step of
+  exactly one component (`rho_step`, `iter_proj`), and the components' deepest states combine into
+  one state.
+
+`TestCompositional_DifferentialRandom` checks these on random decomposable registries against the
+global check, passing and failing: the same result, witness, repair depth, delivery obligations and
+saturating rules.
+
+**Boundaries, each with a counterexample** (every other hypothesis holding, every component
+passing, and the registry diverging):
+
+- **Reads missing from the footprints** (`ws_diverges`): pay writes paid, and ship, guarded on paid,
+  writes shipped. With footprints of writes alone they sit in separate components. gsm puts the
+  guard's read in ship's footprint, so the two merge (`ws_true_footprint`, `inside_merge`) and the
+  check fails the machine as the global check does. For a closure, a read outside its declared
+  footprint is refused where the perturbation test detects it.
+- **A repair crossing components** (`rc_diverges`): a combinator repair's writes are in its
+  footprint, so its component includes them. A closure repair that writes outside its `Watches` is
+  refused, naming the invariant and the variable.
+- **A written shared variable** (`sw_diverges`): gsm has no shared variables; a variable written by
+  one rule and read by another joins their components.
+
+Non-vacuity: the theory's store (`shop_converges`, `shop_cost`) is gsm's
+`TestBuildDefault_OrdersAndInventoryPerComponent` and `ExampleRegistry_Build_compositional`, with
+wider ranges.
+
+**Not claimed, or not implemented.**
+
+- CC2 and unique normal forms of the governance rewrite system: gsm does not check CC2 (§6.5).
+- **Composition with symmetry and abstraction**: no combined theorem is stated. A collection
+  template and a registry declared with `Abstract` are not decomposed; each reduction runs on its
+  own (a collection template is checked as a whole, and `Abstract` takes precedence). A federation
+  component is not decomposed either, since federation checks run on step tables.
+- **The rules oracle per component**: `ast_N_normalize` makes a component's normalization the rules
+  oracle's, but gsm does not export a component as a machine for it, so a per-component build is
+  certified by the table oracle alone.
+- **Shared read-only variables** and **validity per component** (`validK`, `rhoK`, which would drop
+  the valid-zero-state precondition): covered by the theory, not implemented.
 
 ---
 

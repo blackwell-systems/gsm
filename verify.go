@@ -25,7 +25,7 @@ type Report struct {
 	// CC results
 	CC            bool
 	PairsTotal    int
-	PairsDisjoint int        // proved by verified footprint disjointness (BuildCompositional only; always 0 for Build)
+	PairsDisjoint int        // need no check: the two events lie in different footprint components (cc1_cross); 0 when the whole state space was enumerated
 	PairsBrute    int        // proved by exhaustive check
 	CCFailure     *CCFailure // non-nil if CC failed
 
@@ -65,15 +65,32 @@ type Report struct {
 	// of every cycle the removed edge broke is driven from.
 	Coordinated []CoordinationPoint
 
-	// Compositional (BuildCompositional) results
+	// Per-component results (Build's per-component path, or BuildCompositional)
 	Components         int  // number of footprint components verified
 	MaxComponentStates int  // largest component subspace enumerated
-	FootprintChecked   bool // closures verified to respect declared footprints
+	FootprintChecked   bool // footprints derived (combinators) or tested (closures); see Compositional
 
-	// FootprintViolation is non-empty when BuildCompositional rejected the machine
-	// because a closure does not respect its declared footprint. The rejection
-	// happens before WFC and CC run, so neither was evaluated and WFC/CC are false
-	// for that reason, not because either check failed.
+	// Compositional is non-nil when the machine was checked per footprint component:
+	// by Build, whose default path this is for a registry too large to enumerate whose
+	// rules are combinators, or by BuildCompositional. It names the components and the
+	// cost, and says whether the footprints were derived exactly or tested. The result
+	// is exact for the whole machine (normalization-confluence coq/CompositionalCheck.v,
+	// compositional_exact); see docs/theory.md §11.10. StateCount is then 0: the whole
+	// state space was not enumerated (Compositional.GlobalStates gives its size).
+	Compositional *CompositionalReduction
+
+	// GlobalReason is set when Build enumerated the whole state space: it says why Build
+	// did not check the machine per footprint component (the machine is small enough to
+	// enumerate, which keeps step tables and both whole-machine oracles; a closure rule,
+	// whose footprint gsm can only test; one component; an invalid zero state; a
+	// component above the per-component limit; a collection template or federation
+	// component). Empty on the per-component and abstraction paths.
+	GlobalReason string
+
+	// FootprintViolation is non-empty when the per-component check rejected the
+	// machine because a rule does not respect its footprint (a closure, found by the
+	// perturbation test). The rejection happens before WFC and CC run, so neither was
+	// evaluated and WFC/CC are false for that reason, not because either check failed.
 	FootprintViolation string
 
 	// DomainViolation is non-empty when the build stopped because a rule (an event's
@@ -189,7 +206,7 @@ func (r *Report) String() string {
 	s := fmt.Sprintf("Machine: %s\n", r.Name)
 	s += fmt.Sprintf("  Variables: %d\n", r.VarCount)
 	if r.Components > 0 {
-		// BuildCompositional never enumerates the global state space.
+		// The per-component check never enumerates the global state space.
 		s += fmt.Sprintf("  Components: %d\n", r.Components)
 	} else if r.Abstraction != nil {
 		s += fmt.Sprintf("  States: %d representative (values not enumerated)\n", r.StateCount)
@@ -278,16 +295,32 @@ func (r *Report) String() string {
 		if r.Abstraction != nil {
 			s += fmt.Sprintf("  %s\n", r.Abstraction)
 		}
+		s += r.pathLine(true)
 		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
 		if r.RulesOracleSkipped != "" {
 			s += fmt.Sprintf("  Rules oracle: not run: %s\n", r.RulesOracleSkipped)
 		}
 	} else {
-		s += fmt.Sprintf("\n  Assurance: %s\n", r.Assurance)
+		s += "\n" + r.pathLine(false)
+		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
 	}
 	s += r.obligations()
 
 	return s
+}
+
+// pathLine says how the machine was checked: per footprint component, with the cost, or
+// globally, and why. verified is true under a convergence line.
+func (r *Report) pathLine(verified bool) string {
+	switch {
+	case r.Compositional != nil && verified:
+		return fmt.Sprintf("  %s\n", r.Compositional)
+	case r.Compositional != nil:
+		return fmt.Sprintf("  Checked compositionally: %s\n", r.Compositional.detail())
+	case r.GlobalReason != "":
+		return fmt.Sprintf("  Checked globally: %s\n", r.GlobalReason)
+	}
+	return ""
 }
 
 // obligations renders what the guarantee assumes of the runtime and of the rules
@@ -336,7 +369,51 @@ func (r *Report) obligations() string {
 // A registry declared with Abstract is verified by abstraction instead: Build checks the
 // rules over a representative domain rather than every value, and the table oracle
 // certifies the representative tables (see Registry.Abstract and Report.Abstraction).
+//
+// Compositional checking. A registry too large to enumerate (more than 20 bits or 2^20
+// states) whose rules are all combinators is checked per footprint component instead, when
+// it splits into more than one component, every component fits 20 bits, and the zero
+// state is valid. Each rule's footprint is derived from its expression trees, reads
+// included (an event's guard reads, effect reads and writes; an invariant's check reads
+// and repair reads and writes); union-find over the footprints gives the components; each
+// component is checked over its own subspace (WFC with its deepest repair chain, CC for
+// every checked pair of its events at its valid states), event pairs in different
+// components need no check, and the verified table oracle certifies every component's
+// tables. The result is exact for the whole machine (normalization-confluence
+// coq/CompositionalCheck.v, compositional_exact): a pass is the guarantee, and a failure in
+// a component is a failure of the machine, with its witness. Report.Compositional records
+// the reduction, Report.Assurance is AssuranceOracleComponents, and the machine computes at
+// run time from the rules, like BuildCompositional's (Export and WriteConvergenceTables are
+// unavailable).
+//
+// Otherwise Build enumerates the whole state space as described above, and
+// Report.GlobalReason says why it did not decompose the machine. A machine small enough to
+// enumerate is always checked that way, even when it decomposes: the global check gives the
+// step tables (Export, WriteConvergenceTables, federations, certificates) and both
+// whole-machine oracles, a stronger assurance than per-component tables. A closure rule
+// keeps Build global, since gsm can only test a closure's footprint (BuildCompositional
+// with TrustClosureFootprints accepts a tested footprint). A registry neither path can
+// check returns an error that gives both reasons.
 func (r *Registry) Build() (*Machine, *Report, error) {
+	return r.buildWith(buildOpts{})
+}
+
+// buildOpts selects Build's path. Its zero value is Build's default.
+type buildOpts struct {
+	// global keeps Build on the global check and says why (a collection template, a
+	// federation component), unless the machine is small enough that the global check
+	// runs anyway.
+	global string
+	// compositionalFirst runs the per-component check whenever it applies, even when the
+	// whole machine is small enough to enumerate. Only tests set it, to compare the paths.
+	compositionalFirst bool
+	// componentBits caps a component's bits for the per-component path (0 means
+	// maxComponentBits). Only tests set it.
+	componentBits int
+}
+
+// buildWith is Build with the path options o.
+func (r *Registry) buildWith(o buildOpts) (*Machine, *Report, error) {
 	if r.abs != nil {
 		m, rep, err := r.buildAbstract()
 		if buildObserver != nil {
@@ -344,7 +421,118 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 		}
 		return m, rep, err
 	}
+	var m *Machine
+	var rep *Report
+	var err error
+	plan, reason, feasible := r.route(o)
+	if plan != nil {
+		m, rep, err = r.buildPerComponent(plan)
+	} else {
+		m, rep, err = r.buildGlobal(reason, feasible)
+	}
+	if buildObserver != nil {
+		buildObserver(r, m, rep, err)
+	}
+	return m, rep, err
+}
+
+// globalSize returns the number of states of the whole machine as Build counts them, and
+// whether Build can enumerate them (at most 20 bits and maxStateSpace states).
+func (r *Registry) globalSize() (count int, feasible bool) {
+	if r.totalBits > 20 {
+		return 0, false
+	}
+	count = 1
+	for _, v := range r.vars {
+		if v.domain <= 0 || count > maxStateSpace/v.domain {
+			return 0, false
+		}
+		count *= v.domain
+	}
+	return count, count <= maxStateSpace
+}
+
+// route decides Build's path. It returns the footprint plan when Build checks the machine
+// per component; otherwise why it checks globally, and whether the global check can run.
+func (r *Registry) route(o buildOpts) (plan *compPlan, reason string, feasible bool) {
+	if err := r.checkNames(); err != nil {
+		return nil, "", true // the global path reports it
+	}
+	count, feasible := r.globalSize()
+	if feasible && !o.compositionalFirst {
+		return nil, fmt.Sprintf("the whole machine has %s states, within Build's enumeration limit of %s, and "+
+			"the global check keeps step tables and both whole-machine oracles", groupDigits(fmt.Sprint(count)),
+			groupDigits(fmt.Sprint(maxStateSpace))), true
+	}
+	if o.global != "" {
+		return nil, o.global, feasible
+	}
+	if err := r.checkDomains(); err != nil {
+		return nil, strings.TrimPrefix(err.Error(), "gsm: "), feasible
+	}
+	if r.totalBits > 64 {
+		return nil, fmt.Sprintf("the machine needs %d bits of state, and State holds at most 64", r.totalBits), feasible
+	}
+	if c := r.firstClosureRule(); c != "" {
+		return nil, fmt.Sprintf("%s is a Go closure, whose footprint gsm can only test by perturbation, not derive, so "+
+			"Build does not decompose it (BuildCompositional with TrustClosureFootprints accepts a tested footprint)", c), feasible
+	}
+	p, why := r.planComponents()
+	if why != "" {
+		return nil, strings.TrimPrefix(why, "gsm: "), feasible
+	}
+	if len(p.comps) < 2 {
+		return nil, "its rules form one footprint component, so there is nothing to decompose", feasible
+	}
+	if ii := r.firstViolated(State{packed: 0, vars: r.vars}); ii >= 0 {
+		return nil, fmt.Sprintf("the zero state violates invariant %q, and the per-component check holds every other "+
+			"component at zero, which needs a valid zero state", r.invariants[ii].name), feasible
+	}
+	limit := o.componentBits
+	if limit == 0 {
+		limit = maxComponentBits
+	}
+	for ci := range p.comps {
+		if bits, _ := r.componentSize(&p.comps[ci]); bits > limit {
+			return nil, fmt.Sprintf("component %s needs %d bits, above the per-component limit of %d",
+				r.componentNames(&p.comps[ci]), bits, limit), feasible
+		}
+	}
+	return p, "", feasible
+}
+
+// buildPerComponent is Build's per-component path (see Build).
+func (r *Registry) buildPerComponent(p *compPlan) (_ *Machine, rep *Report, err error) {
+	before := r.shape()
+	defer func() {
+		if err != nil {
+			if gerr := r.checkUnchanged(before); gerr != nil {
+				err = gerr
+			}
+			rep.noteDomainViolation(err)
+		}
+	}()
+	m, rep, err := r.checkComponents(p, before)
+	if err == nil {
+		rep.RulesOracleSkipped = fmt.Sprintf("checked per component: the rules oracle checks a whole machine, and "+
+			"this one has %s states; the table oracle certified each component's tables instead",
+			groupDigits(rep.Compositional.GlobalStates.String()))
+	}
+	return m, rep, err
+}
+
+// buildGlobal is Build's global path: it enumerates the whole state space, then runs
+// both oracles. reason says why the per-component check did not run; feasible is false
+// when the machine is too large to enumerate, so that a size error gives both reasons.
+func (r *Registry) buildGlobal(reason string, feasible bool) (*Machine, *Report, error) {
 	m, rep, err := r.build(true)
+	if rep != nil {
+		rep.GlobalReason = reason
+	}
+	var se *stateSpaceError
+	if err != nil && !feasible && reason != "" && errors.As(err, &se) {
+		err = fmt.Errorf("%w; Build could not check it per footprint component either: %s", err, reason)
+	}
 	if err == nil {
 		// The oracle gate: the verified table oracle must certify the tables too.
 		if err = certifyMachine(m); err != nil {
@@ -361,11 +549,13 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 			rep.Assurance = AssuranceOracleTablesAndRules
 		}
 	}
-	if buildObserver != nil {
-		buildObserver(r, m, rep, err)
-	}
 	return m, rep, err
 }
+
+// stateSpaceError is build's error for a state space too large to enumerate.
+type stateSpaceError struct{ msg string }
+
+func (e *stateSpaceError) Error() string { return e.msg }
 
 // buildObserver, when non-nil, sees every Build result. This package's tests set
 // it (once, before any test runs), to cross-check every machine the test suite
@@ -374,7 +564,8 @@ func (r *Registry) Build() (*Machine, *Report, error) {
 var buildObserver func(r *Registry, m *Machine, rep *Report, err error)
 
 // machineObserver, when non-nil, sees every machine handed out without Build: kind
-// "synthesized" (Synthesis.Machine) or "compositional" (BuildCompositional). Only
+// "synthesized" (Synthesis.Machine) or "compositional" (BuildCompositional). Build's
+// per-component machines go to buildObserver, with Report.Compositional set. Only
 // the example-machine gate sets it (gate.go, built with the gsmgate tag).
 var machineObserver func(kind string, r *Registry, m *Machine)
 
@@ -400,7 +591,7 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 		}
 	}()
 	if r.totalBits > 20 {
-		return nil, nil, fmt.Errorf("gsm: state space too large (%d bits, max 20)", r.totalBits)
+		return nil, nil, &stateSpaceError{fmt.Sprintf("gsm: state space too large (%d bits, max 20)", r.totalBits)}
 	}
 	for _, inv := range r.invariants {
 		if inv.repair == nil {
@@ -412,12 +603,12 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 	stateCount := 1
 	for _, v := range r.vars {
 		if v.domain > 0 && stateCount > maxStateSpace/v.domain {
-			return nil, nil, fmt.Errorf("gsm: state space overflow (exceeds limit %d)", maxStateSpace)
+			return nil, nil, &stateSpaceError{fmt.Sprintf("gsm: state space overflow (exceeds limit %d)", maxStateSpace)}
 		}
 		stateCount *= v.domain
 	}
 	if stateCount > maxStateSpace {
-		return nil, nil, fmt.Errorf("gsm: state space %d exceeds limit %d", stateCount, maxStateSpace)
+		return nil, nil, &stateSpaceError{fmt.Sprintf("gsm: state space %d exceeds limit %d", stateCount, maxStateSpace)}
 	}
 
 	packedCount := 1 << r.totalBits
@@ -574,10 +765,11 @@ func (r *Registry) computeStepTables(run checkedRules, packedCount int, valid []
 // nothing outside its own footprint (the precondition of disjoint_events_commute in
 // normalization-confluence coq/Gsm.v), and an event's guard or effect may read any
 // variable. Establishing that precondition (verifyFootprints) costs more closure
-// calls per event than the exact check costs table lookups per pair, so Build always
-// runs the exact check and PairsDisjoint is always 0 for Build. BuildCompositional,
-// which cannot enumerate the global space, uses the shortcut only after
-// verifyFootprints has established the precondition for every component.
+// calls per event than the exact check costs table lookups per pair, so the global check
+// always runs the exact check and its PairsDisjoint is always 0. The per-component check
+// (Build on a combinator registry too large to enumerate, BuildCompositional), which
+// cannot enumerate the global space, skips a pair only when its events lie in different
+// components, with every rule's reads in its footprint (cc1_cross).
 func (r *Registry) verifyCC(packedCount int, valid []bool, nf []uint64, step [][]uint64, mkState func(uint64) State, report *Report) error {
 	pairsChecked := 0
 	inDomain := ccDomain(packedCount, valid, nf)

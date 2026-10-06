@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Compositional checking by default (roadmap item 1c).** `Build` now checks a registry too large
+  to enumerate (more than 2²⁰ states) per footprint component when every rule is a combinator, the
+  registry splits into more than one component, every component fits 20 bits and the zero state is
+  valid. Each rule's footprint is derived from its expression trees, reads included (an event's
+  guard reads, effect reads and writes; an invariant's check reads and repair reads and writes);
+  union-find over the footprints gives the components; each component is checked over its own
+  subspace (WFC with its deepest repair chain, CC for every checked pair of its events at its valid
+  states, the undeclared pairs and idempotence the same way); pairs in different components need no
+  check; and the verified table oracle certifies every component's tables
+  (`AssuranceOracleComponents`). The result is exact for the whole machine
+  (normalization-confluence `coq/CompositionalCheck.v`: `compositional_exact`, `compositional_gsm`,
+  `wfc_iff`, `bound_sum`, `cc1_cross`, `cc1_same_iff`, `cc1_component`, `gsm_literal`), so a failure
+  in a component is a failure of the machine, with the witness the global check gives. The report
+  gains `Report.Compositional` (`CompositionalReduction{Components, Vars, LargestStates,
+  StatesChecked, GlobalStates, CrossPairs, RepairBounds, FootprintsExact}`), printed as "Verified
+  compositionally: 2 components (largest 131,072 states; 131,136 states checked instead of
+  8,388,608); 6 cross-component pairs need no check (disjoint footprints, reads included);
+  footprints checked exactly (combinators)", and `Report.GlobalReason`, printed as "Checked
+  globally: ...", which says why `Build` enumerated a machine whole: it is small enough (the global
+  check keeps step tables and both whole-machine oracles, so a machine within 2²⁰ states is still
+  enumerated whole even when it decomposes), a closure rule (whose footprint gsm can only test), one
+  component, an invalid zero state, a component above 20 bits, or a collection template or
+  federation component (no combined theorem is stated for symmetry with compositional checking, and
+  federation checks run on step tables). A registry neither path can check is refused with both
+  reasons. A machine checked per component computes at run time from the rules, like
+  `BuildCompositional`'s. `ExampleRegistry_Build_compositional` and a run block in
+  `docs/verification.md` show it, and the example-machine gate records such a machine as one
+  machine per component (`store/component1`, ...), each component's tables checked by the extracted
+  table checker. New `docs/theory.md` §11.10 maps each guarantee to its theorem.
+- **Tests: the per-component check against the global one.** `TestCompositional_DifferentialRandom`
+  builds random decomposable registries both ways and requires the same result, CC witness, repair
+  depth, delivery obligations and saturating rules, passing and failing; mirrors of the theory's
+  counterexamples (`ws_diverges`: the guarded shipment's read merges it with payment;
+  `rc_diverges`: a combinator repair's writes merge, a closure repair writing outside its `Watches`
+  is refused; `sw_diverges`: a written variable read by two groups merges all three); the fallbacks
+  (an oversized component, closures without the opt-in, collection templates, federation
+  components); and the repair bound as the sum of the component bounds.
+
 - **Abstraction: check relationships, not values (roadmap item 1b, the comparison route).**
   `Registry.Abstract(constants...)` declares the constants a registry's rules compare and copy;
   `Build` then verifies the registry over a few representative values instead of every value: the
@@ -57,6 +95,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BuildCompositional derives combinator footprints with their reads.** A combinator event whose
+  guard or effect reads a variable outside its write set was refused with a footprint violation; its
+  reads are now part of its footprint, so the variables join one component and the check decides the
+  machine (the guarded shipment now fails CC, as `Build` fails it, instead of being refused). A
+  combinator rule that mentions a variable of another registry is refused up front, naming the
+  variable. A combinator event that reads and writes nothing (the identity) is accepted and needs
+  no check. Closure footprints are unchanged: an event's `Writes`, an invariant's `Watches`, tested
+  by perturbation under `TrustClosureFootprints`.
+- **BuildCompositional's report matches Build's.** `MaxRepairLen` is now the machine's longest
+  repair chain, the sum of the components' deepest chains (it was the deepest single component's);
+  `NotIdempotent`, `Saturations` (counted over component states) and, in declared-only mode,
+  `PairsUndeclared` and `CausalOrderRequired` are now reported; CC is checked pair by pair in
+  `Build`'s order; and the table oracle receives the component tables the check computed rather
+  than tables recomputed by running the rules again.
 - **Docs: roadmap item 1d in detail.** Independence checked rather than declared (each
   restriction backed by a mechanized counterexample), the n! to one-trace payoff, symmetry combined
   with history reduction, and how both would read in the report.

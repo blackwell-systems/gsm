@@ -39,7 +39,7 @@ And gsm's own verification is **checked again by the proof itself, in-process**.
 
 When you call `registry.Build()`:
 
-1. **Enumerate state space** - All combinations of variable values (finite per variable; `BuildCompositional` enumerates per footprint component instead of the global product)
+1. **Enumerate state space** - All combinations of variable values (finite per variable). A registry too large for that, whose rules are combinators and split into footprint components, is checked per component instead ([Compositional verification](#compositional-verification))
 2. **Compute normal forms** - For every state, apply compensation until valid
 3. **Verify WFC** - Compensation terminates and reaches valid states
 4. **Build step table** - For every (event, state) pair, precompute the normal form after applying the event
@@ -84,6 +84,7 @@ Machine: order_fulfillment
   CC (Compensation Commutativity): PASS (3 pairs: 0 disjoint, 3 brute-force)
 
   Convergence: GUARANTEED
+  Checked globally: the whole machine has 24 states, within Build's enumeration limit of 1,048,576, and the global check keeps step tables and both whole-machine oracles
   Assurance: tables certified by the verified table oracle
   Rules oracle: not run: not a combinator machine (gsm: invariant "status_matches_facts" has no combinator AST (declare it with DeclInvariant to export))
 ```
@@ -91,10 +92,15 @@ Machine: order_fulfillment
 **WFC (Well-Founded Compensation)**: Compensation terminates from every state. The report shows the maximum number of repair steps needed.
 
 **CC (Compensation Commutativity)**: For every independent pair of events, both orderings reach the same normal form from every valid state (and from the zero state `NewState` returns). The report shows:
-- **Disjoint pairs** - Skipped because the two events lie in different footprint components, after the footprint check (`BuildCompositional` only; always 0 for `Build`)
+- **Disjoint pairs** - Need no check because the two events lie in different footprint components (per-component path only; 0 when `Build` enumerates the whole state space)
 - **Brute-force pairs** - Checked exhaustively, state by state
 
 **Assurance** and **Rules oracle**: what certified the machine, and why the rules oracle did not run (here, the rules are closures); see [Assurance levels](#assurance-levels). Every field is listed in [Reference](reference.md#report).
+
+The report also says how `Build` checked the machine. A machine it enumerated whole carries a
+`Checked globally: ...` line with the reason (`Report.GlobalReason`; for this machine, that its 24
+states are within the enumeration limit). A machine checked per footprint component carries
+`Verified compositionally: ...` instead ([Compositional verification](#compositional-verification)).
 
 If verification fails, you get a counterexample. For the guarded-shipment draft ([Getting started](getting-started.md#why-not-guard-the-shipment-on-payment)), reduced to two flags:
 
@@ -152,15 +158,17 @@ gsm's verification produced:
 
 - `Build`, and so `BuildOrSynthesize` when the rules converge as written;
 - `SynthesizeWith`, and so `BuildOrSynthesize`'s synthesized path and `Synthesis.Machine`;
-- `BuildCompositional`, once per footprint component, over that component's subspace.
+- `Build` on its per-component path, and `BuildCompositional`, once per footprint component, over
+  that component's subspace.
 
 If the oracle does not certify the tables (it rejects them, or it cannot check them), the call
 returns an error and no machine, and `Report.OracleDisagreement` holds the oracle's error. For
 rules that are deterministic, a disagreement points at a bug in gsm's verification or in the
 oracle's generator, not at your rules. One cause does come from your rules: an impure rule (one
 that reads a clock, a counter or other outside state) can give different results when it runs
-again. `BuildCompositional` runs every rule again to build the component tables, so such a rule
-can make the two checks see different tables.
+again. The per-component check hands the oracle the component tables it checked itself, and a lazy
+machine runs the rules again at `Apply` time, where an impure rule can still diverge from what was
+checked.
 
 ### Assurance levels
 
@@ -170,9 +178,12 @@ can make the two checks see different tables.
   oracle certified the machine from its combinator rules (below).
 - `AssuranceOracleTables`: gsm's verification and the table oracle both certified the machine's
   tables; the rules oracle did not run, and `Report.RulesOracleSkipped` says why.
-- `AssuranceOracleComponents` (`BuildCompositional`): the oracle certified every component's
-  tables. That cross-component pairs commute rests on gsm's footprint check, which the oracle does
-  not see; with combinator rules that check is exact.
+- `AssuranceOracleComponents` (`Build` on its per-component path, or `BuildCompositional` with
+  combinator rules): gsm checked each footprint component in Go, and the table oracle certified
+  every component's tables. The step from the components to the whole machine is
+  `compositional_exact` (normalization-confluence `CompositionalCheck.v`): it rests on the
+  footprints, which gsm derives from the combinator trees, reads included, and which the oracle
+  does not see. The rules oracle does not run (it checks a whole machine).
 - `AssuranceOracleComponentsTested` (`BuildCompositional` with `TrustClosureFootprints`, on a
   machine with closure rules): as above, but the footprint check for closures is a perturbation
   test, not exact.
@@ -210,8 +221,8 @@ tables at all. It runs when all of these hold, and `Report.RulesOracleSkipped` s
 
 If it runs and does not certify the machine (repair does not terminate, or a declared pair does
 not commute), or gives no result, `Build` fails closed like the table oracle. `SynthesizeWith`
-and `BuildCompositional` run the table oracle only: synthesized repairs are not rules, and a
-component is not a registry.
+and the per-component path (`Build` on a large registry, `BuildCompositional`) run the table oracle
+only: synthesized repairs are not rules, and a component is not a registry.
 
 **Out of process.** Either spelling of combinator rules ([Getting started](getting-started.md#declarative-rules-combinators)) can be cross-checked against the verified **rules oracle**: `WriteMachineAST` emits the machine as S-expressions and the OCaml `astchecker` (extracted from the axiom-free Coq proof in `normalization-confluence`) recomputes convergence straight from those rules. It also certifies the **CRDT-fragment classification** (a machine-checked `compensation_free` result: whether repair is ever needed), so a consumer can confirm from the rules whether a machine is a plain CRDT or a compensation-bearing governed machine. See `astoracle_test.go` (`GSM_AST_CHECKER`).
 
@@ -317,49 +328,127 @@ How to make and embed a certificate is in [Federation](federation.md#composing-f
 
 ## Compositional verification
 
-`Build` enumerates the whole state space, which caps it at the 2²⁰ (≈1M) state ceiling.
-`BuildCompositional` lifts that cap for machines that are *wide but loosely coupled*: many
-variables, but each invariant and event touches only a few of them.
+`Build` enumerates the whole state space, which caps it at 2²⁰ (about 1M) states. Most registries
+are *wide but loosely coupled*: orders and inventory, accounts and notifications, each group of
+variables governed by its own rules. When the rules of a registry too large to enumerate are
+combinators, `Build` checks it **per footprint component** by default, and the result holds for
+the whole machine:
 
-**When to use it:**
-- Your global state space exceeds the ~1M enumeration ceiling, but
-- The machine decomposes into independent groups of variables (invariants and events with
-  disjoint footprints), each group small on its own.
+<!-- gocheck: run -->
+```go
+r := gsm.NewRegistry("store")
+shipped, paid := r.Bool("shipped"), r.Bool("paid")
+charged := r.Int("charged", 0, 15)
+stock, reserved := r.Int("stock", 0, 255), r.Int("reserved", 0, 255)
+backordered := r.Bool("backordered")
+
+// Orders: shipping unpaid is repaired by charging, and a charge marks the order paid.
+r.Rule("shipped_needs_payment").Require(gsm.Or(gsm.Is(shipped, 0), gsm.Is(paid, 1))).RepairWith(gsm.Raise(paid)).Add()
+r.Rule("charge_marks_paid").Require(gsm.Or(gsm.Is(paid, 1), gsm.AtMost(charged, 0))).RepairWith(gsm.Raise(paid)).Add()
+r.On("pay").Does(gsm.Raise(paid)).Add()
+r.On("ship").Does(gsm.Raise(shipped)).Add()
+r.On("charge").OnlyIf(gsm.Below(charged, 15)).Does(gsm.Inc(charged)).Add()
+
+// Inventory: the backorder flag is reserved > stock, recomputed by repair.
+r.Rule("flag_when_short").Require(gsm.Or(gsm.Is(backordered, 1), gsm.AtMostVar(reserved, stock))).
+    RepairWith(gsm.Raise(backordered)).Add()
+r.Rule("clear_when_covered").Require(gsm.Or(gsm.Is(backordered, 0), gsm.AboveVar(reserved, stock))).
+    RepairWith(gsm.Lower(backordered)).Add()
+r.On("reserve").OnlyIf(gsm.Below(reserved, 255)).Does(gsm.Inc(reserved)).Add()
+r.On("restock").OnlyIf(gsm.Below(stock, 255)).Does(gsm.Inc(stock)).Add()
+
+m, report, err := r.Build() // 2^23 states: too many to enumerate, so Build checks each component
+if err != nil {
+    panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+}
+fmt.Println(report.Compositional)
+// Verified compositionally: 2 components (largest 131,072 states; 131,136 states checked instead of
+// 8,388,608); 6 cross-component pairs need no check (disjoint footprints, reads included);
+// footprints checked exactly (combinators)
+
+s := m.Apply(m.Apply(m.NewState(), "ship"), "reserve")
+fmt.Println(s.GetBool(paid), s.GetBool(backordered)) // true true: both components repaired
+```
+
+**How it works.** Every rule's footprint is what it reads and writes. For a combinator rule `Build`
+derives it from the expression trees: an event's guard reads, effect reads and writes; an
+invariant's check reads and repair reads and writes. Union-find over the footprints gives the
+components, so every rule lies in one component. Then, for each component, over its own subspace
+(its variables, every other variable at zero):
+
+- **WFC**: repair terminates from every state, and its deepest chain is recorded. The machine's
+  repair bound, and `Report.MaxRepairLen`, is the sum of the components' chains.
+- **CC**: every checked pair of the component's events commutes at every valid state.
+- **Pairs in different components need no check.** They commute at every valid state, and gsm
+  never applies an event to any other state (`Apply` normalizes an invalid input first).
+- **The oracle gate**: the verified table oracle certifies every component's tables.
+
+The cost is the sum of the components' state counts, not their product. The result is exact: the
+machine converges iff every component does, so a pass is the guarantee for the whole machine, and a
+failure in a component is a failure of the machine, reported with the witness the global check
+would give. The theorems (normalization-confluence `CompositionalCheck.v`) are mapped one by one in
+[Theory §11.10](theory.md#1110-footprint-components-compositional-checking).
+
+**Reads are in the footprint.** That is what makes the reduction sound. The guarded shipment of
+[Getting started](getting-started.md#why-not-guard-the-shipment-on-payment) writes `shipped` but
+reads `paid`, which `pay` writes. With footprints of writes alone the two would sit in separate
+components, each would pass, and the machine diverges (`ws_diverges`). With the read in the
+footprint, `paid` and `shipped` land in one component, and the check fails it exactly as the
+global check does. A repair's writes are in its footprint for the same reason (`rc_diverges`), and
+gsm has no shared variables: a variable one rule writes and another reads joins their components
+(`sw_diverges`).
+
+**When Build checks globally instead.** `Report.GlobalReason` says which of these applied, and the
+report prints it as `Checked globally: ...`:
+
+| Reason | Why |
+|---|---|
+| The machine has at most 2²⁰ states | `Build` enumerates it whole, even when it decomposes: that gives step tables (`Export`, `WriteConvergenceTables`, federations, certificates) and both whole-machine oracles, a stronger assurance than per-component tables |
+| A rule is a Go closure | gsm can only test a closure's footprint, not derive it. `BuildCompositional` with `TrustClosureFootprints` accepts a tested footprint (below) |
+| The rules form one component | Nothing to decompose |
+| The zero state violates an invariant | Each component is checked with the others at zero, which needs a valid zero state |
+| A component needs more than 20 bits | The per-component check enumerates each component |
+| A collection template, or a federation component | No combined theorem is stated for symmetry with compositional checking, and federation checks run on step tables |
+
+A registry neither path can check (too large to enumerate, and one of the reasons above) is refused
+with an error that gives both reasons.
+
+**The machine.** A machine checked per component computes `Apply` and `Normalize` at run time from
+the rules, like `BuildCompositional`'s (below), so `Export` and `WriteConvergenceTables` are
+unavailable. `Report.Assurance` is `AssuranceOracleComponents`.
+
+### BuildCompositional
+
+`BuildCompositional` runs the per-component check at any size, with one component or many, and is
+the opt-in for closure rules:
 
 <!-- gocheck: check registry -->
 ```go
 m, rep, err := r.BuildCompositional()
 // rep.Components          -> number of independent footprint components
 // rep.MaxComponentStates  -> size of the largest component's subspace (the real cost)
+// rep.Compositional       -> the reduction: components, cost, cross-component pairs
 // rep.FootprintChecked    -> footprint conformance held
 
 // Rules written as Go closures need an explicit opt-in (see below):
 m, rep, err = r.BuildCompositional(gsm.TrustClosureFootprints())
 ```
 
-**How it works.** gsm partitions the variables into footprint-connected components (union-find
-over invariant footprints and event write sets), checks that every rule reads and writes only its
-declared footprint, verifies WFC and CC over each component's own subspace, and skips
-cross-component event pairs, which commute because they read and write disjoint variables.
-Certification cost is exponential in the *largest component*, not the whole machine, so a registry
-of many independent small invariants certifies even when its global state space is astronomically
-large.
-
-**What the footprint check proves.** An event's guard and effect may read only the variables the
-event writes; an invariant's check and repair only its `Watches` set. A rule that reads anything
-else (like the guarded `ship` in [Getting started](getting-started.md#why-not-guard-the-shipment-on-payment)) is rejected with a footprint violation naming the variable.
-For combinator rules the check is syntactic and exact. A closure is opaque, so gsm tests it: from
-every state of its component, it changes each outside variable, and each pair of outside
-variables, to every other value and confirms the closure's result does not change. That catches
-dependence on one or two outside variables (such as `paid && inStock`), but not a closure that
-depends only on three or more outside variables jointly. Because of that gap, `BuildCompositional`
-accepts closure rules only when you pass `gsm.TrustClosureFootprints()`, acknowledging that each
-closure reads and writes only its declared footprint and is deterministic. Without the option, a
+**Closures: the trust boundary.** A closure is opaque, so its footprint is its declaration: an
+event's `Writes`, within which its guard and effect must also read, and an invariant's `Watches`.
+gsm tests it: from every state of its component, it changes each outside variable, and each pair
+of outside variables, to every other value, and confirms the closure's result does not change and
+it writes nothing outside its footprint. That catches dependence on one or two outside variables
+(such as `paid && inStock`), but not a closure that depends only on three or more outside variables
+jointly. Because of that gap, `BuildCompositional` accepts closure rules only when you pass
+`gsm.TrustClosureFootprints()`, acknowledging that each closure reads and writes only its declared
+footprint and is deterministic, and `Build` never decomposes a closure rule. Without the option, a
 registry with any closure rule (`Holds`/`Repair`/`Apply`/`Guard`) is rejected with an error naming
-the first one. With it, `Report.Assurance` is `AssuranceOracleComponentsTested`, whose text says
-the footprint check for closures is a perturbation test, not exact. If your rules are closures
-with wide guards, use `Build` (exact, no footprint assumption) or the combinator vocabulary, which
-`BuildCompositional` accepts with no option.
+the first one. With it, `Report.Assurance` is `AssuranceOracleComponentsTested`, and the
+reduction line ends `footprints tested by perturbation (TrustClosureFootprints)`. A closure that
+reads or writes outside its footprint, where the test detects it, is refused with a footprint
+violation naming the rule and the variable. If your rules are closures with wide guards, use
+`Build` (exact, no footprint assumption) or the combinator vocabulary.
 
 **Trade-offs.** The returned `Machine` is *lazy*: it computes `Apply`/`Normalize` at runtime from
 the rules instead of via a precomputed table lookup, and `Export` is unavailable (there are no
@@ -367,15 +456,22 @@ global tables to serialize). Each closure result is checked to be a state of the
 computed, and `Apply` panics if one is not. `Apply` and `Normalize` also panic, with an
 explanation, if the repairs take more steps than the build verified any repair chain can (the sum
 of each component's deepest chain): that only happens when a rule breaks its footprint or is not
-deterministic, and the repairs could otherwise cycle forever. Preconditions: every invariant
-declares its footprint and every event its write set (both automatic with the combinator
-vocabulary), every event reads only what it writes, the zero state is valid, every variable's
-range fits its bit field, and the machine fits in 64 bits of state. A closure whose footprint test
+deterministic, and the repairs could otherwise cycle forever. Preconditions: every closure
+invariant declares its footprint and every closure event its write set (both derived for
+combinators), the zero state is valid, every variable's range fits its bit field, no component
+needs more than 20 bits, and the machine fits in 64 bits of state. A closure whose footprint test
 would take more than 2^28 closure calls (wide variables outside its footprint) is rejected up
 front.
 
-The theorem this rests on, and why its read-set hypothesis is essential, is
-[Theory §8](theory.md#8-footprint-calculus).
+**Not covered yet.** A variable that no rule writes (a configuration flag) still joins the
+components that read it; the theory allows such a shared read-only variable in several components
+at once, and gsm does not implement it. Checking each component with only its own invariants,
+which would drop the valid-zero-state precondition, is not implemented either
+([Roadmap 1c](ROADMAP.md#1c-compositional-checking-by-default)).
+
+The disjointness theorem and why its read-set hypothesis is essential are in
+[Theory §8](theory.md#8-footprint-calculus); the per-component theorems in
+[Theory §11.10](theory.md#1110-footprint-components-compositional-checking).
 
 ---
 
@@ -540,7 +636,7 @@ Verification cost depends on state space size:
 
 State space grows as the **product** of variable domains: 5 enums × 100 ints = 500 states.
 
-Hard limit: 2²⁰ ≈ 1M states. `Build` returns an error above this rather than attempt an intractable enumeration; use `BuildCompositional` (or federation) to go beyond it.
+Hard limit for the global check: 2²⁰ ≈ 1M states. Above it, `Build` checks a combinator registry per footprint component ([Compositional verification](#compositional-verification)), and otherwise returns an error rather than attempt an intractable enumeration; `BuildCompositional` (closures with `TrustClosureFootprints`) or a federation go beyond it too.
 
 **The oracle gate's cost.** The table oracle re-checks the tables after gsm's own checks, reading them in place through accessors (a closure call per read), so its cost per state and declared pair is higher than `Build`'s own CC check. Measured locally on an Apple M-series laptop (Build with the gate vs without):
 

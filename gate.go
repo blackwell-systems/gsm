@@ -6,7 +6,8 @@ package gsm
 // with -tags gsmgate compiles this file. Run with GSM_GATE_DIR set, such a build
 // records every machine the program makes (each Build result, each synthesized
 // and each compositional machine) as the extracted checkers' inputs in that
-// directory, for internal/cmd/gsmgate to check. It panics if a record cannot be
+// directory, for internal/cmd/gsmgate to check. A Build result checked per footprint
+// component is recorded as one machine per component. It panics if a record cannot be
 // written, so a gate run cannot silently miss a machine.
 
 import (
@@ -44,6 +45,10 @@ func gateBuild(dir string, r *Registry, m *Machine, rep *Report, err error) {
 	}
 	if r.abs != nil {
 		gateAbstract(dir, rec, r, m, rep)
+		return
+	}
+	if rep != nil && rep.Compositional != nil {
+		gateComponents(dir, rec, r, m, rep)
 		return
 	}
 	rules, pairs, rerr := gateRules(r)
@@ -89,6 +94,39 @@ func gateAbstract(dir string, rec gate.Record, r *Registry, m *Machine, rep *Rep
 		rec.TablesErr = terr.Error()
 	}
 	gateWrite(dir, rec, nil, nil, tables)
+}
+
+// gateComponents records a Build that checked the machine per footprint component. The
+// rules checker would enumerate the whole machine, so it does not run; the table checker
+// gets each component's tables, which the in-process table oracle certified: an accepted
+// machine is recorded as one machine per component, named "<registry>/component<k>", and a
+// machine rejected for CC as the registry with the failing component's tables, which the
+// table checker must reject.
+func gateComponents(dir string, rec gate.Record, r *Registry, m *Machine, rep *Report) {
+	const why = "checked per footprint component: the rules checker would enumerate the whole machine; each " +
+		"component's tables are checked instead"
+	rec.RulesErr = why
+	tbs, terr := r.componentTablesFor()
+	switch {
+	case terr != nil:
+		rec.TablesErr = terr.Error()
+	case m != nil:
+		for _, nt := range tbs {
+			c := rec
+			c.Name = nt.name
+			gateWrite(dir, c, nil, nil, formatTables(nt.tables))
+		}
+		return
+	case rec.CCFail && rep != nil:
+		if ci := r.componentOf(rep.CCFailure.Event1); ci >= 0 && ci < len(tbs) {
+			gateWrite(dir, rec, nil, nil, formatTables(tbs[ci].tables))
+			return
+		}
+		rec.TablesErr = "the failing pair's component was not found"
+	default:
+		rec.TablesErr = "Build failed before the CC phase: no tables"
+	}
+	gateWrite(dir, rec, nil, nil, nil)
 }
 
 func gateMachine(dir, kind string, r *Registry, m *Machine) {

@@ -31,7 +31,8 @@ type Machine struct {
 	ccPairs  [][2]int
 	allPairs bool
 
-	// Lazy path (BuildCompositional): for machines whose global state space is too
+	// Lazy path (the per-component check: Build on a combinator registry too large to
+	// enumerate, or BuildCompositional): for machines whose global state space is too
 	// large to tabulate, Apply/Normalize compute at runtime from the rules instead
 	// of O(1) table lookups. step/nf are nil in this mode.
 	lazy       bool
@@ -79,12 +80,13 @@ func (m *Machine) NewState() State {
 // every invalid input first, the zero state included: abstraction certifies order
 // independence from the valid states.
 //
-// A lazy machine (BuildCompositional) has no tables: Apply runs the event's effect and
-// the repairs at call time, and panics if one returns something that is not a state of
-// this machine (see EffectFunc), naming the rule, the input state and the result.
-// BuildCompositional checked the results only on the states it enumerates (each
-// component's states with the other variables at zero, and the footprint check's one- and
-// two-variable perturbations of them), so a closure that goes wrong elsewhere, for
+// A lazy machine (checked per footprint component, by Build or BuildCompositional) has no
+// tables: Apply runs the event's effect and the repairs at call time, and panics if one
+// returns something that is not a state of this machine (see EffectFunc), naming the rule,
+// the input state and the result. The per-component check ran the rules only on the
+// states it enumerates (each component's states with the other variables at zero, and the
+// footprint check's one- and two-variable perturbations of them), so a closure that goes
+// wrong elsewhere, for
 // example one that depends on three outside variables jointly or on mutable outside data,
 // is caught here. The check costs one mask test plus one comparison per variable whose
 // domain does not fill its bit field, per closure call.
@@ -117,8 +119,8 @@ func (m *Machine) Apply(s State, event string) State {
 // If the state is already valid, returns it unchanged. The input must be a state of this
 // machine, as for Apply. On a lazy machine it checks the input, runs the repairs, and
 // panics on an input or a result outside the machine, as Apply does. It also panics,
-// rather than looping forever, when the repairs take more steps than BuildCompositional
-// verified any repair chain can (the sum of each component's deepest chain), which
+// rather than looping forever, when the repairs take more steps than the per-component
+// check verified any repair chain can (the sum of each component's deepest chain), which
 // happens only when a rule breaks its declared footprint or is not deterministic; Apply
 // normalizes the same way.
 func (m *Machine) Normalize(s State) State {
@@ -141,7 +143,7 @@ func (m *Machine) IsValid(s State) bool {
 	return m.nf[s.packed] == s.packed
 }
 
-// --- lazy runtime (BuildCompositional machines) ---
+// --- lazy runtime (per-component and abstraction machines) ---
 
 func (m *Machine) allHold(s State) bool {
 	for _, inv := range m.invariants {
@@ -162,7 +164,7 @@ func (m *Machine) mustBeInput(op string, s State) {
 }
 
 // mustBeState panics unless out, which a rule returned for input in, is a state of this
-// machine (domainCheck). BuildCompositional checked the rules on every state of each
+// machine (domainCheck). The per-component check ran the rules on every state of each
 // component, but a lazy machine runs them again at Apply time on states it never saw, so
 // the result is checked here, where it is computed. Returns out with this machine's
 // variable list.
@@ -354,8 +356,8 @@ type verifyInfo struct {
 //	        return self.step[self.events[event]][state]
 func (m *Machine) Export(path string) error {
 	if m.lazy {
-		return fmt.Errorf("gsm: cannot Export a machine without global tables (one from BuildCompositional, or from " +
-			"Build by abstraction); Export is for machines Build enumerated")
+		return fmt.Errorf("gsm: cannot Export a machine without global tables (one checked per footprint component, " +
+			"by Build or BuildCompositional, or one Build verified by abstraction); Export is for machines Build enumerated")
 	}
 	eventNames := m.Events()
 

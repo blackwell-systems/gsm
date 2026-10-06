@@ -407,6 +407,12 @@ func checkComponentsUnchanged(comps []*Registry, before []registryShape) error {
 	return nil
 }
 
+// federationGlobal is why a federation component is not checked per footprint
+// component: the federation checks run on each component's step tables, which only the
+// global check produces.
+const federationGlobal = "it is a federation component, and the federation checks run on its step tables, " +
+	"which only the global check produces"
+
 // build is Build on f itself; Build calls it on a frozen copy.
 func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	// Names first: certificate validation and replay address (registry, event) by name.
@@ -453,7 +459,7 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 			// Build re-runs WFC and CC; CC is cheap here because the step tables, which the
 			// runtime Machine needs anyway, are already built. A certificate issued by an
 			// earlier, weaker verifier for a non-convergent component is refused here.
-			cm, cr, err := r.Build()
+			cm, cr, err := r.buildWith(buildOpts{global: federationGlobal})
 			if err != nil {
 				return nil, report, fmt.Errorf("gsm: certified component %q does not converge on re-check: %w", r.name, err)
 			}
@@ -461,7 +467,7 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 			report.Components = append(report.Components, cr)
 			continue
 		}
-		cm, cr, err := r.Build()
+		cm, cr, err := r.buildWith(buildOpts{global: federationGlobal})
 		if err != nil {
 			return nil, report, fmt.Errorf("gsm: component %q does not converge: %w", r.name, err)
 		}
