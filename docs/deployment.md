@@ -87,6 +87,24 @@ The formal counterexample (`fed_grs_c1_c2_insufficient` in [`FederationGRS.v`](h
 
 **`RequireProjectionSafe` certifies distributed deployment.** `Federation.RequireProjectionSafe()` makes XU a build requirement: `Build` then returns the `*ProjectionOrderError` (target, event, state, and the two diverging results), or an error naming the structural reason, both wrapping `ErrProjectionNotCertified`. Call it if your deployment merges projections and you want `Build` to refuse a federation that is not certified for it. Like `AllowMonotoneCycles`, it belongs to the federation it is called on.
 
+**Propagation order and delivery.** On an acyclic network the propagation steps can fire in any
+fair order (every node keeps getting updated, no global schedule): after finitely many events, every
+fair schedule settles at the `FedMachine` result, and a node at depth d is final after d + 1 rounds
+in which every node updates (normalization-confluence `RobertFair.v`: `rb_events`, `rb_rounds`;
+Robert's theorem in this model). No final flush is needed. The propagation half of the guarantee,
+XU, holds for every delivery class of events (`xu_xurd`, `DistributedDelivery.v`). For the events
+themselves:
+
+- **Causal delivery:** only pairs that happens-before leaves unordered must commute on the
+  `FedMachine` (`dist_causal_exact`). `Build`'s C2 checks declared pairs statically, so it can reject
+  a causal deployment that would in fact converge (`tr_causal_instance`): the check is safe, not
+  exact.
+- **At-least-once delivery:** besides commutation, each event's *federated* step (the event, then the
+  network's repair) must be idempotent where the event is first delivered (`dist_alo_exact`,
+  `dist_causal_alo_exact`). `Report.NotIdempotent` checks each registry on its own, so in a
+  projection deployment with redelivery it does not cover this: deduplicate events unless you have
+  checked the federated step.
+
 **What is not certified.** `ProjectionSafe` is false on a cyclic network (the theorem is for acyclic ones; [why that is required](#cycles-ghosts-and-reset-epochs)) and on a network with a multi-source target (`SharedProjection` sends one edge's `Map` image, not the resolver's merge the theorem covers). Like C1 and C2, XU is static: a witness is a valid state that a given deployment need not reach. M1 guarantees each merge keeps a valid node valid; it does not make the nodes converge.
 
 **Ordering projections.** A projection carries no ordering by itself. A transport that can reorder

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: propagation order and delivery classes for projection deployments.** From
+  normalization-confluence gaps 15 (c) and 16 (d): any fair propagation order settles on acyclic
+  networks, bounded by depth + 1 rounds, with no final flush (`rb_events`, `rb_rounds`); XU covers
+  propagation for every delivery class (`xu_xurd`); under causal delivery C2 is safe but not exact
+  (`tr_causal_instance`); under at-least-once delivery the federated step must be idempotent, which
+  per-registry `NotIdempotent` does not check (`dist_alo_exact`). `docs/deployment.md` gains a
+  paragraph. No behavior change.
 - **Docs: roadmap item 3, a regime report.** `docs/ROADMAP.md` plans a one-paragraph summary that
   names the user's regime and states what is guaranteed, what the user must provide, and what is not
   covered, each line traceable to a mechanized theorem.
