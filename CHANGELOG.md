@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: roadmap item 1d, partial-order reduction.** Checks that explore reachable states would
+  follow one order per group of commuting events, with soundness proved per condition: the
+  history-side counterpart of the symmetry and abstraction reductions.
 - **Docs: roadmap item 1 in detail.** `docs/ROADMAP.md` now breaks "verify realistic domains" into
   symmetry (check one item, conclude for all), abstraction (check relationships, not values) and
   compositional checking by default, each with when it applies, its theorem, an example, what it

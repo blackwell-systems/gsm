@@ -50,6 +50,30 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
   condition, not only CC.
 - **Effect.** Cost grows with the largest piece, not with the product of everything.
 
+### 1d. Partial-order reduction: check fewer event orders, not just fewer states
+
+- **When it applies.** The checks that explore reachable states by running event sequences: the
+  exact conditions on cycles (GC), the reachable-state forms of the federation and projection
+  conditions, and the planned migration check. Single-registry CC already checks pairs and needs
+  no reduction.
+- **The idea.** When two events commute at a state, the two orders reach the same state, so the
+  explorer needs to follow only one of them. Standard partial-order reduction (persistent or ample
+  sets, sleep sets) prunes the orders a commutation proof makes redundant.
+- **The theorem.** Exploring only the reduced set of orders reaches every state the exact
+  condition quantifies over (or a representative of it under the equivalence the condition
+  respects), so the condition decided on the reduced exploration is the condition on the full one.
+  The commutation results gsm already relies on (trace equivalence, `run_tequiv`) are the main
+  ingredient; what is new is the soundness of the pruning for each condition.
+- **Example.** A cyclic federation whose events are mostly independent: the reachable states are
+  explored along one order per independent group instead of every interleaving.
+- **Not covered.** Events whose independence holds only at some states: the reduction uses only
+  commutation that the check has itself established, never a declared one it has not verified.
+
+This is the history-side counterpart of 1a to 1c: symmetry and abstraction collapse states the
+rules cannot tell apart, and partial-order reduction collapses event orders the rules cannot tell
+apart. In normalization-confluence's terms the first is state descent and the second history
+descent, used to make checking cheap.
+
 ### How it shows up in gsm
 
 - Declarations with realistic types: `Int64` amounts, string identifiers, keyed collections
@@ -65,7 +89,9 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
 1. **Symmetry first**: the most common shape in real systems, the cleanest theorem, and the
    largest immediate gain.
 2. **Abstraction second**, starting with comparison-only rules.
-3. **Compositional by default** last, since most of the machinery exists.
+3. **Compositional by default**, since most of the machinery exists.
+4. **Partial-order reduction** for the checks that explore reachable states, once the checks that
+   need it (cyclic GC, the migration check) are in use.
 
 Each step ships on its own.
 
