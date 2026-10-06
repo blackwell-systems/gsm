@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: roadmap item 1d in detail.** Independence checked rather than declared (each
+  restriction backed by a mechanized counterexample), the n! to one-trace payoff, symmetry combined
+  with history reduction, and how both would read in the report.
 - **Docs: roadmap item 1d, partial-order reduction.** Checks that explore reachable states would
   follow one order per group of commuting events, with soundness proved per condition: the
   history-side counterpart of the symmetry and abstraction reductions.

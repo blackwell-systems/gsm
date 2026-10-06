@@ -69,6 +69,25 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
 - **Not covered.** Events whose independence holds only at some states: the reduction uses only
   commutation that the check has itself established, never a declared one it has not verified.
 
+- **Independence is checked, not declared.** The reduction only uses pairs the check has itself
+  shown independent at the states concerned: no overlapping reads and writes (or proved
+  commutation), neither event disabling the other, no causal dependency between them, and, under
+  at-least-once delivery, duplicates that land compatibly. Each of those restrictions is backed by a
+  mechanized counterexample in normalization-confluence.
+- **The payoff.** For n events that are pairwise independent, checking every order means n!
+  schedules; the reduction checks one. With partial independence, it checks one order per
+  dependency-respecting trace.
+- **Combined with symmetry.** Symmetry removes the need to check every item; this removes the need
+  to check every order of events. Together, a catalog of thousands of products under thousands of
+  events is checked through one representative product and one trace per class.
+- **How it would read in the report.**
+
+  ```
+    Verified by symmetry over ProductID (items independent; cutoff 1)
+    Verified by history reduction (independent event orders collapsed: 31 independent pairs,
+      7 dependency classes)
+  ```
+
 This is the history-side counterpart of 1a to 1c: symmetry and abstraction collapse states the
 rules cannot tell apart, and partial-order reduction collapses event orders the rules cannot tell
 apart. In normalization-confluence's terms the first is state descent and the second history
