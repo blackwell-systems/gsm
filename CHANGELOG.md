@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: roadmap item 3, a regime report.** `docs/ROADMAP.md` plans a one-paragraph summary that
+  names the user's regime and states what is guaranteed, what the user must provide, and what is not
+  covered, each line traceable to a mechanized theorem.
 - **Docs: a roadmap.** New `docs/ROADMAP.md`, linked from the README: verifying realistic domains
   (data independence, abstraction, compositional checking by default) and a migration check for
   live configuration changes, each backed by a normalization-confluence roadmap item; plus

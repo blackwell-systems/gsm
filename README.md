@@ -140,7 +140,7 @@ Verification is Go-only; a built machine exports to JSON and runs in any languag
 | [Verification](docs/verification.md) | The report, the extracted oracles, assurance levels, compositional verification, synthesis, performance, limitations |
 | [Reference](docs/reference.md) | `Report` and `FedReport` fields, errors, build options, the export format, the test suite |
 | [Theory](docs/theory.md) | Formal definitions and proofs, the paper's sections mapped to the code |
-| [Roadmap](docs/ROADMAP.md) | What is planned next: verifying realistic domains, checking a change before deploying it |
+| [Roadmap](docs/ROADMAP.md) | What is planned next: verifying realistic domains, checking a change before deploying it, a regime report |
 | [Design notes](docs/design/) | [Architecture](docs/design/ARCHITECTURE.md), [certificates](docs/design/CERTIFICATE-DESIGN.md), [holonomy-minimal coordination](docs/design/HOLONOMY-COORDINATION-DESIGN.md) |
 | [CHANGELOG](CHANGELOG.md) | What changed in each release |
 
