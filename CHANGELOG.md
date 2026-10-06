@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: roadmap item 1 in detail.** `docs/ROADMAP.md` now breaks "verify realistic domains" into
+  symmetry (check one item, conclude for all), abstraction (check relationships, not values) and
+  compositional checking by default, each with when it applies, its theorem, an example, what it
+  does not cover, how it shows up in the report, and the order of work.
 - **Docs: propagation order and delivery classes for projection deployments.** From
   normalization-confluence gaps 15 (c) and 16 (d): any fair propagation order settles on acyclic
   networks, bounded by depth + 1 rounds, with no final flush (`rb_events`, `rb_rounds`); XU covers

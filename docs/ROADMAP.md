@@ -7,26 +7,75 @@ Nothing here is implemented yet.
 
 ## 1. Verify realistic domains
 
-**Why.** `Build` checks convergence by enumerating states, so a registry has to use small finite
-domains. Real data does not look like that: money as 64-bit amounts, string identifiers, thousands
-of independent items. Today you shrink the model by hand (counts from 0 to 5, say) and nothing
-proves the check carries over to the real system. This is the first limit a team adopting gsm hits.
+**Why.** `Build` proves convergence by checking every combination of state values, and that count
+explodes: 3 variables of 10 values is 1,000 states and instant; 10 variables of 1,000 values is
+10^30 and impossible. Real data is worse: money as 64-bit amounts, string identifiers, thousands
+of products. Today you shrink the model by hand (stock counts 0 to 5, two products) and nothing
+proves the check carries over. That is the difference between a verified model of your system and
+verification of your system, and it is the first limit a team adopting gsm hits.
 
-**What it would do.** Let you declare realistic types and still get a guarantee, by one of these
-reductions, each a theorem about the conditions `Build` already checks:
+**What it would do.** Let you declare realistic types and still get a guarantee, through
+reductions that each come with a theorem saying "checking this small thing proves the property for
+the real one". The theorems are about the conditions `Build` already checks (WFC, CC, C1, C2, XU,
+the at-least-once conditions), so the guarantee means exactly what it means today.
 
-- **Data independence and symmetry.** When items are independent and governed identically (one
-  stock count per product, say), checking one item covers all of them.
-- **Abstraction.** A rule that depends only on how values relate ("stock is at least the quantity
-  ordered") is checked over one representative of each relation instead of every value. A symbolic
-  solver can do this, justified by the abstraction theorem rather than trusted.
-- **Compositional checking by default.** Each rule is checked against only the variables it
-  touches, so the cost grows with each piece, not with the whole system. `BuildCompositional`
-  already does this for footprints; it would become the main path, with its soundness stated for
-  every condition.
+### 1a. Symmetry: check one item, conclude for all
 
-**Done when.** gsm verifies a registry with realistic domains through one of these reductions, and
-the report names the reduction used and what it assumed.
+- **When it applies.** State is a collection of items (per product, per customer, per account)
+  governed by the same rules, where an event on one item reads and writes only that item.
+- **The theorem.** For independent, identically governed items, each convergence condition holds
+  for any number of items if and only if it holds at a small cutoff (one item, or two for
+  conditions that relate two events on different items).
+- **Example.** Per-product inventory with reserve, release and restock: verify one product, and
+  the result covers a catalog of any size.
+- **Not covered.** Aggregates that make items interact ("total reserved across all products is at
+  most warehouse capacity"). The check detects them and refuses this reduction.
+
+### 1b. Abstraction: check relationships, not values
+
+- **When it applies.** Rules that only compare or add values ("stock is at least the quantity
+  ordered", "balance minus amount stays non-negative"), not rules that test exact constants.
+- **The theorem.** Checking over one representative of each relationship between the values a
+  rule compares (or symbolically, with an SMT solver over all integers) implies the condition for
+  every value. The solver's answer counts because the theorem says it answered the right question.
+- **Example.** A wallet with 64-bit balances: verified without enumerating balances.
+- **Not covered.** Rules that inspect exact values ("if amount = 13"), detected and refused.
+
+### 1c. Compositional checking by default
+
+- **When it applies.** Always, when rules declare or reveal what they read and write.
+- **The theorem.** Each condition decomposes over footprints: checking every pair of rules over the
+  variables they touch implies the condition for the whole registry. `BuildCompositional` already
+  enumerates per footprint component; this makes it the default and states its soundness for every
+  condition, not only CC.
+- **Effect.** Cost grows with the largest piece, not with the product of everything.
+
+### How it shows up in gsm
+
+- Declarations with realistic types: `Int64` amounts, string identifiers, keyed collections
+  (`Map[ProductID]Item`).
+- `Build` picks a reduction that applies, runs the small check, and the report names it and its
+  assumptions, for example: "Verified by symmetry over ProductID (items independent); by
+  abstraction over Stock (rules compare values only)."
+- If no reduction applies, the report says so and names the rule that blocks each one. It never
+  shrinks a domain silently.
+
+### Order of work
+
+1. **Symmetry first**: the most common shape in real systems, the cleanest theorem, and the
+   largest immediate gain.
+2. **Abstraction second**, starting with comparison-only rules.
+3. **Compositional by default** last, since most of the machinery exists.
+
+Each step ships on its own.
+
+**Precedents.** Data independence (Wolper, 1986), cutoff results in parameterized verification,
+predicate abstraction, and solver-backed verifiers such as Ivy and Apalache. The new part is
+applying them to gsm's convergence conditions with mechanized soundness.
+
+**Done when.** gsm verifies a registry with realistic domains through at least the symmetry
+reduction, the report names the reduction and what it assumed, and a test checks that no reduction
+is applied where its hypotheses fail.
 
 **Theory item.** normalization-confluence roadmap item 8.
 
