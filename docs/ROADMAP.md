@@ -51,6 +51,46 @@ reports one of the three outcomes with its witness.
 
 **Theory item.** normalization-confluence roadmap item 9 (`REGIME-AUDIT.md` gap 20).
 
+## 3. A regime report: one paragraph that says what you have
+
+**Why.** The guarantees gsm gives depend on what you built and how you deploy it: one registry or a
+federation, declared independent pairs or not, cycles, projection deployments, at-least-once or
+causal delivery. Today the pieces are spread across `Report`, `FedReport` and the docs pages, and a
+user has to know which [Deployment](deployment.md) rules apply to their setup. Much of the newer
+theory (duplicate delivery on streams, buffered guards, projection channels) reaches users only as
+documentation.
+
+**What it would do.** A single summary, printed with the report and available as a field, that
+names the regime and states its contract in three parts:
+
+```
+  Regime: acyclic federation, projection deployment, at-least-once delivery
+  Guaranteed: every interleaving converges to the FedMachine result once channels drain
+  You must provide: versions in send order on the snapshot sent; a send after every source
+    change; deduplication for withdraw, refund
+  Not covered: none
+```
+
+- **Regime** is derived from what was built and declared (topology, cycle opt-ins, declared pairs,
+  projection mode, and the delivery model you state), not guessed.
+- **Guaranteed** lists only what the checks that ran actually certify, each line traceable to a
+  mechanized theorem in normalization-confluence.
+- **You must provide** collects every obligation the report already computes
+  (`NotIdempotent`, `CausalOrderRequired`, projection versioning) plus the deployment rules for
+  that regime.
+- **Not covered** names anything outside the mechanized model for that configuration (a cyclic
+  projection deployment, a multi-source target, live reconfiguration), with a pointer to the open
+  gap, so the report never implies more than is proved.
+
+**Done when.** `Build` and `Federation.Build` produce the summary for every supported
+configuration, each "Guaranteed" line cites its theorem, and a test checks that no configuration
+reports a guarantee its checks did not establish.
+
+**Theory item.** None new: it packages normalization-confluence's regime map
+([`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md),
+[`docs/COVERAGE.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/docs/COVERAGE.md))
+for one user's configuration.
+
 ## Smaller items
 
 - **Oracle-certified federation checks.** Federation-level checks (M1, R1/R2, C1, C2, XU, cycles)
