@@ -90,17 +90,31 @@ The formal counterexample (`fed_grs_c1_c2_insufficient` in [`FederationGRS.v`](h
 **What is not certified.** `ProjectionSafe` is false on a cyclic network (the theorem is for acyclic ones; [why that is required](#cycles-ghosts-and-reset-epochs)) and on a network with a multi-source target (`SharedProjection` sends one edge's `Map` image, not the resolver's merge the theorem covers). Like C1 and C2, XU is static: a witness is a valid state that a given deployment need not reach. M1 guarantees each merge keeps a valid node valid; it does not make the nodes converge.
 
 **Ordering projections.** A projection carries no ordering by itself. A transport that can reorder
-or redeliver projections should stamp `Projection.Version` (strictly increasing per source-target
-edge, assigned by the source node; `SharedProjection` leaves it 0) and merge with
-`MergeProjectionAfter`, which refuses a projection that is not newer than the last one applied
-from that edge (wrapping `ErrStaleProjection`) or that names another target. Freshness keeps an
-older projection from overwriting a newer one; it does not make a deployment converge. XU does,
-in the mechanized propagation model, where a merge reads each source's current value. Channels
-that deliver projections late, reordered or duplicated are outside that model
-(normalization-confluence
+or redeliver projections should stamp `Projection.Version` and merge with `MergeProjectionAfter`,
+which refuses a projection that is not newer than the last one applied from that edge (wrapping
+`ErrStaleProjection`) or that names another target. On an acyclic federation with single-source
+targets this is a proved guarantee (normalization-confluence `ProjectionChannels.v`), given two
+deployment rules:
+
+1. **Versions follow send order, stamped on the snapshot sent.** Each source stamps a strictly
+   increasing version per edge on the projection it takes at that send. A retry must resend the
+   same snapshot with its original version; restamping an old snapshot with a newer version lets a
+   stale value win (`version_order_counterexample`).
+2. **A send follows every source change.** If the last change to a source is never sent, the
+   target stays stale once the channels drain, in either merge mode (`no_final_send_counterexample`).
+
+With both rules, `ProjectionSafe` (XU) plus `Build`'s C2 make every deployment converge once its
+channels drain, despite late, reordered and duplicated projections, with no outside flush
+(`vsettle_xu_c2`); the drained state is what the current-value model reaches with the same events
+followed by a flush (`vsettle_cv`), and the condition is exact (`vsettle_exact_cond`).
+Plain `MergeProjection` over a channel that can reorder or redeliver converges only after an
+outside flush (`chan_exact`): a stale projection delivered after a fresh one can leave the
+deployment wrong at drain even under XU (`plain_stale_counterexample`). Per-edge FIFO channels
+without redelivery avoid that. Multi-source targets and cyclic networks are not certified, as
+before: on a monotone cycle the ghost survives versioned channels (`vchan_cyc_ghost`; see
+[Cycles](#cycles-ghosts-and-reset-epochs)), and what remains open is normalization-confluence
 [`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
-gap 21); `MergeProjectionAfter`'s version check is the engineering guard, not a proved
-condition.
+gap 21's residue (longer chains, channels on cycles, loss without redelivery).
 
 ---
 
