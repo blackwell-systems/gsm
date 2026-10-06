@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: versioned projection merging is a proved guarantee.** normalization-confluence
+  `ProjectionChannels.v` (gap 21, narrowed) proves that on acyclic federations with single-source
+  targets, `MergeProjectionAfter` plus `ProjectionSafe` and C2 converge at drain over channels that
+  delay, reorder or duplicate, given two deployment rules (versions follow send order on the
+  snapshot sent; a send follows every source change), each shown necessary by a counterexample.
+  `docs/deployment.md` "Ordering projections" now states the guarantee and the rules, and that
+  plain `MergeProjection` needs an outside flush or FIFO channels. No behavior change.
 - **Docs: `NotIdempotent` under declared independence is now exact upstream.** normalization-confluence
   closed gap 15 (a) (`AtLeastOnceDeclared.v`): with declared `Independent` pairs, deduplicating
   exactly the listed events is enough when `Build` passes and the transport keeps undeclared pairs
