@@ -97,6 +97,7 @@ WFC: repair terminates from every state. CC: every pair of events reaches the sa
 | Setting | What converges | What `Build` checks | Details |
 |---|---|---|---|
 | Single registry | Every ordering of the events, from a valid state or `NewState`, reaches one normal form | WFC and CC over the whole state space (or per footprint component), re-certified by the extracted oracle | [Verification](docs/verification.md) |
+| Keyed collection | The single-registry guarantee at every key, for any number of keys; events on different keys commute | The template (one item) with `Build`: by symmetry one item is the whole check (cutoff 1) | [Getting started](docs/getting-started.md#collections-one-template-every-key) |
 | Acyclic federation | The whole network: a unique federated normal form, and every interleaving of independent events | Validity preservation per morphism (M1, or R1/R2 for a resolver), plus the event-order checks C1 and C2 | [Federation](docs/federation.md#when-it-just-works-no-loops) |
 | Monotone cycles | The least fixed point, reached in any order | Opt-in `AllowMonotoneCycles`: monotonicity of every morphism and resolver, plus C1 and C2 | [Federation](docs/federation.md#escape-hatch-2-monotone-cycles) |
 | Coordinated cycles | The rest of the network, coordination-free; the normal form is unique given the plan's authority root | `CoordinationPlan` names the edges to coordinate; `BuildCoordinated` verifies the acyclic residual (not the coordination itself) | [Federation](docs/federation.md#escape-hatch-3-coordinate-the-obstruction) |
@@ -133,7 +134,7 @@ Verification is Go-only; a built machine exports to JSON and runs in any languag
 
 | Page | Read it for |
 |---|---|
-| [Getting started](docs/getting-started.md) | The tutorial: using machines, reading and writing state, combinator rules, independence declarations |
+| [Getting started](docs/getting-started.md) | The tutorial: using machines, reading and writing state, combinator rules, independence declarations, keyed collections |
 | [Concepts](docs/concepts.md) | Why it works: invariants, compensation, events, WFC and CC, where CRDTs fit, a glossary |
 | [Federation](docs/federation.md) | Many registries: morphisms, resolvers, C1 and C2, cycles, coordination, certificates |
 | [Deployment](docs/deployment.md) | What your runtime must provide: delivery, causal order, shared logs, projection deployments, reset epochs |

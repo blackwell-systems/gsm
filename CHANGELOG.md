@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Keyed collections: check one item, conclude for all (roadmap item 1a).**
+  `NewCollection[K](over, template).Build()` verifies one item registry, the template, with
+  `Build` (every check and the oracle gate) and returns a `CollectionMachine[K]` that runs it at
+  every key: `Apply(s, key, event)` acts on that key's item only, and a key no event has reached
+  is at the template's `NewState`. The report is the template's with the new
+  `Report.Symmetry` (`SymmetryReduction{Over, Cutoff}`), printed as "Verified by symmetry over
+  ProductID (items independent; cutoff 1)", and its delivery lines apply per key
+  (`NotIdempotent` at each key; a `CausalOrderRequired` pair only on the same key). Every key
+  runs the same machine and a rule sees one item's state, so the collection is independent and
+  identically governed by construction, and an aggregate across keys cannot be written through
+  it. A template that does not build makes the collection fail with the template's report and
+  witness. Theory: normalization-confluence `coq/SymmetryCutoff.v` (`lift_idgov`, `run_proj`,
+  `alo_cutoff`, `cross_commute`, `idem_reduces`, `declared_cutoff`; the aggregate boundary
+  `aggregate_diverges`); `docs/theory.md` §11.8 maps each guarantee to its theorem and explains
+  why gsm's per-key repair makes every reported condition cutoff 1.
+
 ### Changed
 
 - **Docs: roadmap item 1d in detail.** Independence checked rather than declared (each

@@ -3,7 +3,7 @@
 What gsm plans next, and why. Each item is backed by a theory item in normalization-confluence's
 [`docs/ROADMAP.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/docs/ROADMAP.md).
 gsm ships a feature only when its guarantee is mechanized there, so the theory item lands first.
-Nothing here is implemented yet.
+Item 1a (symmetry) is implemented; nothing else here is implemented yet.
 
 ## 1. Verify realistic domains
 
@@ -21,15 +21,25 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
 
 ### 1a. Symmetry: check one item, conclude for all
 
+- **Implemented.** `NewCollection[K](over, template).Build()` verifies the template (one item)
+  with `Build` and returns a machine that runs it at every key; the report reads "Verified by
+  symmetry over ProductID (items independent; cutoff 1)" (`Report.Symmetry`). Theory:
+  normalization-confluence `coq/SymmetryCutoff.v`. See
+  [Getting started](getting-started.md#collections-one-template-every-key) and
+  [Theory §11.8](theory.md#118-keyed-collections-symmetry). 1b, 1c, 1d remain.
 - **When it applies.** State is a collection of items (per product, per customer, per account)
   governed by the same rules, where an event on one item reads and writes only that item.
 - **The theorem.** For independent, identically governed items, each convergence condition holds
   for any number of items if and only if it holds at a small cutoff (one item, or two for
-  conditions that relate two events on different items).
+  conditions that relate two events on different items). gsm repairs each key's item on its own,
+  so every condition its report states has cutoff 1 ([Theory §11.8](theory.md#118-keyed-collections-symmetry)).
 - **Example.** Per-product inventory with reserve, release and restock: verify one product, and
   the result covers a catalog of any size.
 - **Not covered.** Aggregates that make items interact ("total reserved across all products is at
-  most warehouse capacity"). The check detects them and refuses this reduction.
+  most warehouse capacity"). As implemented they cannot be written through a collection at all:
+  every template rule sees one item's state and no key, so the hypotheses hold by construction
+  (`lift_idgov`) and there is nothing to detect. An aggregate goes in one registry that holds the
+  items it relates, which `Build` checks directly.
 
 ### 1b. Abstraction: check relationships, not values
 

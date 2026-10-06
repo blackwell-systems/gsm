@@ -1030,6 +1030,67 @@ A deployment that runs the `FedMachine` itself (for example one `FedMachine` ove
 
 **Challenge**: Requires verifying that concurrent repairs don't interfere.
 
+### 11.8 Keyed Collections (Symmetry)
+
+**Implemented**: `NewCollection[K](over, template).Build()` verifies one item registry, the
+template, with `Build`, and returns a machine that runs it at every key
+([Getting started](getting-started.md#collections-one-template-every-key)). The theory is
+normalization-confluence
+[`SymmetryCutoff.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/SymmetryCutoff.v)
+(axiom-free; the design notes are its `coq/docs/symmetry.md`).
+
+**The model.** An item registry is lifted to a collection over n keys: states are one item per
+key, the event "e at k" acts on item k only, repair acts on each item by the item's repair, and
+the invariant is the conjunction of the item invariants. A registry is *independent and
+identically governed* (`IdGov`) when an event or repair at k reads and writes only item k, the
+rules are invariant under exchanging two keys, and the invariant is a conjunction of item
+invariants. Every lift satisfies `IdGov` (`lift_idgov`), and for n ≥ 1 a registry satisfies it
+iff it is the lift of its one-item restriction (`idgov_lift`). A collection is a lift by
+construction: a template rule sees one item's state and no key, and every key runs the same
+machine. So gsm needs no check of the hypotheses; there is nothing a user can write through the
+API that violates them.
+
+**What gsm runs.** Each key holds the template machine's state, and `Apply(s, k, e)` replaces item
+k by the template's `Machine.Apply` of it: the lifted step `lst` of `SymmetryCutoff.v`, with the
+template's governed step (event, then repair) as the item step. The guarantees map as follows.
+
+| Report result, for a collection | Theorem |
+|---|---|
+| The collection's run at key k is the template's run of the events addressed to k | `run_proj` |
+| Every interleaving of a delivery converges at every key, for any number of keys, iff it does for the template (exactly-once and at-least-once delivery) | `run_proj`, `alo_cutoff`, `alo_cutoff_uniform` |
+| Events on different keys commute at every state, with no hypothesis | `cross_commute` |
+| `NotIdempotent`: an event is idempotent at key k iff it is idempotent for the item at k; commutation and idempotence at reachable states reduce per item | `idem_reduces`, `alo_cutoff_exact` |
+| `CausalOrderRequired`, declared pairs: every cross-key pair counts as declared, and the template's declared pairs commute at every key iff they commute for the template | `declared_cutoff` |
+| WFC: the collection's repair has a potential iff the item's does | `wfc_cutoff` |
+
+Each condition has cutoff 1: one item is the whole check, which is what the report line
+`Verified by symmetry over <key> (items independent; cutoff 1)` states.
+
+**CC1, CC2 and the cutoff.** `SymmetryCutoff.v` also treats the governance rewrite system of §7,
+where repair may be delayed and then runs on every item at once. There, unique normal forms have
+cutoff 1 given CC1 and CC2 together (`cc_lift_iff`, `un_cutoff`, `un_cutoff_global`, and for any
+registry satisfying `IdGov`, `symmetry_sound`), while CC1 alone has cutoff 2 (`cc1_cutoff`, tight
+by `cc1_cutoff_tight`): a repair pending on one item can be taken before or after an event on
+another, and the two orders agree iff, on each item, repair then event equals the event alone
+(`cross_item_reduces`), which the item's CC2 implies (`cc2_star`). gsm
+checks CC1 and not CC2 (§6.5), so it does not claim the rewrite-system form. It does not need it:
+gsm repairs eagerly, per key. An event at one key never runs repair on another key's item, so no
+repair is pending across keys, and the cutoff-2 case cannot arise. From a valid collection the two
+models coincide anyway: the governed collection step is the lift of the governed item step
+(`gL_lst`, `run_bridge`, `alo_gov_cutoff`), and at valid states events on different keys commute
+with no hypothesis (`cross_valid_commute`).
+
+**Boundaries.** An aggregate rule (the invariant "total reserved across items is at most 1", with a
+repair that cancels a reservation on every positive item) converges on one item and diverges on
+two (`aggregate_diverges`, `agg_item_un`) and fails `IdGov` (`agg_not_idgov`); with the per-item
+invariant the same events converge at every n (`itemwise_converges`). Items governed by different
+rules can pass on one item and diverge together (`nonidentical_misleads`). Neither can be written
+through a collection: every rule sees one item, and every key runs one machine. The tests
+`TestCollection_NaiveAggregateRegistryFailsBuild` (the aggregate, written by hand as one two-item
+registry, fails `Build`) and `TestCollection_AggregateCannotBeExpressed` pin both sides. The
+federation conditions C1 and C2 also reduce to one item for a morphism that maps items pointwise
+(`c1_cutoff`, `c2_cutoff`); gsm does not implement collections as federation components.
+
 ---
 
 ## 12. Relationship to the Paper

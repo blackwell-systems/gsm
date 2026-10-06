@@ -121,6 +121,19 @@ Machine: pay_ship
   CC (Compensation Commutativity): not evaluated (footprint violation)
 ```
 
+A collection's report (`NewCollection(...).Build()`, [Getting started](getting-started.md#collections-one-template-every-key))
+is its template's report with one more line under the convergence line:
+
+```
+  Convergence: GUARANTEED
+  Verified by symmetry over ProductID (items independent; cutoff 1)
+```
+
+`Build` checked the template as one item, and every key of the collection runs it, so the result
+holds for any number of keys (`Report.Symmetry`; the theorems are in [Theory §11.8](theory.md#118-keyed-collections-symmetry)).
+The delivery lines then apply per key: `Delivery: exactly once per ProductID for ...`, and a
+convergence line under causal delivery ends `on the same ProductID`.
+
 ---
 
 ## What the extracted oracles check

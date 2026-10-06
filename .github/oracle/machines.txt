@@ -22,6 +22,7 @@
 # a listed machine is not made.
 
 README.md#1                      order_fulfillment  certified-tables
+docs/getting-started.md#1        product            certified-tables
 
 Example                          counter            certified-tables
 ExampleRegistry_Build            counter            certified-tables
@@ -33,3 +34,4 @@ ExampleFederation                manufacturer       certified-tables
 ExampleFederation                supplier           certified-tables
 Example_acceptWithCoordination   primary            certified-tables
 Example_acceptWithCoordination   mirror             certified
+ExampleNewCollection             product            certified-tables
