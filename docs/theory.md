@@ -508,9 +508,14 @@ for ...". Those events need an event id and a dedupe set (or equivalent) before 
 listed tolerate duplicates under the conditions above, which are mechanized for free and causal
 delivery (normalization-confluence `alo_exact`, `causal_alo_exact`); in causal deployments a
 redelivered copy must also not overtake an effect of its own event. For a registry with declared
-`Independent` pairs under at-least-once delivery, no exact theorem is mechanized yet
-(normalization-confluence `REGIME-AUDIT.md` gap 15 (a)), so the list's soundness and completeness
-are not claimed there; deduplicating every event is the safe choice in that setting.
+`Independent` pairs under at-least-once delivery the exact condition is mechanized too
+(normalization-confluence `AtLeastOnceDeclared.v`, `dalo_exact`): declared pairs commute at
+reachable states, and every event is idempotent where it can occur. The list is sound at reachable
+witnesses (`dalo_notidem_needs_dedup`), and it is complete, so deduplicating exactly the listed
+events is enough (`dalo_unlisted_converge`, `dalo_gsm_build`), when `Build` passes, reachable states
+are valid, and the transport keeps undeclared pairs ordered for redeliveries too. If a retry can
+cross an undeclared partner, completeness fails (`fl_retry_order_needed`) and the requirement is
+absorption after every history (`dalo_r_exact`).
 
 ---
 

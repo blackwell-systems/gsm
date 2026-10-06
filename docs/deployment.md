@@ -28,9 +28,11 @@ It lists every event whose second application changes the state, and the report 
 
 Those events need an event id and a dedupe set (or equivalent) in front of `Apply`. The list is
 exact for free and causal delivery (normalization-confluence `alo_exact`, `causal_alo_exact`).
-If the registry declares `Independent` pairs, at-least-once delivery has no exact theorem yet
-([`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
-gap 15 (a)), so deduplicate every event there rather than relying on the list. A non-idempotent
+If the registry declares `Independent` pairs, deduplicating exactly the listed events is still
+enough, provided your transport keeps every undeclared pair in order for retries as well as first
+deliveries (normalization-confluence `dalo_unlisted_converge`, `dalo_gsm_build`). A retry that
+jumps ahead of an undeclared partner can diverge even when nothing is listed
+(`fl_retry_order_needed`); if your transport cannot promise that ordering, deduplicate every event. A non-idempotent
 event delivered twice always diverges from delivering it once, while an idempotent one is absorbed
 when it commutes with what arrived between the copies (normalization-confluence
 [`AtLeastOnce.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/AtLeastOnce.v): `non_idempotent_diverges`, `alo_absorbed`). A counter

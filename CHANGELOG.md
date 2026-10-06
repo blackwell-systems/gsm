@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: `NotIdempotent` under declared independence is now exact upstream.** normalization-confluence
+  closed gap 15 (a) (`AtLeastOnceDeclared.v`): with declared `Independent` pairs, deduplicating
+  exactly the listed events is enough when `Build` passes and the transport keeps undeclared pairs
+  ordered for retries too; `docs/theory.md` and `docs/deployment.md` replace the earlier
+  "deduplicate every event" advice with that rule and its counterexample. No behavior change.
 - **Docs: qualifiers from normalization-confluence's coverage pass.** `docs/theory.md` and
   `docs/deployment.md` now say `Report.NotIdempotent` is exact for free and causal delivery only;
   with declared `Independent` pairs under at-least-once delivery no exact theorem is mechanized
