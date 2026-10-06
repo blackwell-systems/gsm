@@ -34,8 +34,8 @@ func TestAbsReps_MatchCoq(t *testing.T) {
 	// reps_length: |C|(N+1)+N when no two representatives coincide.
 	for n := 0; n < 5; n++ {
 		consts := []int{-100, 0, 100}
-		got, _ := absReps(n, consts)
-		if len(got) != len(consts)*(n+1)+n {
+		got, err := absReps(n, consts)
+		if err != nil || len(got) != len(consts)*(n+1)+n {
 			t.Errorf("n=%d: %d representatives, want %d", n, len(got), len(consts)*(n+1)+n)
 		}
 	}
@@ -67,7 +67,7 @@ func TestAbs_Exact13RepresentativesPass(t *testing.T) {
 	if err != nil || !a.wfc || !absCommutes(r, a) {
 		t.Fatalf("representative check over 0..3: %v; want a pass", err)
 	}
-	if _, _, err := mk().Build(); err == nil {
+	if _, _, perr := mk().Build(); perr == nil {
 		t.Fatal("ordinary Build accepted the diverging events")
 	}
 	a13, err := r.absCheck([]int{13})
@@ -220,9 +220,9 @@ func TestAbs_DifferentialAgainstEnumeration(t *testing.T) {
 		}
 		// On a pass, ordinary Build agrees, except that it also checks CC1 at the zero state,
 		// which abstraction does not need (its machine normalizes the zero state first).
-		if _, erep, err := mk().build(true); err != nil &&
+		if _, erep, eerr := mk().build(true); eerr != nil &&
 			(erep == nil || erep.CCFailure == nil || erep.CCFailure.State.packed != 0) {
-			t.Fatalf("case %d: abstraction passes, ordinary Build fails off the zero state: %v\n%s", i, err, erep)
+			t.Fatalf("case %d: abstraction passes, ordinary Build fails off the zero state: %v\n%s", i, eerr, erep)
 		}
 		// And the machine agrees with the enumerated machine on random runs.
 		em, _, err := mk().build(false)
