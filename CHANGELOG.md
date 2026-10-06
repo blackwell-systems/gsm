@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Docs: convergence alone on cycles is now exact upstream.** `docs/theory.md` and
+  `docs/deployment.md` no longer call convergence among quiescent interleavings (without agreement
+  with the `FedMachine`) open: normalization-confluence closed it (`conv_quiet_exact`, REGIME-AUDIT gap
+  14), and agreement with the `FedMachine` is that convergence plus no ghost (`agree_conv_noghost`).
+  No behavior change.
+
 ## [0.14.0] - 2026-10-05
 
 A distributed-deployment release. `Federation.Build` now checks XU, the condition under which
