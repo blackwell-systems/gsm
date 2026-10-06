@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: qualifiers from normalization-confluence's coverage pass.** `docs/theory.md` and
+  `docs/deployment.md` now say `Report.NotIdempotent` is exact for free and causal delivery only;
+  with declared `Independent` pairs under at-least-once delivery no exact theorem is mechanized
+  (REGIME-AUDIT gap 15 (a)), so deduplicate every event there. `docs/deployment.md` states that
+  late, reordered or duplicated projections over a channel are outside the mechanized propagation
+  model (gap 21), and that `MergeProjectionAfter`'s version check is an engineering guard. No
+  behavior change.
 - **Docs: convergence alone on cycles is now exact upstream.** `docs/theory.md` and
   `docs/deployment.md` no longer call convergence among quiescent interleavings (without agreement
   with the `FedMachine`) open: normalization-confluence closed it (`conv_quiet_exact`, REGIME-AUDIT gap

@@ -26,7 +26,11 @@ It lists every event whose second application changes the state, and the report 
   Delivery: exactly once for withdraw (applying one twice differs from once); deduplicate redelivered events
 ```
 
-Those events need an event id and a dedupe set (or equivalent) in front of `Apply`. A non-idempotent
+Those events need an event id and a dedupe set (or equivalent) in front of `Apply`. The list is
+exact for free and causal delivery (normalization-confluence `alo_exact`, `causal_alo_exact`).
+If the registry declares `Independent` pairs, at-least-once delivery has no exact theorem yet
+([`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
+gap 15 (a)), so deduplicate every event there rather than relying on the list. A non-idempotent
 event delivered twice always diverges from delivering it once, while an idempotent one is absorbed
 when it commutes with what arrived between the copies (normalization-confluence
 [`AtLeastOnce.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/AtLeastOnce.v): `non_idempotent_diverges`, `alo_absorbed`). A counter
@@ -88,7 +92,13 @@ or redeliver projections should stamp `Projection.Version` (strictly increasing 
 edge, assigned by the source node; `SharedProjection` leaves it 0) and merge with
 `MergeProjectionAfter`, which refuses a projection that is not newer than the last one applied
 from that edge (wrapping `ErrStaleProjection`) or that names another target. Freshness keeps an
-older projection from overwriting a newer one; it does not make a deployment converge. XU does.
+older projection from overwriting a newer one; it does not make a deployment converge. XU does,
+in the mechanized propagation model, where a merge reads each source's current value. Channels
+that deliver projections late, reordered or duplicated are outside that model
+(normalization-confluence
+[`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
+gap 21); `MergeProjectionAfter`'s version check is the engineering guard, not a proved
+condition.
 
 ---
 

@@ -505,8 +505,12 @@ once. Transports usually promise at-least-once delivery. The mechanized account
 gsm reports which events need deduplication: `Report.NotIdempotent` lists every event whose second
 application changes the state from some state `Build` checked, printed as "Delivery: exactly once
 for ...". Those events need an event id and a dedupe set (or equivalent) before `Apply`. Events not
-listed tolerate duplicates under the conditions above; in declared-only or causal deployments, a
-redelivered copy must also not overtake an effect of its own event.
+listed tolerate duplicates under the conditions above, which are mechanized for free and causal
+delivery (normalization-confluence `alo_exact`, `causal_alo_exact`); in causal deployments a
+redelivered copy must also not overtake an effect of its own event. For a registry with declared
+`Independent` pairs under at-least-once delivery, no exact theorem is mechanized yet
+(normalization-confluence `REGIME-AUDIT.md` gap 15 (a)), so the list's soundness and completeness
+are not claimed there; deduplicating every event is the safe choice in that setting.
 
 ---
 
