@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Docs: a roadmap.** New `docs/ROADMAP.md`, linked from the README: verifying realistic domains
+  (data independence, abstraction, compositional checking by default) and a migration check for
+  live configuration changes, each backed by a normalization-confluence roadmap item; plus
+  oracle-certified federation checks, holonomy-minimal coordination and reset epochs.
 - **Docs: versioned projection merging is a proved guarantee.** normalization-confluence
   `ProjectionChannels.v` (gap 21, narrowed) proves that on acyclic federations with single-source
   targets, `MergeProjectionAfter` plus `ProjectionSafe` and C2 converge at drain over channels that
