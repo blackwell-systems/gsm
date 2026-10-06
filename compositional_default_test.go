@@ -332,8 +332,8 @@ func payShipComb(name string) *Registry {
 func TestCompositional_ReadsMergeComponents(t *testing.T) {
 	small := payShipComb("pay_ship")
 	if !assertPathsAgree(t, small) {
-		_, rep, _ := small.buildWith(buildOpts{compositionalFirst: true})
-		if !strings.Contains(rep.GlobalReason, "one footprint component") {
+		_, rep, err := small.buildWith(buildOpts{compositionalFirst: true})
+		if err == nil || !strings.Contains(rep.GlobalReason, "one footprint component") {
 			t.Fatalf("GlobalReason = %q, want one component", rep.GlobalReason)
 		}
 	}
@@ -385,7 +385,8 @@ func TestCompositional_RepairCrossingComponents(t *testing.T) {
 	}
 	wide := rcComb("rc_padded")
 	pad(wide)
-	if _, rep, err := wide.Build(); err == nil || rep.Compositional == nil || rep.CCFailure == nil {
+	_, rep, err = wide.Build()
+	if err == nil || rep.Compositional == nil || rep.CCFailure == nil {
 		t.Fatalf("Build of the padded rc machine: want a per-component CC failure, got %v:\n%s", err, rep)
 	}
 
