@@ -582,6 +582,12 @@ func (r *Registry) verifyComponentCC(c *component, i, j int, report *Report) err
 // components' invariants fire in. A longer chain means a rule reads or writes outside
 // its declared footprint, or is not deterministic, and the repairs may cycle forever.
 func (m *Machine) lazyRepairBoundError(in, now State, last string, bound int) string {
+	if m.abstract {
+		return fmt.Sprintf("gsm: machine %q: repairs from %s did not reach a valid state within %d steps, the most "+
+			"Build verified by abstraction for this machine (the deepest repair chain over the representatives, "+
+			"which term_abs makes a bound for every value); a bug in gsm (state reached: %s, last repaired: "+
+			"invariant %q)", m.name, in, bound, now, last)
+	}
 	return fmt.Sprintf("gsm: machine %q: repairs from %s did not reach a valid state within %d steps, the most "+
 		"BuildCompositional verified for this machine (the sum of each component's deepest repair chain); "+
 		"a rule reads or writes outside its declared footprint or is not deterministic, and the repairs may "+

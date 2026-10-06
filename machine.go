@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/blackwell-systems/gsm/internal/oracle"
 )
 
 // Machine is an immutable, verified governed state machine.
@@ -36,8 +38,13 @@ type Machine struct {
 	invariants []invariantDef
 	eventDefs  []eventDef
 	// repairBound is the most repair steps Normalize may take on a lazy machine: the
-	// sum of each component's deepest verified repair chain (see lazyRepairBoundError).
+	// sum of each component's deepest verified repair chain (see lazyRepairBoundError),
+	// or for a machine verified by abstraction the deepest chain over the representatives.
 	repairBound int
+	// abstract marks a machine Build verified by abstraction (Registry.Abstract). It is
+	// lazy, and Apply normalizes every invalid input first, the zero state included:
+	// abstraction certifies CC1 at the valid states only.
+	abstract bool
 }
 
 // Name returns the machine's name.
@@ -68,6 +75,10 @@ func (m *Machine) NewState() State {
 // input outside the machine selects an arbitrary table entry or panics with an index out
 // of range. A lazy machine checks the input and panics, naming it.
 //
+// A machine Build verified by abstraction (Registry.Abstract) is lazy too, and normalizes
+// every invalid input first, the zero state included: abstraction certifies order
+// independence from the valid states.
+//
 // A lazy machine (BuildCompositional) has no tables: Apply runs the event's effect and
 // the repairs at call time, and panics if one returns something that is not a state of
 // this machine (see EffectFunc), naming the rule, the input state and the result.
@@ -84,7 +95,7 @@ func (m *Machine) Apply(s State, event string) State {
 	}
 	if m.lazy {
 		m.mustBeInput("Apply", s)
-		if s.packed != 0 && !m.allHold(s) {
+		if (s.packed != 0 || m.abstract) && !m.allHold(s) {
 			s = m.lazyNormalize(s)
 		}
 		return m.lazyApply(m.eventDefs[ei], s)
@@ -343,7 +354,8 @@ type verifyInfo struct {
 //	        return self.step[self.events[event]][state]
 func (m *Machine) Export(path string) error {
 	if m.lazy {
-		return fmt.Errorf("gsm: cannot Export a compositionally-verified machine (no global tables); Export is for Build machines")
+		return fmt.Errorf("gsm: cannot Export a machine without global tables (one from BuildCompositional, or from " +
+			"Build by abstraction); Export is for machines Build enumerated")
 	}
 	eventNames := m.Events()
 
@@ -419,7 +431,8 @@ func (m *Machine) Export(path string) error {
 // machines have no global tables).
 func (m *Machine) WriteConvergenceTables(path string) error {
 	if m.lazy {
-		return fmt.Errorf("gsm: WriteConvergenceTables needs global step tables (a Build machine), not a compositional one")
+		return fmt.Errorf("gsm: WriteConvergenceTables needs global step tables (a machine Build enumerated), not a " +
+			"compositional one or one verified by abstraction")
 	}
 	b, err := m.convergenceTables()
 	if err != nil {
@@ -445,6 +458,11 @@ func (m *Machine) convergenceTables() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return formatTables(tb), nil
+}
+
+// formatTables renders tables in WriteConvergenceTables' format.
+func formatTables(tb oracle.Tables) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "gsm-tables 2\n%d %d\nnf", len(tb.NF), len(tb.Step))
 	for _, i := range tb.NF {
@@ -468,5 +486,5 @@ func (m *Machine) convergenceTables() ([]byte, error) {
 		}
 		b.WriteByte('\n')
 	}
-	return []byte(b.String()), nil
+	return []byte(b.String())
 }

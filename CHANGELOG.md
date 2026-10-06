@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Abstraction: check relationships, not values (roadmap item 1b, the comparison route).**
+  `Registry.Abstract(constants...)` declares the constants a registry's rules compare and copy;
+  `Build` then verifies the registry over a few representative values instead of every value: the
+  constants, the n integers above each and the n below the least, for n `Int` variables (events
+  have no parameters, so the cutoff is n). Ranges can be as wide as one 64-bit state holds (three
+  variables over 0..1,000,000 check 343 representative states). `Build` checks WFC from every
+  representative state and CC at every valid one, the table oracle certifies the representative
+  tables (new `AssuranceOracleRepresentatives`), and the returned machine computes at run time
+  from the rules, normalizing every invalid input first (the zero state included). The report
+  gains `Report.Abstraction` (`AbstractionReduction{Over, Constants, Cutoff, Representatives,
+  States}`), printed as "Verified by abstraction over stock (rules compare values only; constants
+  {5}; 7 representatives)"; a CC witness found this way is in `CCFailure.Abstract`
+  (`AbstractWitness`, with `InRange` false when it lies outside the declared ranges). A registry
+  outside the fragment is refused with an `*AbstractionError` (also `Report.AbstractionRefused`)
+  naming the rule: closure rules (gsm cannot inspect them), a literal that is not a declared
+  constant (`exact13_diverges`), `Add` or `Sub` anywhere (`triangle_diverges`), Bool and Enum
+  variables, a copy or constant write that could saturate, more than 64 bits of state, more than
+  2²⁰ representative states. Since the fragment never computes a value and no write saturates,
+  nothing can wrap around. A collection template may declare `Abstract` (both reduction lines
+  appear); a federation refuses such a component. `NotIdempotent` is computed from the
+  valid representative states and is exact for every value (`idem_valid_abs`,
+  `idem_runtime_abs`). Theory: normalization-confluence `coq/AbstractionCutoff.v` (`term_abs`,
+  `wfc_abs`, `cc1_abs`, `ord_frag_sound`, `closure_ap`, `closure_rp`, `reps_length`, `copy_tight`)
+  and `coq/AbstractionGsm.v`, the gsm instantiation: CC1 at the valid states transfers
+  (`cc1_valid_abs`, through the repair-first registry: `derived_ordinv`, `cc1_derived_valid`,
+  `cc1_valid_derived_abs`), it is exactly the reordering guarantee from a valid state
+  (`gsm_abs_exact`), and the runtime converges from every integer state, the zero state included
+  (`gsm_abs_sound`, `gsm_abs_sound_all`).
+  `docs/theory.md` §11.9 maps each condition to its theorem; `docs/verification.md` has the new
+  "Abstraction" section. The linear (SMT) route is deferred on the roadmap.
 - **Keyed collections: check one item, conclude for all (roadmap item 1a).**
   `NewCollection[K](over, template).Build()` verifies one item registry, the template, with
   `Build` (every check and the oracle gate) and returns a `CollectionMachine[K]` that runs it at

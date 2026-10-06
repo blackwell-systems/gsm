@@ -3,7 +3,8 @@
 What gsm plans next, and why. Each item is backed by a theory item in normalization-confluence's
 [`docs/ROADMAP.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/docs/ROADMAP.md).
 gsm ships a feature only when its guarantee is mechanized there, so the theory item lands first.
-Item 1a (symmetry) is implemented; nothing else here is implemented yet.
+Items 1a (symmetry) and 1b (abstraction, the comparison route) are implemented; nothing else here
+is implemented yet.
 
 ## 1. Verify realistic domains
 
@@ -43,6 +44,28 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
 
 ### 1b. Abstraction: check relationships, not values
 
+- **Implemented: the comparison route.** `Registry.Abstract(constants...)` makes `Build` check a
+  registry of `Int` variables over a few representative values (the constants, n values above each
+  and n below the least, for n variables) instead of every value, when every rule only compares
+  and copies variables and declared constants. The report reads "Verified by abstraction over
+  stock (rules compare values only; constants {5}; 7 representatives)" (`Report.Abstraction`).
+  Closure rules, undeclared literals (`exact13_diverges`), arithmetic (`triangle_diverges`),
+  Bool and Enum variables, and writes that could saturate are refused, naming the rule. Theory:
+  normalization-confluence `coq/AbstractionCutoff.v`; see
+  [Verification](verification.md#abstraction-check-relationships-not-values) and
+  [Theory §11.9](theory.md#119-integer-variables-abstraction). The WFC transfer is `term_abs`; the
+  CC1 transfer for gsm's model (CC1 at valid states, events without parameters) is
+  `cc1_valid_abs` and `gsm_abs_exact` (normalization-confluence `coq/AbstractionGsm.v`), with
+  `gsm_abs_sound` for the runtime; `NotIdempotent` is exact for every value (`idem_valid_abs`).
+- **Deferred.**
+  - **The linear route**: rules that add, subtract or multiply by a literal, through formulas an
+    SMT solver decides (`lin_exact`). Not started in gsm: `Int` writes saturate, which the
+    formulas over the integers do not model, and the formula generator needs a differential test
+    against an extraction of the Coq construction. gsm takes no solver dependency.
+  - **Event parameters**: gsm events carry none (m = 0); with parameters the cutoff is n + 2m.
+  - **One state per order type** (`cc1_order_type`): would shrink the representative states from
+    |reps|^n to the ordered Bell numbers.
+  - **Federations**: a component declared with `Abstract` is refused.
 - **When it applies.** Rules that only compare or add values ("stock is at least the quantity
   ordered", "balance minus amount stays non-negative"), not rules that test exact constants.
 - **The theorem.** Checking over one representative of each relationship between the values a

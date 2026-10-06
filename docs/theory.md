@@ -945,7 +945,9 @@ Placing gsm among these formalisms gives its regime a floor and a ceiling, estab
 
 **Mitigation**:
 - Bound domains to reasonable ranges (e.g., balance ∈ [0, 1000000])
-- Use symbolic verification for unbounded domains (future work)
+- For integer variables whose rules only compare and copy, verify by abstraction (§11.9): wide
+  ranges are checked through a few representative values
+- Use symbolic verification for arithmetic rules over unbounded domains (future work)
 
 The limitation is gsm's, not the theorem's: convergence holds on infinite domains under any
 well-founded potential (§5.3), and the monotone regime needs only the ascending chain condition,
@@ -967,8 +969,10 @@ the modular-verification mitigation, resting on the mechanized footprint-disjoin
 states a compositional machine applies events to) and on a build-time footprint check (exact for
 combinator rules; a perturbation test for closures, see §9.6).
 
-**Further mitigations (future work)**: symmetry reduction (exploit equivalent states); partial
-order reduction (ignore irrelevant interleavings); symbolic verification for unbounded domains.
+**Further mitigations**: symmetry reduction for keyed collections (implemented, §11.8);
+abstraction for integer variables whose rules only compare and copy (implemented, §11.9); partial
+order reduction (ignore irrelevant interleavings) and solver-backed verification of arithmetic
+rules (future work).
 
 ### 11.3 Dynamic Event Sets
 
@@ -1090,6 +1094,106 @@ through a collection: every rule sees one item, and every key runs one machine. 
 registry, fails `Build`) and `TestCollection_AggregateCannotBeExpressed` pin both sides. The
 federation conditions C1 and C2 also reduce to one item for a morphism that maps items pointwise
 (`c1_cutoff`, `c2_cutoff`); gsm does not implement collections as federation components.
+
+### 11.9 Integer Variables (Abstraction)
+
+**Implemented**: `Registry.Abstract(constants...)` makes `Build` verify a registry of integer
+variables by abstraction: over a small representative domain instead of every value
+([Verification](verification.md#abstraction-check-relationships-not-values)). The theory is
+normalization-confluence
+[`AbstractionCutoff.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/AbstractionCutoff.v)
+(axiom-free; the design notes are its `coq/docs/abstraction.md`).
+
+**The model.** A state is a list of n integers; an event is a kind with m integer parameters; C is
+the set of declared constants; repair reaches validity within K steps (`TermK`), and the governed
+step is the event followed by K repair steps. The rules are a program in a small language
+(variables, literals, `+`, `-`, `*`, if-then-else, comparisons and connectives). The program is in
+the **order-invariant fragment** when it only compares and copies variables and constants of C
+(`ord_frag`); then it commutes with every order isomorphism that fixes C (`ord_frag_sound`), and it
+never produces a value that is not an input or a constant (`closure_ap`, `closure_rp`). The
+representative domain `reps N C` is C, the N integers above each constant and the N below the
+least (0 to N-1 when C is empty), at most |C|(N+1)+N values (`reps_length`), and any finitely many
+integers can be moved into it without changing how they compare to each other and to C
+(`compress`).
+
+**How gsm's registries map onto it.** gsm's model matches as follows, and Build checks exactly the
+conditions it checks without `Abstract`, over the representatives:
+
+- **Variables**: every variable must be an `Int`; its value is the integer. (Bool and Enum
+  variables are refused: the model has integer variables only.)
+- **Events have no parameters**: m = 0, so N = n + 2m = n for every condition.
+- **An event** (a guard and a sequence of assignments, each seeing the previous ones) is the
+  program's per-variable new values: each variable's new value is its assignment composed by
+  substitution, under an if-then-else on the guard. **The repair** (the first violated
+  invariant's repair) is one if-then-else chain over the invariants, and the invariant is their
+  conjunction. Substitution and if-then-else keep a rule in the fragment.
+- **The fragment check** is gsm's, over the combinator trees: expressions are variables or
+  declared constants only; comparisons, `And`, `Or` and `Not` are free. That is `ord_frag` on the
+  translated program. Closure rules cannot be translated, so they are refused.
+- **Integers, not saturating writes**: the model's writes are exact. gsm's `Int` writes saturate at
+  the declared bounds, so Build also requires every copied variable's range to lie inside its
+  target's and every written constant to lie in its target's range. Then, since the fragment
+  writes only existing values and constants, no write on a state within the ranges saturates, the
+  ranges are closed under the rules, and gsm's rules compute the model's. There is no arithmetic,
+  so nothing can wrap around.
+
+**What Build checks, and the theorem per condition.**
+
+| Build checks, over the representative states (N = n) | Conclusion for every integer state | Theorem |
+|---|---|---|
+| WFC: repair reaches a valid state from every representative state, within K steps (K the deepest chain, `Report.MaxRepairLen`) | Repair reaches a valid state within K steps from every integer state (`TermK`); a decreasing potential exists | `term_abs`, `wfc_abs` |
+| CC1 for every checked pair at every valid representative state (gsm's CC1, §6.5: valid states only) | CC1 for that pair at every valid integer state; with WFC, every reordering of independent events from a valid state reaches the same state | `cc1_valid_abs`, `gsm_abs_exact` |
+| Idempotence of each event at every valid representative state (`NotIdempotent`) | Idempotence at every valid integer state, and of the runtime step from every integer state: the list is exact for every value | `idem_valid_abs`, `idem_runtime_abs` |
+| The representative tables: steps land on valid states, checked pairs commute on the valid representative states | Certified by the verified table oracle (`check_tables_converges`), as for `Build` without `Abstract` | `check_tables_converges` |
+| A CC1 failure at a valid representative state | The two orders of the pair differ from that state, which is an integer state: a real divergence (of the declared machine when the witness is within the ranges) | none needed |
+
+CC1 at the valid states, for the checked pairs, holds over every integer iff it holds at the valid representative states (normalization-confluence `AbstractionGsm.v`, `cc1_valid_abs`); with repair verified within K steps over the representatives, this is exactly the condition for every reordering of independent events from a valid state to reach the same state (`gsm_abs_exact`, through `Trace.run_tequiv`, the base of `check_tables_converges`). Because `Apply` normalizes its input first, runs from every integer state, the zero state included, reach the same state under every reordering of independent events (`gsm_abs_sound`; any permutation when every pair is checked, `gsm_abs_sound_all`).
+
+**The CC1 transfer.** `cc1_abs` states that CC1 over all integer states holds iff it holds over
+all representative states, with N ≥ n + 2m; its CC1 quantifies over every state, valid or not, and
+every event including a no-op one, while gsm checks CC1 at valid states only (§6.5). The registry whose events first repair to validity stays in the fragment (`derived_ordinv`), and its CC1 at every state is gsm's CC1 at the valid states (`cc1_derived_valid`), so `cc1_abs` applies to it (`cc1_valid_derived_abs`). The failure direction needs no theorem: a
+witness is a concrete integer state where two orders differ.
+
+**Idempotence.** Idempotence transfers too: an event is idempotent at every valid integer state iff at every valid representative state (`idem_valid_abs`; for the runtime step from every integer state, `idem_runtime_abs`). So `NotIdempotent` is computed from the representatives and is exact for every value: deduplicate exactly the listed events. The cutoff is N ≥ n + m, so N = n here as well. The at-least-once
+rules of §7.8 apply unchanged, including declared pairs: deduplicating exactly the listed events is
+enough when the transport keeps undeclared pairs ordered for retries too (`fl_retry_order_needed`
+otherwise).
+
+**Not claimed.** `AbstractionCutoff.v` also proves unique normal forms for the full rewrite system,
+from CC1 and CC2 together (`un_abs`, `abs_check_exact`, `build_sound`). gsm does not check CC2
+(§6.5), so it does not claim that form.
+
+**Boundaries, each refused by the fragment check.**
+
+- **An undeclared literal.** `exact13_passes`, `exact13_diverges`: "if amount = 13 then
+  last := tag" passes the representative check with no constants (the representatives never
+  reach 13) and diverges over the integers. `exact13_refused`: the fragment check refuses it;
+  `exact13_declared`: with 13 declared the check fails, as it should. gsm refuses a literal that
+  is not declared, naming the rule and the literal.
+- **Arithmetic.** `triangle_passes`, `triangle_diverges`: the guard x < y < z < x + y passes the
+  check over 0, 1, 2 and diverges at (2, 3, 4); `triangle_refused`. gsm refuses `Add` and `Sub`
+  anywhere in a rule.
+- **The cutoff cannot drop below n.** `copy_tight`: x := y and y := x pass over one
+  representative and diverge at (0, 1). gsm uses N = n.
+
+**Representatives outside the ranges.** The theorems are over all integers, so a representative
+may lie outside a variable's declared range (one below the least constant, for a range starting at
+it). A pass covers the ranges, which are integer states closed under the rules. A failure at a
+witness outside the ranges is a failure over the integers but not necessarily of the declared
+machine; gsm reports it as outside the declared ranges and does not certify.
+
+**With collections.** For a collection template declared with `Abstract`, the template's
+guarantee holds for every value, and the collection theorems of §11.8 (`run_proj`,
+`cross_commute`, `declared_cutoff`, `alo_cutoff`) carry it to every key: they are stated for any
+item state type. `AbstractionCutoff.v` also composes the two reductions for the rewrite-system form
+(`sym_abs`, `capped_catalog`), which needs CC2; gsm does not claim that form (§11.8).
+
+**Not implemented: the linear route.** For rules that add, subtract and multiply by literals,
+`AbstractionCutoff.v` generates each condition as a quantifier-free linear-arithmetic formula whose
+validity is the condition (`phi_cc1_exact`, `lin_exact`, `lin_frag_linear`), for an external SMT
+solver to decide. gsm does not emit these formulas yet: gsm's `Int` writes saturate, which the
+formulas over the integers do not model as stated, and a generator would need a differential test
+against an extraction of the Coq construction.
 
 ---
 

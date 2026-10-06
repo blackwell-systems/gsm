@@ -111,6 +111,22 @@ func newDiffCase(r *Registry, m *Machine, rep *Report, err error) *diffCase {
 		c.wfcFail = err != nil && !rep.WFC && strings.Contains(c.goErr, "WFC")
 		c.ccFail = err != nil && rep.WFC && rep.CCFailure != nil
 	}
+	if r.abs != nil {
+		// Built by abstraction: the rules oracle would enumerate the declared ranges, so
+		// only the representative tables are compared (the table oracle must accept them
+		// exactly when Build did, and reject them on a CC failure).
+		c.astErr = "verified by abstraction"
+		if c.goOK || c.ccFail {
+			tb, e := r.representativeTables()
+			switch {
+			case e != nil:
+				c.tableClass = "BUG: the representative tables cannot be computed (" + firstLine(e.Error()) + ")"
+			case len(tb.NF) <= diffMaxTableStates:
+				c.tables, c.tableStates = formatTables(tb), len(tb.NF)
+			}
+		}
+		return c
+	}
 	var buf bytes.Buffer
 	if e := r.WriteMachineAST(&buf); e == nil {
 		c.ast = buf.Bytes()

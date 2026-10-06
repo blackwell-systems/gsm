@@ -24,6 +24,12 @@ import (
 // State (a captured variable, a global) is evaluated then, on the template's states, and
 // what it computed is frozen into the tables the table oracle certifies. It cannot
 // observe other keys at run time, because it does not run at run time.
+//
+// A template declared with Registry.Abstract is verified by abstraction instead, and its
+// machine computes at run time from its rules. Abstraction accepts combinator rules only,
+// which are data over one item's State, so they cannot observe other keys either. The
+// report then carries both Report.Symmetry and Report.Abstraction: the template's
+// guarantee holds for every value of every item variable, and by symmetry at every key.
 type Collection[K comparable] struct {
 	over     string
 	template *Registry

@@ -94,6 +94,15 @@ const (
 	// (it misses a joint dependence on three or more outside variables), not an
 	// exact check.
 	AssuranceOracleComponentsTested
+	// AssuranceOracleRepresentatives: Build verified the machine by abstraction
+	// (Registry.Abstract), and the table oracle certified its representative tables:
+	//   - normal forms and steps land on valid states;
+	//   - the declared pairs commute on every valid representative state.
+	// The step from the representatives to every value (the abstraction theorems of
+	// normalization-confluence coq/AbstractionCutoff.v) rests on gsm's syntactic check
+	// that the rules only compare and copy values and declared constants, which the
+	// oracle does not see.
+	AssuranceOracleRepresentatives
 )
 
 func (a Assurance) String() string {
@@ -104,6 +113,9 @@ func (a Assurance) String() string {
 		return "tables certified by the verified table oracle; rules certified by the verified rules oracle"
 	case AssuranceOracleComponents:
 		return "component tables certified by the verified table oracle; cross-component independence by gsm's footprint check"
+	case AssuranceOracleRepresentatives:
+		return "representative tables certified by the verified table oracle; the transfer to every value by gsm's " +
+			"fragment check (rules compare and copy values and declared constants only)"
 	case AssuranceOracleComponentsTested:
 		return "component tables certified by the verified table oracle; cross-component independence by gsm's footprint check, " +
 			"which for closure rules is a perturbation test, not exact"

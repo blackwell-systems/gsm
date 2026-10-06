@@ -18,6 +18,7 @@ for the formal algorithm and its soundness, [Theory §9](theory.md#9-verificatio
   - [Cross-checks against the OCaml checkers](#cross-checks-against-the-ocaml-checkers)
 - [Certificates: what gsm recomputes itself](#certificates-what-gsm-recomputes-itself)
 - [Compositional verification](#compositional-verification)
+- [Abstraction: check relationships, not values](#abstraction-check-relationships-not-values)
 - [Compensation synthesis](#compensation-synthesis)
 - [Performance](#performance)
 - [Limitations](#limitations)
@@ -175,6 +176,11 @@ can make the two checks see different tables.
 - `AssuranceOracleComponentsTested` (`BuildCompositional` with `TrustClosureFootprints`, on a
   machine with closure rules): as above, but the footprint check for closures is a perturbation
   test, not exact.
+- `AssuranceOracleRepresentatives` (`Build` on a registry declared with `Abstract`): the oracle
+  certified the representative tables (steps land on valid states, and the checked pairs commute
+  at every valid representative state). That this carries over to every value rests on gsm's
+  syntactic check that the rules only compare and copy, which the oracle does not see
+  ([Abstraction](#abstraction-check-relationships-not-values)).
 - `AssuranceNone`: not certified (the build failed, or the oracle rejected the tables).
 
 ### The rules oracle and its fragment
@@ -373,6 +379,87 @@ The theorem this rests on, and why its read-set hypothesis is essential, is
 
 ---
 
+## Abstraction: check relationships, not values
+
+`Build` enumerates every value of every variable. When the rules only **compare and copy** values
+("stock is below the shipment level", "copy the level into stock", "stock is at most the cap 5"),
+they cannot tell apart two states whose values stand in the same order relative to each other and
+to the constants the rules mention. Declare those constants with `Registry.Abstract`, and `Build`
+checks a small set of representative values instead, with the result holding for every value:
+
+<!-- gocheck: run -->
+```go
+r := gsm.NewRegistry("inventory")
+stock := r.Int("stock", 0, 1_000_000)  // 2^60 states together: far too many to enumerate
+shipA := r.Int("ship_a", 0, 1_000_000) // the level shipment A restocks to
+shipB := r.Int("ship_b", 0, 1_000_000)
+
+r.Rule("cap").Require(gsm.AtMost(stock, 5)).RepairWith(gsm.SetTo(stock, 5)).Add()
+r.On("receive_a").OnlyIf(gsm.BelowVar(stock, shipA)).Does(gsm.Copy(stock, shipA)).Add()
+r.On("receive_b").OnlyIf(gsm.BelowVar(stock, shipB)).Does(gsm.Copy(stock, shipB)).Add()
+
+m, report, err := r.Abstract(5).Build() // 5 is the one constant the rules use
+if err != nil {
+    panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+}
+fmt.Println(report.Abstraction)
+// Verified by abstraction over stock, ship_a, ship_b (rules compare values only; constants {5}; 7 representatives)
+
+s := m.NewState().SetInt(shipA, 3).SetInt(shipB, 900_000)
+fmt.Println(m.Apply(m.Apply(s, "receive_a"), "receive_b").GetInt(stock)) // 5: received, then capped
+```
+
+**What Build checks.** With n variables and constants C, the representatives are C, the n integers
+above each constant, and the n integers below the least one (0 to n-1 when there is no constant):
+at most |C|(n+1)+n values, here 5 and 6, 7, 8 and 4, 3, 2. `Build` runs its usual checks over every
+state built from them (7³ = 343 states here): WFC from every representative state, and CC for the
+checked pairs at every valid one. The verified table oracle certifies those tables, and
+`Report.Assurance` is `AssuranceOracleRepresentatives`. The theorems (normalization-confluence
+`AbstractionCutoff.v`; [Theory §11.9](theory.md#119-integer-variables-abstraction)) say the result
+over the representatives is the result over all integers: a pass is a guarantee for every value,
+and a failure is a real failure, reported with a witness state. WFC transfers by `term_abs`. CC1 at the valid states, for the checked pairs, holds over every integer iff it holds at the valid representative states (normalization-confluence `AbstractionGsm.v`, `cc1_valid_abs`); with repair verified within K steps over the representatives, this is exactly the condition for every reordering of independent events from a valid state to reach the same state (`gsm_abs_exact`, through `Trace.run_tequiv`, the base of `check_tables_converges`). Because `Apply` normalizes its input first, runs from every integer state, the zero state included, reach the same state under every reordering of independent events (`gsm_abs_sound`; any permutation when every pair is checked, `gsm_abs_sound_all`).
+
+**What it accepts.** `Build` checks, from the rules' combinator trees, that the registry is in the
+fragment the theorems cover, and refuses it otherwise with an `*AbstractionError` naming the rule
+and the reason (also in `Report.AbstractionRefused`). Nothing is checked after a refusal.
+
+| Refused | Why |
+|---|---|
+| A rule written as a Go closure (`Event().Apply`, `Invariant().Holds`, a `Guard` closure) | gsm cannot inspect a closure, so it cannot show the rule only compares and copies. Write it with combinators (`On`, `Rule`, `DeclEvent`, `DeclInvariant`) |
+| A literal that is not a declared constant (`Is(amount, 13)` without `Abstract(13)`) | An exact test against an undeclared value can pass on every representative and still diverge: `exact13_diverges`. Declaring 13 makes the check see it |
+| Arithmetic (`Add`, `Sub`, `Inc`, `IncBy`, ...) in a guard, an invariant or a write | An order-pattern check can pass on a rule that adds and the machine still diverge: `triangle_diverges`. Use `Build` without `Abstract` over a bounded range |
+| A `Bool` or `Enum` variable | The theorems are about integer variables. Use an `Int` whose values are declared constants |
+| A copy into a narrower range, or a constant written outside its target's range | The write could saturate, which the theorems (over all integers) do not model |
+| More than 64 bits of state, more than 2²⁰ representative states, or a constant within n of the int limits | The state must fit one machine word, the check must stay enumerable, and the representatives must not overflow |
+
+**Ranges and wrap-around.** The theorems are about mathematical integers. The fragment has no
+arithmetic, so a rule never computes a value: it can only write a value some variable already
+holds or a declared constant. With the copy and constant checks above no write saturates, so
+on every state within the declared ranges the machine computes exactly what the theorems model,
+and nothing can wrap around. A representative may lie outside a variable's range (a range that
+starts at the least constant has no room for the representatives below it). That does not weaken
+a pass. A failure whose witness lies outside the ranges is reported as such
+(`CCFailure.Abstract.InRange` is false, and the report says "outside the declared ranges"): it is a
+failure over the integers, so abstraction cannot certify the machine, but the machine as declared
+may still converge. For ranges small enough, `Build` without `Abstract` decides it.
+
+**The machine.** The machine computes at run time from the rules rather than by table lookup (like
+`BuildCompositional`'s), so `Export` and `WriteConvergenceTables` are unavailable. `Apply`
+normalizes every invalid input before applying the event, the zero state included: abstraction
+certifies CC at the valid states, not at the zero state, which `Build` without `Abstract` also checks.
+
+**Delivery.** Idempotence transfers too: an event is idempotent at every valid integer state iff at every valid representative state (`idem_valid_abs`; for the runtime step from every integer state, `idem_runtime_abs`). So `NotIdempotent` is computed from the representatives and is exact for every value: deduplicate exactly the listed events.
+
+**With collections.** A collection template may declare `Abstract`: the report then carries both
+lines, `Verified by symmetry over ...` and `Verified by abstraction over ...`, and the result holds
+for every value at every key. Federations do not accept a component declared with `Abstract`.
+
+**Not covered yet.** Rules that add or subtract (a wallet whose balance changes by an amount) need
+the linear route of the theory, where the conditions become integer-arithmetic formulas checked by
+an SMT solver; gsm does not implement it ([Roadmap 1b](ROADMAP.md#1b-abstraction-check-relationships-not-values)).
+
+---
+
 ## Compensation synthesis
 
 You don't have to *design* the compensation. Declare the invariants (what "valid" means) and
@@ -497,7 +584,7 @@ Memory: One `uint64` per state for normal form table, plus one `uint64` per (eve
 
 ## Limitations
 
-- **Finite variable domains** - Each variable's domain must be finite (no arbitrary strings or lists). This is a per-variable constraint, not a global ceiling: `BuildCompositional` certifies machines whose product state space is astronomically large, as long as each footprint component is small
+- **Finite variable domains** - Each variable's domain must be finite (no arbitrary strings or lists). Integer variables whose rules only compare and copy can have ranges far too wide to enumerate, through `Abstract` (see [Abstraction](#abstraction-check-relationships-not-values)). This is a per-variable constraint, not a global ceiling: `BuildCompositional` certifies machines whose product state space is astronomically large, as long as each footprint component is small
 - **Build-time cost** - Global `Build` enumerates the state space and hard-errors above 2²⁰ (~1M) states (a fixed cap, not configurable), so it does not degrade gracefully past that wall; use `BuildCompositional` for machines that decompose into small footprint components (see [Compositional verification](#compositional-verification)), where cost scales with the largest component rather than the whole machine
 - **Verification requires Go** - Runtime portable via JSON export ([Reference](reference.md#multi-language-runtime)), but verification engine is Go-only
 - **Federation** - Tree networks, multi-source acyclic DAGs (resolution operators), and monotone *cyclic* networks are all covered by the paper's proofs (Section 8). gsm establishes the theorems' preconditions (morphism M1, resolver R1/R2, the event-order conditions C1/C2, monotonicity) by exhaustive build-time verification. *Non-monotone* cycles are rejected unless coordinated (`BuildCoordinated`), and multi-source targets without a resolver are rejected. On monotone cycles, event interleavings are certified by the same C1/C2 checks (`cyc_check_gc_lfp`, see [monotone cycles](federation.md#escape-hatch-2-monotone-cycles)). C1/C2 certify the `FedMachine` model; a deployment that merges projections on separate nodes needs XU, which `Build` reports (`FedReport.ProjectionSafe`) and requires only under `RequireProjectionSafe`, and which is certified only on acyclic networks without multi-source targets ([Deployment](deployment.md#projection-deployments)). The federation-level checks are gsm's Go code, not oracle-gated
