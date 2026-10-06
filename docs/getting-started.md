@@ -18,6 +18,7 @@ report means, see [Verification](verification.md).
 - [Rules must return a state of their own machine](#rules-must-return-a-state-of-their-own-machine)
 - [Declarative rules (combinators)](#declarative-rules-combinators)
 - [Independence declarations](#independence-declarations)
+- [Collections: one template, every key](#collections-one-template-every-key)
 - [Next steps](#next-steps)
 
 ---
@@ -164,6 +165,79 @@ r.Independent("withdraw", "notify")
 Use this when you know some events are causally ordered (e.g., `pay` always before `ship`). That knowledge is an obligation on the runtime: **every undeclared pair must be delivered in causal order**, the same fixed order at every replica. `Build` still checks the undeclared pairs and lists each one that does not commute in `Report.CausalOrderRequired`; [Deployment](deployment.md#causal-order-for-undeclared-pairs) shows the report and what to do about a listed pair.
 
 `Build` checks every declared pair exactly, whatever the pair's footprints. Two events that write different variables can still fail to commute: a guard or effect may read a variable the other event writes (see [Why not guard the shipment on payment?](#why-not-guard-the-shipment-on-payment)). Only `BuildCompositional` skips pairs by footprint, and only after it has checked what each event reads (see [Compositional Verification](verification.md#compositional-verification)).
+
+## Collections: one template, every key
+
+When the state is a collection of items governed by the same rules (per product, per customer,
+per account), declare the rules of one item, the **template**, and let `NewCollection` run it at
+every key. `Build` verifies the template alone, and by symmetry the result holds for a collection
+of any number of keys:
+
+<!-- gocheck: run -->
+```go
+// The template: one product's rules. A rule sees one product's State: no key, no other product.
+item := gsm.NewRegistry("product")
+stock := item.Int("stock", 0, 5)
+reserved := item.Int("reserved", 0, 5)
+backordered := item.Bool("backordered")
+
+short := func(s gsm.State) bool { return s.GetInt(reserved) > s.GetInt(stock) }
+item.Invariant("backorder_flag").
+    Watches(stock, reserved, backordered).
+    Holds(func(s gsm.State) bool { return s.GetBool(backordered) == short(s) }).
+    Repair(func(s gsm.State) gsm.State { return s.SetBool(backordered, short(s)) }).
+    Add()
+item.Event("restock").Writes(stock).
+    Apply(func(s gsm.State) gsm.State { return s.SetInt(stock, s.GetInt(stock)+1) }).Add()
+item.Event("reserve").Writes(reserved).
+    Apply(func(s gsm.State) gsm.State { return s.SetInt(reserved, s.GetInt(reserved)+1) }).Add()
+
+type ProductID string
+catalog, report, err := gsm.NewCollection[ProductID]("ProductID", item).Build() // checks one product
+if err != nil {
+    panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+}
+fmt.Println(report.Symmetry) // Verified by symmetry over ProductID (items independent; cutoff 1)
+
+s := catalog.NewState()
+catalog.Apply(s, "widget", "reserve") // reserved before any stock: backordered
+catalog.Apply(s, "gadget", "restock") // another key: widget is unaffected
+catalog.Apply(s, "widget", "restock") // the stock arrives: compensation clears the flag
+fmt.Println(s.Item("widget").GetBool(backordered), s.Item("gadget").GetInt(stock)) // false 1
+```
+
+**Why one item is enough.** Every key runs the template's machine, and an event addressed to a key
+changes that key's item and nothing else. So the events at one key reach exactly what the template
+reaches from them, whatever happens at other keys, and events on different keys commute in every
+state. Whatever `Build` certified for the template holds at every key, for any number of keys: one
+item is the whole check (cutoff 1). The theorems are in [Theory §11.8](theory.md#118-keyed-collections-symmetry).
+
+**The report.** The report is the template's, with one more line under the convergence line,
+`Verified by symmetry over ProductID (items independent; cutoff 1)`, also available as
+`Report.Symmetry`. The delivery obligations apply per key: an event in `NotIdempotent` needs
+exactly-once delivery at each key (the report reads `Delivery: exactly once per ProductID for
+...`), and a pair in `CausalOrderRequired` needs causal order only when both events address the
+same key. If the template does not build, neither does the collection: `Build` returns the
+template's error and report, with its counterexample.
+
+**What a collection cannot say.** A rule sees one item's state, so a rule across keys ("total
+reserved over all products is at most the warehouse capacity") cannot be written through a
+collection. That is not only a gap in the API: such an aggregate can converge on one item and
+diverge on two (normalization-confluence `aggregate_diverges`), so checking one item would prove
+nothing about it. Put a rule that relates items in one registry whose state holds those items, and
+`Build` checks it directly.
+
+**Rules run at build time only.** The collection runs the template's tables, so a rule closure runs
+only while `Build` verifies the template. A closure that reads data outside its `State` (a captured
+variable, a global) reads it then, and the result is frozen into the tables the oracle certifies; it
+cannot observe other keys at run time, since it does not run at run time. The template must fit
+`Build` (at most 2²⁰ states); a template that needs `BuildCompositional` is not supported.
+
+**State.** `CollectionMachine.NewState` returns an empty collection; a key no event has reached is at
+the template's `NewState`. `Apply(s, key, event)` updates `s` in place and returns the key's new
+item state, `Item(key)` reads one item, and `Keys`, `Len` and `Clone` list, count and copy the
+items. A `CollectionState` is not safe for concurrent use. `Item()` on the machine returns the
+template's `Machine`.
 
 ## Next steps
 

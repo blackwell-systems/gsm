@@ -311,3 +311,44 @@ func ExampleFederation() {
 	// supplier delists:           status=draft        listing=unlisted  featured=true
 	// manufacturer publishes:     status=active       listing=listed    featured=true
 }
+
+// ExampleNewCollection declares the rules of one product (the template), verifies them
+// once, and runs them at every key of a catalog: by symmetry, the check of one product
+// covers a catalog of any size.
+func ExampleNewCollection() {
+	item := gsm.NewRegistry("product")
+	stock := item.Int("stock", 0, 5)
+	reserved := item.Int("reserved", 0, 5)
+	backordered := item.Bool("backordered")
+
+	// A rule sees one product's State: no key, no other product.
+	short := func(s gsm.State) bool { return s.GetInt(reserved) > s.GetInt(stock) }
+	item.Invariant("backorder_flag").
+		Watches(stock, reserved, backordered).
+		Holds(func(s gsm.State) bool { return s.GetBool(backordered) == short(s) }).
+		Repair(func(s gsm.State) gsm.State { return s.SetBool(backordered, short(s)) }).
+		Add()
+	item.Event("restock").Writes(stock).
+		Apply(func(s gsm.State) gsm.State { return s.SetInt(stock, s.GetInt(stock)+1) }).Add()
+	item.Event("reserve").Writes(reserved).
+		Apply(func(s gsm.State) gsm.State { return s.SetInt(reserved, s.GetInt(reserved)+1) }).Add()
+
+	type ProductID string
+	catalog, report, err := gsm.NewCollection[ProductID]("ProductID", item).Build()
+	if err != nil {
+		panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+	}
+	fmt.Println(report.Symmetry)
+
+	s := catalog.NewState()
+	catalog.Apply(s, "widget", "reserve") // reserved before any stock: backordered
+	catalog.Apply(s, "gadget", "restock") // another key: widget is unaffected
+	fmt.Println(s.Item("widget").GetBool(backordered), s.Item("gadget").GetInt(stock))
+	catalog.Apply(s, "widget", "restock") // the stock arrives: compensation clears the flag
+	fmt.Println(s.Item("widget").GetBool(backordered))
+
+	// Output:
+	// Verified by symmetry over ProductID (items independent; cutoff 1)
+	// true 1
+	// false
+}

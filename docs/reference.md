@@ -28,6 +28,7 @@ this page is the map. Field descriptions here are summaries of the godoc.
 | `Registry.BuildCompositional(opts...)` | `*Machine, *Report, error` | Verifies each footprint component on its own; returns a lazy machine. Option: `TrustClosureFootprints()` to accept closure rules | [Verification](verification.md#compositional-verification) |
 | `Registry.Synthesize()` / `SynthesizeWith(opts...)` | `*Synthesis, error` | Generates a convergent compensation or proves none exists. Options: `Prefer(cost)`, `Optimal()` | [Verification](verification.md#compensation-synthesis) |
 | `Registry.BuildOrSynthesize(opts...)` | `*Machine, *Synthesis, error` | `Build`, falling back to synthesis when the compensation is what failed | [Verification](verification.md#compensation-synthesis) |
+| `NewCollection[K](over, template).Build()` | `*CollectionMachine[K], *Report, error` | Builds the template with `Build` (every check, the oracle gate) and returns a machine that runs it at every key of type `K`; sets `Report.Symmetry` | [Getting started](getting-started.md#collections-one-template-every-key) |
 | `Registry.Independent(e1, e2)` / `OnlyDeclaredPairs()` | `*Registry` | Declared-only mode: certify only declared pairs, report the rest | [Getting started](getting-started.md#independence-declarations), [Deployment](deployment.md#causal-order-for-undeclared-pairs) |
 | `Federation.Build()` | `*FedMachine, *FedReport, error` | Builds every component, then checks M1 (R1/R2), C1, C2, acyclicity, and reports XU | [Federation](federation.md) |
 | `Federation.AllowMonotoneCycles()` | `*Federation` | Accept cycles whose morphisms and resolvers are all monotone | [Federation](federation.md#escape-hatch-2-monotone-cycles) |
@@ -39,6 +40,12 @@ this page is the map. Field descriptions here are summaries of the godoc.
 
 Opt-ins belong to the federation they are called on: an embedded sub's `AllowMonotoneCycles` or
 `RequireProjectionSafe` does not apply to the parent.
+
+A `CollectionMachine[K]` has `NewState()`, `Apply(s, key, event)` (updates the `*CollectionState[K]`
+in place and returns the key's new item `State`), `Over()` and `Item()` (the template's `Machine`).
+A `CollectionState[K]` has `Item(key)` (the template's `NewState` for a key no event has reached),
+`Keys()`, `Len()` and `Clone()`. `Apply` panics on an unknown event, a nil state, or a state of
+another collection machine.
 
 ---
 
@@ -61,6 +68,7 @@ Opt-ins belong to the federation they are called on: an embedded sub's `AllowMon
 | `Assurance` | What certified the machine ([Assurance levels](verification.md#assurance-levels)); `AssuranceNone` unless a machine was returned |
 | `OracleDisagreement` | gsm's verification passed but the table oracle did not certify the tables; there is no machine |
 | `RulesOracleSkipped` | Why the rules oracle did not run (no combinator rules, above `RulesOracleMaxWork`, or outside its fragment) |
+| `Symmetry` | On a collection's report: `*SymmetryReduction{Over, Cutoff}`, printed as `Verified by symmetry over <Over> (items independent; cutoff 1)`. The template was checked as one item and the result holds at every key; `NotIdempotent` and `CausalOrderRequired` then apply per key ([Getting started](getting-started.md#collections-one-template-every-key)) |
 
 ---
 

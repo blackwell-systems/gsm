@@ -96,6 +96,14 @@ type Report struct {
 	// combinator rules, above RulesOracleMaxWork, or outside the rules
 	// oracle's fragment).
 	RulesOracleSkipped string
+
+	// Symmetry is non-nil on the report of Collection.Build: the machine was verified
+	// as the template of a keyed collection, on one item, and the result holds at every
+	// key of a collection of any size (normalization-confluence coq/SymmetryCutoff.v).
+	// NotIdempotent and CausalOrderRequired then apply per key: a listed event needs
+	// exactly-once delivery at each key, and a listed pair needs causal order only when
+	// both events address the same key.
+	Symmetry *SymmetryReduction
 }
 
 // compensationError is Build's error when the compensation as written is missing or does
@@ -206,9 +214,16 @@ func (r *Report) String() string {
 	}
 	if r.WFC && r.CC && r.Assurance != AssuranceNone {
 		if n := len(r.CausalOrderRequired); n > 0 {
-			s += fmt.Sprintf("\n  Convergence: GUARANTEED under causal delivery of the %d undeclared pair(s) above\n", n)
+			sameKey := ""
+			if r.Symmetry != nil {
+				sameKey = fmt.Sprintf(" on the same %s", r.Symmetry.Over)
+			}
+			s += fmt.Sprintf("\n  Convergence: GUARANTEED under causal delivery of the %d undeclared pair(s) above%s\n", n, sameKey)
 		} else {
 			s += "\n  Convergence: GUARANTEED\n"
+		}
+		if r.Symmetry != nil {
+			s += fmt.Sprintf("  %s\n", r.Symmetry)
 		}
 		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
 		if r.RulesOracleSkipped != "" {
@@ -228,8 +243,12 @@ func (r *Report) String() string {
 func (r *Report) obligations() string {
 	var b strings.Builder
 	if len(r.NotIdempotent) > 0 {
-		fmt.Fprintf(&b, "  Delivery: exactly once for %s (applying one twice differs from once); "+
-			"deduplicate redelivered events\n", strings.Join(r.NotIdempotent, ", "))
+		perKey := ""
+		if r.Symmetry != nil {
+			perKey = " per " + r.Symmetry.Over
+		}
+		fmt.Fprintf(&b, "  Delivery: exactly once%s for %s (applying one twice differs from once); "+
+			"deduplicate redelivered events\n", perKey, strings.Join(r.NotIdempotent, ", "))
 	}
 	for _, sat := range r.Saturations {
 		fmt.Fprintf(&b, "  Saturation: %s (silently; an invariant testing the bound never sees the overflow)\n", sat)
