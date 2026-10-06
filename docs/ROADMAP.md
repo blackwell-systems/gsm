@@ -54,15 +54,14 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
   normalization-confluence `coq/AbstractionCutoff.v`; see
   [Verification](verification.md#abstraction-check-relationships-not-values) and
   [Theory §11.9](theory.md#119-integer-variables-abstraction). The WFC transfer is `term_abs`; the
-  CC1 transfer for gsm's model (CC1 at valid states, events without parameters) is `cc1_abs`
-  applied to the repair-first registry, with its corollary pending upstream.
+  CC1 transfer for gsm's model (CC1 at valid states, events without parameters) is
+  `cc1_valid_abs` and `gsm_abs_exact` (normalization-confluence `coq/AbstractionGsm.v`), with
+  `gsm_abs_sound` for the runtime; `NotIdempotent` is exact for every value (`idem_valid_abs`).
 - **Deferred.**
   - **The linear route**: rules that add, subtract or multiply by a literal, through formulas an
     SMT solver decides (`lin_exact`). Not started in gsm: `Int` writes saturate, which the
     formulas over the integers do not model, and the formula generator needs a differential test
     against an extraction of the Coq construction. gsm takes no solver dependency.
-  - **Idempotence**: no transfer theorem yet, so the report asks for exactly-once delivery of every
-    event.
   - **Event parameters**: gsm events carry none (m = 0); with parameters the cutoff is n + 2m.
   - **One state per order type** (`cc1_order_type`): would shrink the representative states from
     |reps|^n to the ordered Bell numbers.

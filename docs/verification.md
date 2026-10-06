@@ -417,10 +417,7 @@ checked pairs at every valid one. The verified table oracle certifies those tabl
 `Report.Assurance` is `AssuranceOracleRepresentatives`. The theorems (normalization-confluence
 `AbstractionCutoff.v`; [Theory §11.9](theory.md#119-integer-variables-abstraction)) say the result
 over the representatives is the result over all integers: a pass is a guarantee for every value,
-and a failure is a real failure, reported with a witness state. WFC transfers by `term_abs`. For
-CC, gsm checks valid states only, and the transfer is `cc1_abs` applied to the registry whose
-events repair first; its corollary for gsm's model is pending upstream (Theory §11.9 gives the
-argument).
+and a failure is a real failure, reported with a witness state. WFC transfers by `term_abs`. CC1 at the valid states, for the checked pairs, holds over every integer iff it holds at the valid representative states (normalization-confluence `AbstractionGsm.v`, `cc1_valid_abs`); with repair verified within K steps over the representatives, this is exactly the condition for every reordering of independent events from a valid state to reach the same state (`gsm_abs_exact`, through `Trace.run_tequiv`, the base of `check_tables_converges`). Because `Apply` normalizes its input first, runs from every integer state, the zero state included, reach the same state under every reordering of independent events (`gsm_abs_sound`; any permutation when every pair is checked, `gsm_abs_sound_all`).
 
 **What it accepts.** `Build` checks, from the rules' combinator trees, that the registry is in the
 fragment the theorems cover, and refuses it otherwise with an `*AbstractionError` naming the rule
@@ -451,9 +448,7 @@ may still converge. For ranges small enough, `Build` without `Abstract` decides 
 normalizes every invalid input before applying the event, the zero state included: abstraction
 certifies CC at the valid states, not at the zero state, which `Build` without `Abstract` also checks.
 
-**Delivery.** The theorems carry WFC and CC from the representatives to every value, not
-idempotence. So the report asks for exactly-once delivery of every event; `NotIdempotent` lists the
-events seen not to be idempotent on a representative state.
+**Delivery.** Idempotence transfers too: an event is idempotent at every valid integer state iff at every valid representative state (`idem_valid_abs`; for the runtime step from every integer state, `idem_runtime_abs`). So `NotIdempotent` is computed from the representatives and is exact for every value: deduplicate exactly the listed events.
 
 **With collections.** A collection template may declare `Abstract`: the report then carries both
 lines, `Verified by symmetry over ...` and `Verified by abstraction over ...`, and the result holds

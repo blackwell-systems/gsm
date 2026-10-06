@@ -28,11 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variables, a copy or constant write that could saturate, more than 64 bits of state, more than
   2²⁰ representative states. Since the fragment never computes a value and no write saturates,
   nothing can wrap around. A collection template may declare `Abstract` (both reduction lines
-  appear); a federation refuses such a component. Idempotence has no transfer theorem, so the
-  report asks for exactly-once delivery of every event. Theory: normalization-confluence
-  `coq/AbstractionCutoff.v` (`term_abs`, `wfc_abs`, `cc1_abs`, `ord_frag_sound`, `closure_ap`,
-  `closure_rp`, `reps_length`, `copy_tight`); the CC1 transfer for gsm's model (CC1 at valid
-  states) is `cc1_abs` applied to the repair-first registry, with its corollary pending upstream.
+  appear); a federation refuses such a component. `NotIdempotent` is computed from the
+  valid representative states and is exact for every value (`idem_valid_abs`,
+  `idem_runtime_abs`). Theory: normalization-confluence `coq/AbstractionCutoff.v` (`term_abs`,
+  `wfc_abs`, `cc1_abs`, `ord_frag_sound`, `closure_ap`, `closure_rp`, `reps_length`, `copy_tight`)
+  and `coq/AbstractionGsm.v`, the gsm instantiation: CC1 at the valid states transfers
+  (`cc1_valid_abs`, through the repair-first registry: `derived_ordinv`, `cc1_derived_valid`,
+  `cc1_valid_derived_abs`), it is exactly the reordering guarantee from a valid state
+  (`gsm_abs_exact`), and the runtime converges from every integer state, the zero state included
+  (`gsm_abs_sound`, `gsm_abs_sound_all`).
   `docs/theory.md` §11.9 maps each condition to its theorem; `docs/verification.md` has the new
   "Abstraction" section. The linear (SMT) route is deferred on the roadmap.
 - **Keyed collections: check one item, conclude for all (roadmap item 1a).**

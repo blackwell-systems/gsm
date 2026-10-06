@@ -428,11 +428,13 @@ func TestAbstraction_CollectionTemplate(t *testing.T) {
 	if rep.Symmetry == nil || rep.Abstraction == nil {
 		t.Fatalf("report %+v", rep)
 	}
+	if len(rep.NotIdempotent) != 0 || strings.Contains(rep.String(), "Delivery:") {
+		t.Fatalf("receive events are idempotent; report:\n%s", rep)
+	}
 	out := rep.String()
 	for _, s := range []string{
 		"Verified by symmetry over SKU (items independent; cutoff 1)",
 		"Verified by abstraction over stock, a, b (rules compare values only; constants {5}; 7 representatives)",
-		"Delivery: exactly once per SKU for every event",
 	} {
 		if !strings.Contains(out, s) {
 			t.Errorf("report lacks %q:\n%s", s, out)
@@ -484,5 +486,51 @@ func TestAbstraction_RuntimeAgreesWithEnumeration(t *testing.T) {
 				t.Fatalf("run %d: %s vs %s", run, as, es)
 			}
 		}
+	}
+}
+
+// swapxy (normalization-confluence AbstractionGsm.v, swapxy_not_idem) in gsm's model: the swap
+// of x and y, through a scratch variable since gsm's assignments run in sequence, is in the
+// fragment and not idempotent. The representative check lists it, and NotIdempotent is exact for
+// every value (idem_valid_abs): a concrete integer state shows it.
+func TestAbstraction_SwapNotIdempotent(t *testing.T) {
+	r := gsm.NewRegistry("swap")
+	x, y, tmp := r.Int("x", 0, 1<<20), r.Int("y", 0, 1<<20), r.Int("tmp", 0, 1<<20)
+	r.On("swap").Does(gsm.Do(gsm.Set(tmp, gsm.V(x)), gsm.Set(x, gsm.V(y)), gsm.Set(y, gsm.V(tmp)))).Add()
+	r.On("keep").Does(gsm.Copy(x, x)).Add() // idempotent, and commutes with swap
+	m, rep, err := r.Abstract().Build()
+	if err != nil {
+		t.Fatalf("Build: %v\n%s", err, rep)
+	}
+	if !reflect.DeepEqual(rep.NotIdempotent, []string{"swap"}) {
+		t.Fatalf("NotIdempotent = %v, want [swap]", rep.NotIdempotent)
+	}
+	if !strings.Contains(rep.String(), "Delivery: exactly once for swap") {
+		t.Fatalf("report:\n%s", rep)
+	}
+	// The integer witness, far from the representatives: once swaps, twice swaps back.
+	s := m.NewState().SetInt(x, 7).SetInt(y, 900_000)
+	once := m.Apply(s, "swap")
+	twice := m.Apply(once, "swap")
+	if once.GetInt(x) != 900_000 || once.GetInt(y) != 7 || twice.GetInt(x) != 7 || once.ID() == twice.ID() {
+		t.Fatalf("once %s, twice %s", once, twice)
+	}
+}
+
+// An idempotent event is not listed: receiving a shipment level twice is receiving it once,
+// at every value (idem_valid_abs), so the capped inventory needs no deduplication.
+func TestAbstraction_IdempotentNotListed(t *testing.T) {
+	r, stock, a, _ := cappedInventory(0, 1_000_000)
+	m, rep, err := r.Abstract(5).Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.NotIdempotent) != 0 || strings.Contains(rep.String(), "Delivery:") {
+		t.Fatalf("NotIdempotent = %v\n%s", rep.NotIdempotent, rep)
+	}
+	s := m.NewState().SetInt(a, 4)
+	once := m.Apply(s, "restock_a")
+	if twice := m.Apply(once, "restock_a"); once.ID() != twice.ID() || once.GetInt(stock) != 4 {
+		t.Fatalf("once %s, twice %s", once, twice)
 	}
 }

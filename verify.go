@@ -295,20 +295,7 @@ func (r *Report) String() string {
 // silent saturation, and federation edges left to external coordination.
 func (r *Report) obligations() string {
 	var b strings.Builder
-	if r.Abstraction != nil && r.WFC && r.CC {
-		// Idempotence is checked on the representatives only: no mechanized theorem
-		// transfers it to every value, so no event is cleared for redelivery.
-		perKey := ""
-		if r.Symmetry != nil {
-			perKey = " per " + r.Symmetry.Over
-		}
-		listed := ""
-		if len(r.NotIdempotent) > 0 {
-			listed = fmt.Sprintf(" (%s not idempotent on a representative state)", strings.Join(r.NotIdempotent, ", "))
-		}
-		fmt.Fprintf(&b, "  Delivery: exactly once%s for every event%s; abstraction transfers WFC and CC1 to every "+
-			"value, not idempotence; deduplicate redelivered events\n", perKey, listed)
-	} else if len(r.NotIdempotent) > 0 {
+	if len(r.NotIdempotent) > 0 {
 		perKey := ""
 		if r.Symmetry != nil {
 			perKey = " per " + r.Symmetry.Over

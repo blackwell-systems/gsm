@@ -27,10 +27,18 @@ import (
 //   - WFC, from every representative state; repair reaches validity within K steps
 //     (K the deepest chain). term_abs: then within K steps from every integer state.
 //   - CC1 for the checked pairs at every valid representative state: gsm's own CC1
-//     (valid states, docs/theory.md §6.5). It transfers to every valid integer state by
-//     cc1_abs applied to the registry whose events first repair to validity; that
-//     instantiation is argued in docs/theory.md §11.9, and its mechanized corollary for
-//     gsm's model is pending upstream.
+//     (valid states, docs/theory.md §6.5). cc1_valid_abs (normalization-confluence
+//     coq/AbstractionGsm.v): it holds over every integer iff at the valid
+//     representatives; with repair within K steps, gsm_abs_exact makes it exactly the
+//     condition for every reordering of independent events from a valid state to reach
+//     the same state, and gsm_abs_sound (gsm_abs_sound_all) gives that from every
+//     integer state for the runtime, which normalizes its input first.
+//   - Idempotence at every valid representative state: idem_valid_abs (runtime form
+//     idem_runtime_abs) makes NotIdempotent exact for every value.
+//
+// The repair-first registry stays in the fragment (derived_ordinv) and its CC1 at every
+// state is gsm's CC1 at the valid states (cc1_derived_valid), so cc1_abs applies to it
+// (cc1_valid_derived_abs).
 //
 // The fragment check is syntactic, over the combinator trees, so closure rules are
 // refused: gsm cannot inspect them. An undeclared literal is refused
