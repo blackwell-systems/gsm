@@ -352,3 +352,31 @@ func ExampleNewCollection() {
 	// true 1
 	// false
 }
+
+func ExampleRegistry_Abstract() {
+	r := gsm.NewRegistry("inventory")
+	// Ranges far too wide to enumerate: 2^60 states.
+	stock := r.Int("stock", 0, 1_000_000)
+	shipA := r.Int("ship_a", 0, 1_000_000) // the level shipment A restocks to
+	shipB := r.Int("ship_b", 0, 1_000_000)
+
+	// The rules only compare and copy values and the declared constant 5.
+	r.Rule("cap").Require(gsm.AtMost(stock, 5)).RepairWith(gsm.SetTo(stock, 5)).Add()
+	r.On("receive_a").OnlyIf(gsm.BelowVar(stock, shipA)).Does(gsm.Copy(stock, shipA)).Add()
+	r.On("receive_b").OnlyIf(gsm.BelowVar(stock, shipB)).Does(gsm.Copy(stock, shipB)).Add()
+
+	m, report, err := r.Abstract(5).Build() // checks 7^3 representative states
+	if err != nil {
+		panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+	}
+	fmt.Println(report.Abstraction)
+
+	s := m.NewState().SetInt(shipA, 3).SetInt(shipB, 900_000)
+	ab := m.Apply(m.Apply(s, "receive_a"), "receive_b")
+	ba := m.Apply(m.Apply(s, "receive_b"), "receive_a")
+	fmt.Println(ab.GetInt(stock), ba.GetInt(stock))
+
+	// Output:
+	// Verified by abstraction over stock, ship_a, ship_b (rules compare values only; constants {5}; 7 representatives)
+	// 5 5
+}

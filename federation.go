@@ -414,6 +414,13 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 		if err := r.checkNames(); err != nil {
 			return nil, &FedReport{Name: f.name, Edges: len(f.edges)}, err
 		}
+		if r.abs != nil {
+			// The federation checks run on each component's step tables, which a machine
+			// verified by abstraction does not have.
+			return nil, &FedReport{Name: f.name, Edges: len(f.edges)}, fmt.Errorf("gsm: component %q declares "+
+				"Abstract: federation components are verified by enumeration, and abstraction is not supported in "+
+				"a federation", r.name)
+		}
 	}
 	if err := f.checkSharedVars(); err != nil {
 		return nil, &FedReport{Name: f.name, Edges: len(f.edges)}, err

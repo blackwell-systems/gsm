@@ -231,7 +231,11 @@ nothing about it. Put a rule that relates items in one registry whose state hold
 only while `Build` verifies the template. A closure that reads data outside its `State` (a captured
 variable, a global) reads it then, and the result is frozen into the tables the oracle certifies; it
 cannot observe other keys at run time, since it does not run at run time. The template must fit
-`Build` (at most 2²⁰ states); a template that needs `BuildCompositional` is not supported.
+`Build` (at most 2²⁰ states); a template that needs `BuildCompositional` is not supported. A
+template whose integer variables are too wide to enumerate can declare `Abstract` instead
+([Verification](verification.md#abstraction-check-relationships-not-values)): its rules are then
+combinator rules that run at `Apply` time, still over one item's state, and the report carries
+both the symmetry and the abstraction line.
 
 **State.** `CollectionMachine.NewState` returns an empty collection; a key no event has reached is at
 the template's `NewState`. `Apply(s, key, event)` updates `s` in place and returns the key's new

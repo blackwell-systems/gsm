@@ -19,6 +19,7 @@ type Registry struct {
 	totalBits      uint
 	independent    [][2]int // pairs of event indices declared independent
 	allIndependent bool     // if true, check all pairs
+	abs            *absDecl // non-nil once Abstract is called: Build verifies by abstraction
 }
 
 // CheckFunc is a predicate over State.

@@ -42,6 +42,10 @@ func gateBuild(dir string, r *Registry, m *Machine, rep *Report, err error) {
 			rec.CCFail = rep.WFC && rep.CCFailure != nil
 		}
 	}
+	if r.abs != nil {
+		gateAbstract(dir, rec, r, m, rep)
+		return
+	}
 	rules, pairs, rerr := gateRules(r)
 	if rerr != nil {
 		rec.RulesErr = rerr.Error()
@@ -65,6 +69,26 @@ func gateBuild(dir string, r *Registry, m *Machine, rep *Report, err error) {
 		rec.TablesErr = terr.Error()
 	}
 	gateWrite(dir, rec, rules, pairs, tables)
+}
+
+// gateAbstract records a Build by abstraction (Registry.Abstract). The rules checker would
+// enumerate the declared ranges, so it does not run; the table checker gets the
+// representative tables, which Build checked (and, for an accepted machine, the table
+// oracle certified).
+func gateAbstract(dir string, rec gate.Record, r *Registry, m *Machine, rep *Report) {
+	rec.RulesErr = "verified by abstraction: the rules checker would enumerate the declared ranges; the " +
+		"representative tables are checked instead"
+	var tables []byte
+	var terr error
+	if m != nil || rec.CCFail {
+		tables, terr = r.representativeTablesText()
+	} else {
+		terr = errors.New("Build failed before the CC phase: no tables")
+	}
+	if terr != nil {
+		rec.TablesErr = terr.Error()
+	}
+	gateWrite(dir, rec, nil, nil, tables)
 }
 
 func gateMachine(dir, kind string, r *Registry, m *Machine) {
@@ -100,4 +124,13 @@ func gateWrite(dir string, rec gate.Record, rules, pairs, tables []byte) {
 	if err := gate.WriteRecord(dir, rec, rules, pairs, tables); err != nil {
 		panic("gsm gate: recording machine " + rec.Name + ": " + err.Error())
 	}
+}
+
+// representativeTablesText is representativeTables in WriteConvergenceTables' format.
+func (r *Registry) representativeTablesText() ([]byte, error) {
+	tb, err := r.representativeTables()
+	if err != nil {
+		return nil, err
+	}
+	return formatTables(tb), nil
 }

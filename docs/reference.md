@@ -29,6 +29,7 @@ this page is the map. Field descriptions here are summaries of the godoc.
 | `Registry.Synthesize()` / `SynthesizeWith(opts...)` | `*Synthesis, error` | Generates a convergent compensation or proves none exists. Options: `Prefer(cost)`, `Optimal()` | [Verification](verification.md#compensation-synthesis) |
 | `Registry.BuildOrSynthesize(opts...)` | `*Machine, *Synthesis, error` | `Build`, falling back to synthesis when the compensation is what failed | [Verification](verification.md#compensation-synthesis) |
 | `NewCollection[K](over, template).Build()` | `*CollectionMachine[K], *Report, error` | Builds the template with `Build` (every check, the oracle gate) and returns a machine that runs it at every key of type `K`; sets `Report.Symmetry` | [Getting started](getting-started.md#collections-one-template-every-key) |
+| `Registry.Abstract(constants...)` | `*Registry` | Declares the constants the rules compare and copy; `Build` then verifies by abstraction, over the representative values instead of every value, and returns a lazy machine; sets `Report.Abstraction`. Refuses a registry outside the fragment with an `*AbstractionError` | [Verification](verification.md#abstraction-check-relationships-not-values) |
 | `Registry.Independent(e1, e2)` / `OnlyDeclaredPairs()` | `*Registry` | Declared-only mode: certify only declared pairs, report the rest | [Getting started](getting-started.md#independence-declarations), [Deployment](deployment.md#causal-order-for-undeclared-pairs) |
 | `Federation.Build()` | `*FedMachine, *FedReport, error` | Builds every component, then checks M1 (R1/R2), C1, C2, acyclicity, and reports XU | [Federation](federation.md) |
 | `Federation.AllowMonotoneCycles()` | `*Federation` | Accept cycles whose morphisms and resolvers are all monotone | [Federation](federation.md#escape-hatch-2-monotone-cycles) |
@@ -68,6 +69,8 @@ another collection machine.
 | `Assurance` | What certified the machine ([Assurance levels](verification.md#assurance-levels)); `AssuranceNone` unless a machine was returned |
 | `OracleDisagreement` | gsm's verification passed but the table oracle did not certify the tables; there is no machine |
 | `RulesOracleSkipped` | Why the rules oracle did not run (no combinator rules, above `RulesOracleMaxWork`, or outside its fragment) |
+| `Abstraction` | `Build` by abstraction (`Registry.Abstract`): `*AbstractionReduction{Over, Constants, Cutoff, Representatives, States}`, printed as `Verified by abstraction over stock (rules compare values only; constants {5}; 7 representatives)`. `StateCount` is then the number of representative states, and `Assurance` is `AssuranceOracleRepresentatives`. Also set on a WFC or CC failure found that way ([Verification](verification.md#abstraction-check-relationships-not-values)) |
+| `AbstractionRefused` | The registry declared `Abstract` but is outside the fragment; holds the `*AbstractionError` text, and nothing was checked |
 | `Symmetry` | On a collection's report: `*SymmetryReduction{Over, Cutoff}`, printed as `Verified by symmetry over <Over> (items independent; cutoff 1)`. The template was checked as one item and the result holds at every key; `NotIdempotent` and `CausalOrderRequired` then apply per key ([Getting started](getting-started.md#collections-one-template-every-key)) |
 
 ---
@@ -108,6 +111,8 @@ explains how to read them. `CoordinationPoint` has `Src`, `Dst`, `Shared` and `A
 | Error | Returned when | Explained in |
 |---|---|---|
 | `*CCFailure` (in `Report.CCFailure`) | Two events, a state, and the two results of a CC failure | [Verification](verification.md#verification-report) |
+| `*AbstractionError` | `Build` on a registry declared with `Abstract` that abstraction does not cover: `Rule` names the rule (or variable) and `Reason` says why (a closure rule, an undeclared literal, arithmetic, a Bool or Enum variable, a write that could saturate, a domain too large) | [Verification](verification.md#abstraction-check-relationships-not-values) |
+| `CCFailure.Abstract` (`*AbstractWitness`) | A CC failure found by abstraction: the witness and both results as integer values, and `InRange`. Outside the declared ranges, `State`, `Result1` and `Result2` are zero | [Verification](verification.md#abstraction-check-relationships-not-values) |
 | `*CrossOrderError` | C1 fails: a target event and a source-driven change of its shared component diverge | [Federation](federation.md#event-order-across-registries-c1-and-c2) |
 | `*SameTargetOrderError` | C2 fails: two target events diverge once the morphism repair runs between them | [Federation](federation.md#event-order-across-registries-c1-and-c2) |
 | `*ProjectionOrderError` | XU fails at a target (reported in `ProjectionWitnesses`; returned under `RequireProjectionSafe`). Unwraps to `ErrProjectionNotCertified` | [Deployment](deployment.md#projection-deployments) |
@@ -148,8 +153,9 @@ The exported JSON contains:
   (`verification.pairs`, by event name) and whether that is every pair (`verification.all_pairs`).
   Pairs outside that set are not guaranteed to commute. Version 2 only adds fields to version 1.
 
-A full example file is in [ARCHITECTURE.md](design/ARCHITECTURE.md#export-format). Only `Build`
-machines export: a lazy `BuildCompositional` machine has no global tables.
+A full example file is in [ARCHITECTURE.md](design/ARCHITECTURE.md#export-format). Only machines
+`Build` enumerated export: a lazy `BuildCompositional` machine, or one `Build` verified by
+abstraction, has no global tables.
 
 ### Runtime Implementation (Python Example)
 

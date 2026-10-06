@@ -104,6 +104,19 @@ type Report struct {
 	// exactly-once delivery at each key, and a listed pair needs causal order only when
 	// both events address the same key.
 	Symmetry *SymmetryReduction
+
+	// Abstraction is non-nil when Build verified the machine by abstraction
+	// (Registry.Abstract): over the representative values, with the result holding for
+	// every value of every variable in its declared range (normalization-confluence
+	// coq/AbstractionCutoff.v). StateCount is then the number of representative states.
+	// It is also set on a WFC or CC failure found that way, with the CC witness in
+	// CCFailure.Abstract.
+	Abstraction *AbstractionReduction
+
+	// AbstractionRefused is non-empty when the registry declared Abstract but is outside
+	// the fragment abstraction covers (Build's error, an *AbstractionError, names the
+	// rule and the reason). Nothing was checked: WFC and CC are false for that reason.
+	AbstractionRefused string
 }
 
 // compensationError is Build's error when the compensation as written is missing or does
@@ -132,6 +145,33 @@ type CCFailure struct {
 	State   State
 	Result1 State // apply e1 then e2
 	Result2 State // apply e2 then e1
+
+	// Abstract is set on a failure Build found by abstraction (Registry.Abstract): the
+	// witness and both results as integer values. When a value lies outside its
+	// variable's declared range (Abstract.InRange false), State, Result1 and Result2 are
+	// zero, since a State cannot hold it.
+	Abstract *AbstractWitness
+}
+
+// stateText renders the witness state of f, or (which 1 or 2) one of its results.
+func (f *CCFailure) stateText(which int) string {
+	if w := f.Abstract; w != nil && !w.InRange {
+		vals := w.State
+		switch which {
+		case 1:
+			vals = w.Result1
+		case 2:
+			vals = w.Result2
+		}
+		return w.values(vals) + " (outside the declared ranges)"
+	}
+	switch which {
+	case 1:
+		return f.Result1.String()
+	case 2:
+		return f.Result2.String()
+	}
+	return f.State.String()
 }
 
 // Saturation records a rule whose write was clamped into a variable's range.
@@ -151,6 +191,8 @@ func (r *Report) String() string {
 	if r.Components > 0 {
 		// BuildCompositional never enumerates the global state space.
 		s += fmt.Sprintf("  Components: %d\n", r.Components)
+	} else if r.Abstraction != nil {
+		s += fmt.Sprintf("  States: %d representative (values not enumerated)\n", r.StateCount)
 	} else {
 		s += fmt.Sprintf("  States: %d\n", r.StateCount)
 	}
@@ -163,6 +205,14 @@ func (r *Report) String() string {
 		s += fmt.Sprintf("    %s\n", r.DomainViolation)
 		s += "  WFC: not certified (a rule result is not a state of the machine)\n"
 		s += "  CC (Compensation Commutativity): not certified (a rule result is not a state of the machine)\n"
+		return s
+	}
+	if r.AbstractionRefused != "" {
+		// The registry is outside the abstraction fragment; nothing was checked.
+		s += "  Abstraction: REFUSED\n"
+		s += fmt.Sprintf("    %s\n", r.AbstractionRefused)
+		s += "  WFC: not evaluated (abstraction refused)\n"
+		s += "  CC (Compensation Commutativity): not evaluated (abstraction refused)\n"
 		return s
 	}
 	if r.FootprintViolation != "" {
@@ -189,9 +239,9 @@ func (r *Report) String() string {
 	} else if r.CCFailure != nil {
 		s += "  CC (Compensation Commutativity): FAIL\n"
 		s += fmt.Sprintf("    Events: (%s, %s)\n", r.CCFailure.Event1, r.CCFailure.Event2)
-		s += fmt.Sprintf("    State:  %s\n", r.CCFailure.State)
-		s += fmt.Sprintf("    %s→%s: %s\n", r.CCFailure.Event1, r.CCFailure.Event2, r.CCFailure.Result1)
-		s += fmt.Sprintf("    %s→%s: %s\n", r.CCFailure.Event2, r.CCFailure.Event1, r.CCFailure.Result2)
+		s += fmt.Sprintf("    State:  %s\n", r.CCFailure.stateText(0))
+		s += fmt.Sprintf("    %s→%s: %s\n", r.CCFailure.Event1, r.CCFailure.Event2, r.CCFailure.stateText(1))
+		s += fmt.Sprintf("    %s→%s: %s\n", r.CCFailure.Event2, r.CCFailure.Event1, r.CCFailure.stateText(2))
 	}
 
 	if r.OracleDisagreement != "" {
@@ -207,8 +257,8 @@ func (r *Report) String() string {
 			s += fmt.Sprintf("  Undeclared pairs: %d checked, %d do not commute: each must be causally ordered "+
 				"(not independent), delivered in the same order at every replica\n", r.PairsUndeclared, n)
 			for _, f := range r.CausalOrderRequired {
-				s += fmt.Sprintf("    (%s, %s) from %s: %s→%s gives %s, %s→%s gives %s\n", f.Event1, f.Event2, f.State,
-					f.Event1, f.Event2, f.Result1, f.Event2, f.Event1, f.Result2)
+				s += fmt.Sprintf("    (%s, %s) from %s: %s→%s gives %s, %s→%s gives %s\n", f.Event1, f.Event2, f.stateText(0),
+					f.Event1, f.Event2, f.stateText(1), f.Event2, f.Event1, f.stateText(2))
 			}
 		}
 	}
@@ -224,6 +274,9 @@ func (r *Report) String() string {
 		}
 		if r.Symmetry != nil {
 			s += fmt.Sprintf("  %s\n", r.Symmetry)
+		}
+		if r.Abstraction != nil {
+			s += fmt.Sprintf("  %s\n", r.Abstraction)
 		}
 		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
 		if r.RulesOracleSkipped != "" {
@@ -242,7 +295,20 @@ func (r *Report) String() string {
 // silent saturation, and federation edges left to external coordination.
 func (r *Report) obligations() string {
 	var b strings.Builder
-	if len(r.NotIdempotent) > 0 {
+	if r.Abstraction != nil && r.WFC && r.CC {
+		// Idempotence is checked on the representatives only: no mechanized theorem
+		// transfers it to every value, so no event is cleared for redelivery.
+		perKey := ""
+		if r.Symmetry != nil {
+			perKey = " per " + r.Symmetry.Over
+		}
+		listed := ""
+		if len(r.NotIdempotent) > 0 {
+			listed = fmt.Sprintf(" (%s not idempotent on a representative state)", strings.Join(r.NotIdempotent, ", "))
+		}
+		fmt.Fprintf(&b, "  Delivery: exactly once%s for every event%s; abstraction transfers WFC and CC1 to every "+
+			"value, not idempotence; deduplicate redelivered events\n", perKey, listed)
+	} else if len(r.NotIdempotent) > 0 {
 		perKey := ""
 		if r.Symmetry != nil {
 			perKey = " per " + r.Symmetry.Over
@@ -279,7 +345,18 @@ func (r *Report) obligations() string {
 // AssuranceOracleTables when the rules oracle did not run (Report.RulesOracleSkipped says
 // why). If either oracle rejects the machine or cannot check it, Build returns an error
 // and no machine (it fails closed), and Report.OracleDisagreement says why.
+//
+// A registry declared with Abstract is verified by abstraction instead: Build checks the
+// rules over a representative domain rather than every value, and the table oracle
+// certifies the representative tables (see Registry.Abstract and Report.Abstraction).
 func (r *Registry) Build() (*Machine, *Report, error) {
+	if r.abs != nil {
+		m, rep, err := r.buildAbstract()
+		if buildObserver != nil {
+			buildObserver(r, m, rep, err)
+		}
+		return m, rep, err
+	}
 	m, rep, err := r.build(true)
 	if err == nil {
 		// The oracle gate: the verified table oracle must certify the tables too.
