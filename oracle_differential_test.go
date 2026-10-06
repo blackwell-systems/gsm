@@ -84,7 +84,53 @@ func init() {
 }
 
 func recordBuild(r *Registry, m *Machine, rep *Report, err error) {
-	c := newDiffCase(r, m, rep, err)
+	if rep != nil && rep.Compositional != nil {
+		for _, c := range componentDiffCases(r, rep, err) {
+			recordCase(c)
+		}
+		return
+	}
+	recordCase(newDiffCase(r, m, rep, err))
+}
+
+// componentDiffCases records a Build that checked the machine per footprint component:
+// the rules oracle would enumerate the whole machine, so it does not run, and each
+// component's tables go to the table oracle, which must accept them when Build did. On a
+// CC failure the failing component's tables are recorded, and the table oracle must
+// reject them.
+func componentDiffCases(r *Registry, rep *Report, err error) []*diffCase {
+	base := diffCase{name: r.name, goOK: err == nil, allPairs: r.allIndependent, astErr: "checked per footprint component"}
+	if err != nil {
+		base.goErr = err.Error()
+		base.wfcFail = !rep.WFC && strings.Contains(base.goErr, "WFC")
+		base.ccFail = rep.WFC && rep.CCFailure != nil
+	}
+	if !base.goOK && !base.ccFail {
+		c := base
+		return []*diffCase{&c}
+	}
+	tbs, terr := r.componentTablesFor()
+	if terr != nil {
+		c := base
+		c.tableClass = "BUG: the component tables cannot be computed (" + firstLine(terr.Error()) + ")"
+		return []*diffCase{&c}
+	}
+	var out []*diffCase
+	for ci, nt := range tbs {
+		if base.ccFail && ci != r.componentOf(rep.CCFailure.Event1) {
+			continue
+		}
+		c := base
+		c.name = nt.name
+		if len(nt.tables.NF) <= diffMaxTableStates {
+			c.tables, c.tableStates = formatTables(nt.tables), len(nt.tables.NF)
+		}
+		out = append(out, &c)
+	}
+	return out
+}
+
+func recordCase(c *diffCase) {
 	id := []byte(fmt.Sprintf("%v|%s|%v|%s|", c.goOK, c.goErr, c.allPairs, c.tableClass))
 	id = append(id, c.ast...)
 	id = append(id, 0)

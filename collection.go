@@ -44,7 +44,9 @@ func NewCollection[K comparable](over string, template *Registry) *Collection[K]
 
 // Build verifies the template with Registry.Build, so the template gets every check
 // and the oracle gate a single registry gets, and returns a machine that runs the
-// template at every key. On success the report is the template's, with Report.Symmetry
+// template at every key. The template is checked as a whole, never per footprint
+// component (Report.GlobalReason says so when it is too large to enumerate): the theory
+// states no combined theorem for symmetry with compositional checking. On success the report is the template's, with Report.Symmetry
 // set. If the template does not build, Build returns no machine, the template's report
 // (with its counterexample, such as Report.CCFailure) and the template's error, wrapped.
 //
@@ -60,13 +62,20 @@ func (c *Collection[K]) Build() (*CollectionMachine[K], *Report, error) {
 	if c.template == nil {
 		return nil, nil, fmt.Errorf("gsm: collection over %s: nil template registry", c.over)
 	}
-	item, rep, err := c.template.Build()
+	item, rep, err := c.template.buildWith(buildOpts{global: collectionGlobal})
 	if err != nil {
 		return nil, rep, fmt.Errorf("gsm: collection over %s: template %q did not build: %w", c.over, c.template.name, err)
 	}
 	rep.Symmetry = &SymmetryReduction{Over: c.over, Cutoff: 1}
 	return &CollectionMachine[K]{over: c.over, item: item}, rep, nil
 }
+
+// collectionGlobal is why a collection template is not checked per footprint component:
+// the symmetry reduction is mechanized for a template Build verifies as a whole, and the
+// theory states no combined theorem with compositional checking.
+const collectionGlobal = "it is a collection template, and normalization-confluence states no combined theorem " +
+	"for symmetry with compositional checking (CompositionalCheck.v, Not covered), so the template is checked as " +
+	"a whole"
 
 // SymmetryReduction records, in Report.Symmetry, that a machine was verified as the
 // template of a Collection: on one item, with the result holding for every key of a

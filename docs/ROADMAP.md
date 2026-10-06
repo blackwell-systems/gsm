@@ -3,8 +3,8 @@
 What gsm plans next, and why. Each item is backed by a theory item in normalization-confluence's
 [`docs/ROADMAP.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/docs/ROADMAP.md).
 gsm ships a feature only when its guarantee is mechanized there, so the theory item lands first.
-Items 1a (symmetry) and 1b (abstraction, the comparison route) are implemented; nothing else here
-is implemented yet.
+Items 1a (symmetry), 1b (abstraction, the comparison route) and 1c (compositional checking by
+default) are implemented; nothing else here is implemented yet.
 
 ## 1. Verify realistic domains
 
@@ -27,7 +27,7 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
   symmetry over ProductID (items independent; cutoff 1)" (`Report.Symmetry`). Theory:
   normalization-confluence `coq/SymmetryCutoff.v`. See
   [Getting started](getting-started.md#collections-one-template-every-key) and
-  [Theory §11.8](theory.md#118-keyed-collections-symmetry). 1b, 1c, 1d remain.
+  [Theory §11.8](theory.md#118-keyed-collections-symmetry).
 - **When it applies.** State is a collection of items (per product, per customer, per account)
   governed by the same rules, where an event on one item reads and writes only that item.
 - **The theorem.** For independent, identically governed items, each convergence condition holds
@@ -76,11 +76,35 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
 
 ### 1c. Compositional checking by default
 
-- **When it applies.** Always, when rules declare or reveal what they read and write.
-- **The theorem.** Each condition decomposes over footprints: checking every pair of rules over the
-  variables they touch implies the condition for the whole registry. `BuildCompositional` already
-  enumerates per footprint component; this makes it the default and states its soundness for every
-  condition, not only CC.
+- **Implemented.** `Build` checks a registry too large to enumerate (more than 2^20 states) per
+  footprint component when its rules are combinators, it splits into more than one component, each
+  component fits 20 bits, and the zero state is valid. Footprints include reads: an event's guard
+  reads, effect reads and writes, and an invariant's check reads and repair reads and writes, derived
+  from the expression trees, so the guarded shipment merges with payment instead of being refused
+  or split. The report reads "Verified compositionally: 2 components (largest 131,072 states;
+  131,136 states checked instead of 8,388,608); 6 cross-component pairs need no check (disjoint
+  footprints, reads included); footprints checked exactly (combinators)" (`Report.Compositional`);
+  otherwise `Report.GlobalReason` says why `Build` enumerated the machine whole. The table oracle
+  certifies each component's tables (`AssuranceOracleComponents`). `BuildCompositional` runs the
+  same check at any size, and with `TrustClosureFootprints` accepts closures, whose footprints are
+  tested by perturbation (the trust boundary). Theory: normalization-confluence
+  `coq/CompositionalCheck.v` (`compositional_exact`, `bound_sum`, `cc1_cross`, `cc1_component`,
+  `gsm_literal`); see [Verification](verification.md#compositional-verification) and
+  [Theory §11.10](theory.md#1110-footprint-components-compositional-checking).
+- **Not the default for small machines.** A machine within 2^20 states is still enumerated whole,
+  even when it decomposes: that keeps step tables (`Export`, federations, certificates) and both
+  whole-machine oracles, a stronger assurance than per-component tables.
+- **Deferred.**
+  - **Shared read-only variables**: a variable no rule writes may be read by several components
+    without merging them. The theory covers it; gsm still merges every reader.
+  - **Validity per component** (`validK`, `rhoK`): would drop the valid-zero-state precondition.
+  - **The rules oracle per component**: a component is not exported as a machine, so the
+    per-component path is certified by the table oracle alone.
+  - **Composition with symmetry, abstraction and federations**: no combined theorem is stated, so a
+    collection template, a registry declared with `Abstract` and a federation component are not
+    decomposed.
+  - **Declared reads for closures**: a closure event's footprint is its `Writes`; there is no way to
+    declare a read separately.
 - **Effect.** Cost grows with the largest piece, not with the product of everything.
 
 ### 1d. Partial-order reduction: check fewer event orders, not just fewer states

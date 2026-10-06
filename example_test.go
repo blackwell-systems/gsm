@@ -353,6 +353,48 @@ func ExampleNewCollection() {
 	// false
 }
 
+// ExampleRegistry_Build_compositional: a store whose orders and inventory share no
+// variable. The whole machine has 8,388,608 states, too many for Build to enumerate, so
+// Build checks each footprint component on its own, and the result holds for the whole
+// machine.
+func ExampleRegistry_Build_compositional() {
+	r := gsm.NewRegistry("store")
+	shipped, paid := r.Bool("shipped"), r.Bool("paid")
+	charged := r.Int("charged", 0, 15)
+	stock, reserved := r.Int("stock", 0, 255), r.Int("reserved", 0, 255)
+	backordered := r.Bool("backordered")
+
+	// Orders: shipping unpaid is repaired by charging, and a charge marks the order paid.
+	r.Rule("shipped_needs_payment").Require(gsm.Or(gsm.Is(shipped, 0), gsm.Is(paid, 1))).RepairWith(gsm.Raise(paid)).Add()
+	r.Rule("charge_marks_paid").Require(gsm.Or(gsm.Is(paid, 1), gsm.AtMost(charged, 0))).RepairWith(gsm.Raise(paid)).Add()
+	r.On("pay").Does(gsm.Raise(paid)).Add()
+	r.On("ship").Does(gsm.Raise(shipped)).Add()
+	r.On("charge").OnlyIf(gsm.Below(charged, 15)).Does(gsm.Inc(charged)).Add()
+
+	// Inventory: the backorder flag is reserved > stock, recomputed by repair.
+	r.Rule("flag_when_short").Require(gsm.Or(gsm.Is(backordered, 1), gsm.AtMostVar(reserved, stock))).
+		RepairWith(gsm.Raise(backordered)).Add()
+	r.Rule("clear_when_covered").Require(gsm.Or(gsm.Is(backordered, 0), gsm.AboveVar(reserved, stock))).
+		RepairWith(gsm.Lower(backordered)).Add()
+	r.On("reserve").OnlyIf(gsm.Below(reserved, 255)).Does(gsm.Inc(reserved)).Add()
+	r.On("restock").OnlyIf(gsm.Below(stock, 255)).Does(gsm.Inc(stock)).Add()
+
+	m, report, err := r.Build()
+	if err != nil {
+		panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+	}
+	fmt.Println(report.Compositional)
+	fmt.Println(report.MaxRepairLen, report.Assurance == gsm.AssuranceOracleComponents)
+
+	s := m.Apply(m.Apply(m.NewState(), "ship"), "reserve") // unpaid shipment, reservation past stock
+	fmt.Println(s.GetBool(paid), s.GetBool(backordered))
+
+	// Output:
+	// Verified compositionally: 2 components (largest 131,072 states; 131,136 states checked instead of 8,388,608); 6 cross-component pairs need no check (disjoint footprints, reads included); footprints checked exactly (combinators)
+	// 2 true
+	// true true
+}
+
 func ExampleRegistry_Abstract() {
 	r := gsm.NewRegistry("inventory")
 	// Ranges far too wide to enumerate: 2^60 states.

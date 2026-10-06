@@ -4,17 +4,20 @@ import "fmt"
 
 // Footprint-conformance verification.
 //
-// Compositional certification relies on the declared footprints being accurate:
-// an event's guard and effect read only its Writes() variables and the effect
-// writes only those; an invariant repair
-// modifies only its Watches() variables and reads only those; an invariant check
-// reads only its footprint. If a closure secretly reads or writes another
-// variable, disjointness no longer implies commutation and the certificate is
-// unsound.
+// Compositional certification relies on the footprints being accurate. A combinator
+// rule's footprint is derived from its expression trees, reads included, so it is
+// accurate by construction (normalization-confluence ast_event_local, ast_check_local,
+// ast_repair_local). A closure's footprint is its declaration: an event's guard and effect
+// read only its Writes() variables and the effect writes only those; an invariant repair
+// modifies only its Watches() variables and reads only those; an invariant check reads
+// only its footprint. If a closure secretly reads or writes another variable,
+// disjointness no longer implies commutation and the certificate is unsound
+// (ws_diverges, rc_diverges).
 //
-// verifyFootprints checks these properties directly, so BuildCompositional
-// checks footprint conformance rather than assuming it. (Build does not depend on
-// footprints at all: it checks every pair exactly over the whole state space.) For every state of the
+// verifyFootprints checks these properties for closures, so BuildCompositional with
+// TrustClosureFootprints tests footprint conformance rather than assuming it. (Build's
+// global check does not depend on footprints at all: it checks every pair exactly over the
+// whole state space; Build's per-component path accepts combinator rules only.) For every state of the
 // component subspace (outside variables at zero) it sets each variable outside a
 // closure's footprint to every other value of its domain, one variable at a time,
 // and confirms the closure's declared outputs do not change and no undeclared
@@ -49,8 +52,8 @@ func (inv invariantDef) syntactic() bool {
 // pair change of the outside variables, so its cost is the component's state count
 // times (1 + S + P), where S sums (domain - 1) over the outside variables and P sums
 // the products of that over pairs of them. A wide outside variable (an Int over
-// millions of values) makes that astronomically large; BuildCompositional returns an
-// error up front instead of running for hours.
+// millions of values) makes that astronomically large; the per-component check returns
+// an error up front instead of running for hours.
 const maxPerturbationCalls = 1 << 28
 
 // perturbationCalls estimates the closure calls perturbing outside a footprint
@@ -215,43 +218,31 @@ func writesMatch(s, t State, writeMask uint64) bool {
 }
 
 // verifyFootprints checks that every event effect and invariant repair/check that
-// belongs to the component respects its declared footprint.
+// belongs to the component respects its footprint.
 //
-// Rules written in the combinator vocabulary are checked syntactically, which is
-// exact: an event's read set (its guard's variables and the variables its
-// assignments read) must lie inside its write set, and an invariant's footprint is
-// derived from every variable its predicate and repair mention, so it is conformant
-// by construction. Closure rules are opaque, so they are checked by perturbation
-// (see perturber), which is a test rather than a proof (see the soundness note above).
+// Rules written in the combinator vocabulary need no test: their footprints are derived
+// from the expression trees (an event's guard reads, effect reads and writes; an
+// invariant's check reads and repair reads and writes), which is exact, and the
+// components are built from those footprints, so every variable a combinator rule reads
+// or writes lies in its component (checked here once more). Closure rules are opaque, so
+// they are checked by perturbation against their declared footprint (see perturber),
+// which is a test rather than a proof (see the soundness note above). Every event's
+// effect and every repair also runs on every state of its component when the per-component
+// check builds the component's tables, where each result is checked to be a state of the
+// machine.
 func (r *Registry) verifyFootprints(c *component) error {
 	run := r.checked()
+	in := indexSet(c.vars)
 	for _, ei := range c.events {
 		ev := r.events[ei]
 		ws := indexSet(ev.writes)
 		if ev.syntactic() {
-			reads := ev.effectAST.readVars()
-			if ev.guardAST != nil {
-				reads = append(reads, ev.guardAST.vars()...)
-			}
-			for _, vi := range reads {
-				if !ws[vi] {
-					return fmt.Errorf("gsm: event %q reads variable %q outside its declared footprint",
+			fp, _ := r.eventFootprint(ev)
+			for _, vi := range fp {
+				if !in[vi] {
+					return fmt.Errorf("gsm: event %q reads or writes variable %q outside its footprint component",
 						ev.name, r.vars[vi].name)
 				}
-			}
-			// The syntactic check runs no closure, and CC runs only events in a checked pair,
-			// so run the effect on every state of the component here: every event's result is
-			// then checked to be a state of the machine, as the perturbation run below does
-			// for closures. (A combinator rule can leave the domain only through a Var of
-			// another registry, which reads and writes with that registry's layout.)
-			var effErr error
-			r.enumComponent(c, func(s State) {
-				if effErr == nil {
-					_, effErr = run.applyEvent(ev, s)
-				}
-			})
-			if effErr != nil {
-				return effErr
 			}
 			continue
 		}
@@ -263,7 +254,14 @@ func (r *Registry) verifyFootprints(c *component) error {
 	for _, ii := range c.invariants {
 		inv := r.invariants[ii]
 		if inv.syntactic() {
-			continue // footprint derived from the AST: conformant by construction
+			fp, _ := r.invariantFootprint(inv)
+			for _, vi := range fp {
+				if !in[vi] {
+					return fmt.Errorf("gsm: invariant %q reads or writes variable %q outside its footprint component",
+						inv.name, r.vars[vi].name)
+				}
+			}
+			continue
 		}
 		fp := indexSet(inv.footprint)
 		// Repair may write only its footprint and depend only on its footprint.

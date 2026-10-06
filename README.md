@@ -11,7 +11,7 @@
 
 gsm is the checker for [normalization confluence](https://github.com/blackwell-systems/normalization-confluence): an exact regime map of governed concurrent state. In every regime there is a machine-checked exact condition, a hardness result showing no efficient one exists, or a gap stated in the open ([regime audit](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)), and gsm checks the practical ones.
 
-`gsm` is a Go library for **convergence by compensation**: events may arrive out of order and break business rules, and every replica still converges to the same valid state, because repair is well-founded and commutes with events. Convergence is **verified at build time**: `Build` enumerates the state space and checks that every ordering converges, then returns a machine that applies an event with one table lookup, or refuses with a counterexample (`BuildCompositional` checks per footprint component, for machines too large to enumerate whole). The check is **checked again by the proof**: a checker extracted from the axiom-free Coq/Rocq development re-certifies the machine's tables in-process, and the build fails closed if it does not, so a bug in gsm's Go verification cannot hand you a machine that does not converge.
+`gsm` is a Go library for **convergence by compensation**: events may arrive out of order and break business rules, and every replica still converges to the same valid state, because repair is well-founded and commutes with events. Convergence is **verified at build time**: `Build` enumerates the state space and checks that every ordering converges, then returns a machine that applies an event with one table lookup, or refuses with a counterexample. A machine too large to enumerate whole is checked per footprint component instead, exactly, when its rules are combinators (`BuildCompositional` also takes closures). The check is **checked again by the proof**: a checker extracted from the axiom-free Coq/Rocq development re-certifies the machine's tables in-process, and the build fails closed if it does not, so a bug in gsm's Go verification cannot hand you a machine that does not converge.
 
 ## Example: Order Fulfillment
 
@@ -86,6 +86,7 @@ Machine: order_fulfillment
   CC (Compensation Commutativity): PASS (3 pairs: 0 disjoint, 3 brute-force)
 
   Convergence: GUARANTEED
+  Checked globally: the whole machine has 24 states, within Build's enumeration limit of 1,048,576, and the global check keeps step tables and both whole-machine oracles
   Assurance: tables certified by the verified table oracle
   Rules oracle: not run: not a combinator machine (...)
 ```
@@ -96,7 +97,8 @@ WFC: repair terminates from every state. CC: every pair of events reaches the sa
 
 | Setting | What converges | What `Build` checks | Details |
 |---|---|---|---|
-| Single registry | Every ordering of the events, from a valid state or `NewState`, reaches one normal form | WFC and CC over the whole state space (or per footprint component), re-certified by the extracted oracle | [Verification](docs/verification.md) |
+| Single registry | Every ordering of the events, from a valid state or `NewState`, reaches one normal form | WFC and CC over the whole state space, re-certified by the extracted oracles | [Verification](docs/verification.md) |
+| Registry too large to enumerate, combinator rules | The single-registry guarantee, for the whole machine | Each footprint component over its own subspace (footprints include reads; pairs in different components need no check), exact for the whole machine, each component's tables re-certified by the extracted oracle | [Verification](docs/verification.md#compositional-verification) |
 | Keyed collection | The single-registry guarantee at every key, for any number of keys; events on different keys commute | The template (one item) with `Build`: by symmetry one item is the whole check (cutoff 1) | [Getting started](docs/getting-started.md#collections-one-template-every-key) |
 | Integer variables, compared and copied (`Abstract`) | The single-registry guarantee for every value in the declared ranges, however wide | The representative states only (C, the n values above each constant and below the least): rules must only compare and copy values and declared constants, which `Build` checks from the combinator trees | [Verification](docs/verification.md#abstraction-check-relationships-not-values) |
 | Acyclic federation | The whole network: a unique federated normal form, and every interleaving of independent events | Validity preservation per morphism (M1, or R1/R2 for a resolver), plus the event-order checks C1 and C2 | [Federation](docs/federation.md#when-it-just-works-no-loops) |
@@ -110,7 +112,7 @@ Every row assumes each event is delivered once and, if you declared only some pa
 
 **Use gsm when:**
 - Events arrive out of order and can violate invariants, so you need compensation (repair), not just commutativity
-- Each variable's domain is finite (the *global* state space may be astronomically large: `BuildCompositional` scales with the largest footprint component, not the product of all domains)
+- Each variable's domain is finite (the *global* state space may be astronomically large: the per-component check of `Build` and `BuildCompositional` scales with the largest footprint component, not the product of all domains)
 - You want convergence proved, not tested, before the machine runs
 - Several registries share constraints across organizational boundaries (federated registry networks)
 - You want gsm to **synthesize** the compensation from your invariants and events (or prove none converges)

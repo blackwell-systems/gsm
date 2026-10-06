@@ -621,7 +621,7 @@ func (c *Certificate) recheckComponents(comps map[string]*Registry) error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		if _, _, err := comps[n].Build(); err != nil {
+		if _, _, err := comps[n].buildWith(buildOpts{global: federationGlobal}); err != nil {
 			return fmt.Errorf("gsm: certificate %q: component %q does not converge on re-check: %w", c.Name, n, err)
 		}
 	}

@@ -121,7 +121,7 @@ r.DeclInvariant("a_cap", Le(V(a), Lit(3)), Do(Set(a, Lit(3)))) // holds when a<=
 r.DeclEvent("inc_a", Do(Set(a, Add(V(a), Lit(1)))))            // a := a + 1
 ```
 
-The footprint is **derived** from the tree: an invariant's footprint is every variable its predicate and repair mention, and an event's write set is the variables it assigns. Nothing is declared by hand, so nothing can be mis-declared, and `BuildCompositional` checks an event's reads (its guard and the expressions it assigns) against its write set exactly, from the tree. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. Declarations copy the transforms they are given, and `And`/`Or` copy their predicate lists, so changing the caller's slice afterwards does not change a declared rule. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits. Closure rules stay fully supported; they just cannot be serialized or independently re-certified from their rules.
+The footprint is **derived** from the tree: an invariant's footprint is every variable its predicate and repair mention, and an event's write set is the variables it assigns. Nothing is declared by hand, so nothing can be mis-declared: an event's reads (its guard and the expressions it assigns) are part of its footprint too, so the per-component check (`Build` on a registry too large to enumerate, and `BuildCompositional`) puts every variable an event reads in the event's component, exactly, from the tree. Because the rules are data (not opaque closures), they are inspectable and serializable, the precondition for a verified verifier and portable policies. Declarations copy the transforms they are given, and `And`/`Or` copy their predicate lists, so changing the caller's slice afterwards does not change a declared rule. The closure API (`Holds`/`Repair`/`Apply`) is unchanged; use whichever fits. Closure rules stay fully supported; they just cannot be serialized or independently re-certified from their rules.
 
 ### Rule expression layers
 
@@ -164,7 +164,7 @@ r.Independent("withdraw", "notify")
 
 Use this when you know some events are causally ordered (e.g., `pay` always before `ship`). That knowledge is an obligation on the runtime: **every undeclared pair must be delivered in causal order**, the same fixed order at every replica. `Build` still checks the undeclared pairs and lists each one that does not commute in `Report.CausalOrderRequired`; [Deployment](deployment.md#causal-order-for-undeclared-pairs) shows the report and what to do about a listed pair.
 
-`Build` checks every declared pair exactly, whatever the pair's footprints. Two events that write different variables can still fail to commute: a guard or effect may read a variable the other event writes (see [Why not guard the shipment on payment?](#why-not-guard-the-shipment-on-payment)). Only `BuildCompositional` skips pairs by footprint, and only after it has checked what each event reads (see [Compositional Verification](verification.md#compositional-verification)).
+`Build` checks every declared pair exactly, whatever the pair's footprints. Two events that write different variables can still fail to commute: a guard or effect may read a variable the other event writes (see [Why not guard the shipment on payment?](#why-not-guard-the-shipment-on-payment)). Only the per-component check (`Build` on a combinator registry too large to enumerate, and `BuildCompositional`) skips pairs by footprint, and only with each event's reads in its footprint (see [Compositional Verification](verification.md#compositional-verification)).
 
 ## Collections: one template, every key
 
@@ -231,7 +231,8 @@ nothing about it. Put a rule that relates items in one registry whose state hold
 only while `Build` verifies the template. A closure that reads data outside its `State` (a captured
 variable, a global) reads it then, and the result is frozen into the tables the oracle certifies; it
 cannot observe other keys at run time, since it does not run at run time. The template must fit
-`Build` (at most 2²⁰ states); a template that needs `BuildCompositional` is not supported. A
+`Build`'s enumeration (at most 2²⁰ states): a template is checked as a whole, never per footprint
+component, since no combined theorem is stated for symmetry with compositional checking. A
 template whose integer variables are too wide to enumerate can declare `Abstract` instead
 ([Verification](verification.md#abstraction-check-relationships-not-values)): its rules are then
 combinator rules that run at `Apply` time, still over one item's state, and the report carries

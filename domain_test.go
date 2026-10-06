@@ -480,9 +480,10 @@ func TestSameVar_EveryField(t *testing.T) {
 
 // TestCombinatorForeignVar_Rejected: a combinator rule can leave the domain only
 // through a Var of another registry with the same name and index, which writes with
-// that registry's layout. BuildCompositional runs no closure for a combinator
-// event's footprint check, so it runs every combinator effect on its component's
-// states for the domain check; a combinator repair is checked by the WFC pass.
+// that registry's layout. Build runs the rule and rejects the result as outside the
+// machine. BuildCompositional derives a combinator rule's footprint from its trees, so
+// it refuses the rule before running it, naming the variable that is not this
+// registry's.
 func TestCombinatorForeignVar_Rejected(t *testing.T) {
 	wide := NewRegistry("wide")
 	fa := wide.Int("a", 0, 7) // 3 bits where the machine's "a" has 1
@@ -507,8 +508,12 @@ func TestCombinatorForeignVar_Rejected(t *testing.T) {
 			if msg := catchPanic(func() { err = b.build() }); msg != "" {
 				t.Fatalf("%s(%s) panicked: %s", b.name, r.name, msg)
 			}
-			if err == nil || !strings.Contains(err.Error(), "not a state of machine") {
-				t.Errorf("%s(%s): want an out-of-domain error, got: %v", b.name, r.name, err)
+			want := "not a state of machine"
+			if b.name == "BuildCompositional" {
+				want = `variable "a", which is not a variable of this registry`
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s(%s): want an error containing %q, got: %v", b.name, r.name, want, err)
 			}
 		}
 	}

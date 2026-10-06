@@ -34,9 +34,11 @@ verdict:
 
 - `certified`: `Build` accepts it and both checkers verify it.
 - `certified-tables`: `Build` accepts it and the table checker verifies it. Its
-  rules are closures, which `WriteMachineAST` cannot export, so the rules checker
-  does not run. Every example machine with events or invariants is of this kind
-  today.
+  rules are closures, which `WriteMachineAST` cannot export, or it was verified by
+  abstraction or per footprint component, so the rules checker does not run.
+  A machine `Build` checked per footprint component is listed as one machine per
+  component, `<name>/component<k>` (k from 1, components ordered by their first
+  variable), each with that component's tables.
 - `rejected`: `Build` rejects it for WFC or CC, and every checker that can run
   rejects it for the same reason.
 - `synthesized`: a synthesized repair, which the table checker verifies.
@@ -55,8 +57,9 @@ if it makes one.
 
 How it works: built with `-tags gsmgate` and run with `GSM_GATE_DIR=<dir>`, any
 program records every machine it makes (each `Build` result, accepted or not,
-each synthesized machine and each compositional machine, which fails the gate
-because it has no global tables) as the checkers' inputs in that directory
+each synthesized machine and each compositional machine; a `Build` result checked
+per footprint component is recorded as one machine per component with its tables,
+while a `BuildCompositional` machine fails the gate because it has no global tables) as the checkers' inputs in that directory
 (`gate.go`). `internal/cmd/gsmgate` then runs both checkers on the records and
 compares the verdicts with the catalog (`internal/gate`). Without the tag none of
 this is compiled. A project that uses gsm can gate its own machines the same way,
