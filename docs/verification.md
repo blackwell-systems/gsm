@@ -328,6 +328,9 @@ How to make and embed a certificate is in [Federation](federation.md#composing-f
 
 ## Compositional verification
 
+For choosing between per-component checking, collections and abstraction, see
+[Scaling your model](scaling.md).
+
 `Build` enumerates the whole state space, which caps it at 2²⁰ (about 1M) states. Most registries
 are *wide but loosely coupled*: orders and inventory, accounts and notifications, each group of
 variables governed by its own rules. When the rules of a registry too large to enumerate are
