@@ -11,6 +11,7 @@ this page is the map. Field descriptions here are summaries of the godoc.
 - [Report](#report)
 - [FedReport](#fedreport)
 - [Synthesis](#synthesis)
+- [MigrationReport](#migrationreport)
 - [Errors](#errors)
 - [Names are unique within a registry](#names-are-unique-within-a-registry)
 - [Multi-language runtime](#multi-language-runtime)
@@ -38,6 +39,7 @@ this page is the map. Field descriptions here are summaries of the godoc.
 | `Federation.CoordinationPlan()` / `BuildCoordinated(plan)` | `[]CoordinationPoint` / `*FedMachine, *FedReport, error` | Name the edges to coordinate externally; build the residual | [Federation](federation.md#escape-hatch-3-coordinate-the-obstruction) |
 | `Federation.Embed(sub)` | `*Federation` | Reuse a sub-federation, re-verified in the whole | [Federation](federation.md#composing-federations-embed-and-certificates) |
 | `Federation.Certify(ports...)` / `EmbedCertified(sub, cert)` / `Certificate.Verify(comps)` | | Package a verified sub-federation, embed it pinned to the certificate, re-check it as a consumer. `Port{Registry, Var}` declares an input port | [Federation](federation.md#composing-federations-embed-and-certificates) |
+| `CheckMigration(from, to, migrate, events, opts...)` | `*MigrationReport, error` | Classifies a change from one registry to another before you deploy it: safe online, safe behind a barrier, unsafe with a witness, or unknown. Enumerates the states runs reach (at most 2²⁰ per side); the registries need not pass `Build`. Option: `MigrationFrom(states...)` to check from given states instead of the zero state | [Deployment](deployment.md#changing-a-running-system) |
 
 Opt-ins belong to the federation they are called on: an embedded sub's `AllowMonotoneCycles` or
 `RequireProjectionSafe` does not apply to the parent.
@@ -105,6 +107,36 @@ explains how to read them. `CoordinationPoint` has `Src`, `Dst`, `Shared` and `A
 | `Assurance` | `AssuranceOracleTables` when the table oracle certified the synthesized tables |
 | `Substituted`, `BuildError` | Set by `BuildOrSynthesize` when it returned the synthesized machine instead of the rules as written, and the `Build` error that caused the fallback |
 | `Machine()`, `Repairs()`, `Witness()`, `String()` | The certified machine (nil unless convergent and certified), the repair per invalid state, the impossibility witness, the readable report |
+
+---
+
+## MigrationReport
+
+`MigrationReport` is what `CheckMigration` returns; `MigrationReport.String()` prints it
+([example](deployment.md#changing-a-running-system)). `migrate` is a `Migration`,
+`func(old, blank State) State`: it builds a state of the new registry (`blank` is its zero state)
+from a state of the old one. `events` maps an old event name to the new event an in-flight
+occurrence becomes; an old event it does not name becomes the new event of the same name.
+
+| Field | Meaning |
+|---|---|
+| `From`, `To` | The two registries' names |
+| `Outcome` | `MigrationSafeOnline`, `MigrationSafeBehindBarrier`, `MigrationUnsafe` or `MigrationUnknown` (the zero value), printed as `SAFE ONLINE`, `SAFE BEHIND A BARRIER`, `UNSAFE`, `UNKNOWN` |
+| `Reason` | Why, in one line |
+| `Starts`, `StatesFrom`, `StatesTo` | The starts checked (the old registry's zero state unless `MigrationFrom` gave others), the old registry's states reachable from them, and the new registry's states reachable after a switch |
+| `Conditions`, `Condition(key)` | Every condition evaluated (`MigrationCondition{Key, Mode, Desc, Evaluated, Decided, Holds, Detail}`), with where it fails. Keys: online, `MigrationPermBStart` (the new registry converges from the migrated start) and `MigrationDS1` (in-flight events commute with the switch); barrier, `MigrationPermBEvery` (the new registry converges from every migrated reachable state), `MigrationPermA` (the old registry converges from the start), `MigrationFaithful` (the migration is injective on the reachable states) and `MigrationAmodM` (two orders of the same old events never migrate apart; searched only when the change is not safe online, `PermB-every` holds and `PermA` fails, and `Decided` only when a witness is found, which under `Faithful` is always) |
+| `Failed` | The key of the condition that decided a negative outcome; empty when safe online |
+| `Faithful`, `Collision` | Whether the migration is injective on the reachable states, and two old states with one image (`*MigrationCollision{State1, State2, Image}`) when it is not |
+| `LiveWitness` | Why the change is not safe online: a `*MigrationWitness{Condition, Start, Run1, Run2, Result1, Result2, Barrier}`, two runs of the same events from `Start` ending in different states of the new registry. A `MigrationRun{Before, InFlight, After}` applies `Before` under the old registry, switches with `InFlight` still in flight, then applies `After` (the in-flight events' translations first) under the new one |
+| `BarrierWitness` | Why the change is unsafe: two runs that both switch at a barrier and diverge. Set only when `Outcome` is `MigrationUnsafe` |
+| `Theorems` | The normalization-confluence theorems behind the outcome ([Theory §11.11](theory.md#1111-changing-a-running-system-migration)) |
+| `SearchStopped` | Set when the search for a `MigrationAmodM` witness stopped at the state limit |
+
+`CheckMigration` returns an error, not a report, for a registry declared with `Abstract` or with
+`Independent` pairs, more than 64 bits of state, an invariant without a `Repair`, an event map
+naming an event the registries lack, a migration or rule returning a state of another registry,
+a repair that does not terminate on a state a run reaches, or a side that reaches more than 2²⁰
+states.
 
 ---
 

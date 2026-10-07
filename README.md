@@ -105,6 +105,7 @@ WFC: repair terminates from every state. CC: every pair of events reaches the sa
 | Monotone cycles | The least fixed point, reached in any order | Opt-in `AllowMonotoneCycles`: monotonicity of every morphism and resolver, plus C1 and C2 | [Federation](docs/federation.md#escape-hatch-2-monotone-cycles) |
 | Coordinated cycles | The rest of the network, coordination-free; the normal form is unique given the plan's authority root | `CoordinationPlan` names the edges to coordinate; `BuildCoordinated` verifies the acyclic residual (not the coordination itself) | [Federation](docs/federation.md#escape-hatch-3-coordinate-the-obstruction) |
 | Projection deployments | Nodes that each run one registry and merge projections, once propagation completes | XU, reported in `FedReport.ProjectionSafe` and required with `RequireProjectionSafe`; acyclic, single-source targets only | [Deployment](docs/deployment.md#projection-deployments) |
+| A change of rules or schema, deployed while events are in flight | Every run that switches once from the old registry to the new one: at any time (safe online) or after draining (safe behind a barrier) | Not `Build`: `CheckMigration` checks the in-flight events against the migration and both registries on the states runs reach, and returns the outcome with a witness | [Deployment](docs/deployment.md#changing-a-running-system) |
 
 Every row assumes each event is delivered once and, if you declared only some pairs `Independent`, that each undeclared pair that does not commute arrives in causal order. `Build` names the events and pairs this applies to ([Deployment](docs/deployment.md#delivery)).
 
@@ -140,12 +141,12 @@ Verification is Go-only; a built machine exports to JSON and runs in any languag
 | [Getting started](docs/getting-started.md) | The tutorial: using machines, reading and writing state, combinator rules, independence declarations, keyed collections |
 | [Concepts](docs/concepts.md) | Why it works: invariants, compensation, events, WFC and CC, where CRDTs fit, a glossary |
 | [Federation](docs/federation.md) | Many registries: morphisms, resolvers, C1 and C2, cycles, coordination, certificates |
-| [Deployment](docs/deployment.md) | What your runtime must provide: delivery, causal order, shared logs, projection deployments, reset epochs |
+| [Deployment](docs/deployment.md) | What your runtime must provide: delivery, causal order, shared logs, projection deployments, reset epochs; checking a change before you deploy it |
 | [Scaling your model](docs/scaling.md) | Which reduction to use for a large model: collections, abstraction, or per-component checking, what combines, and what each refuses |
 | [Verification](docs/verification.md) | The report, the extracted oracles, assurance levels, compositional verification, abstraction, synthesis, performance, limitations |
 | [Reference](docs/reference.md) | `Report` and `FedReport` fields, errors, build options, the export format, the test suite |
 | [Theory](docs/theory.md) | Formal definitions and proofs, the paper's sections mapped to the code |
-| [Roadmap](docs/ROADMAP.md) | What is planned next: verifying realistic domains, checking a change before deploying it, a regime report |
+| [Roadmap](docs/ROADMAP.md) | What is planned next: verifying realistic domains further, the residue of the migration check, a regime report |
 | [Design notes](docs/design/) | [Architecture](docs/design/ARCHITECTURE.md), [certificates](docs/design/CERTIFICATE-DESIGN.md), [holonomy-minimal coordination](docs/design/HOLONOMY-COORDINATION-DESIGN.md) |
 | [CHANGELOG](CHANGELOG.md) | What changed in each release |
 

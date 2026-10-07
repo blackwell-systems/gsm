@@ -50,6 +50,7 @@ with a counterexample from the model you declared.
 | Collection + compositional | No | A template is always checked as one registry: no combined theorem is stated yet |
 | Abstraction + compositional | No | `Abstract` takes precedence and checks the registry over its representatives as a whole |
 | Any of these + federations | Partly | A collection cannot be a federation component, a registry inside a federation is checked whole (never per component), and federations refuse a component declared with `Abstract` |
+| Any of these + `CheckMigration` | No | `CheckMigration` enumerates the states runs reach in two plain registries (at most 2²⁰ on each side), so its cost is the reachable states, not the whole state space; it refuses a registry declared with `Abstract` and takes no collection or federation ([Deployment](deployment.md#changing-a-running-system)) |
 
 The unsupported combinations are not refused silently: the report says which path ran
 (`Report.GlobalReason` prints `Checked globally: ...` with the reason).

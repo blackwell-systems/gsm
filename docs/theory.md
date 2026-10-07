@@ -1318,6 +1318,123 @@ wider ranges.
 - **Shared read-only variables** and **validity per component** (`validK`, `rhoK`, which would drop
   the valid-zero-state precondition): covered by the theory, not implemented.
 
+### 11.11 Changing a Running System (Migration)
+
+**Implemented**: `CheckMigration` classifies a change from one registry to another as safe online,
+safe behind a barrier, unsafe with a witness, or unknown
+([Deployment](deployment.md#changing-a-running-system)). The theory is normalization-confluence
+[`Reconfiguration.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/Reconfiguration.v)
+(axiom-free; the notes are its `coq/docs/reconfiguration.md`), gap 20 of the
+[regime audit](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md).
+
+**Two models of the switch.** A run starts under configuration A, switches once to configuration
+B, and finishes under B. The switch migrates the state, and A-events still in flight become
+B-events through a translation τ. The theory states the result for two models:
+
+- **The rewriting model** (section `Switch`): A and B are governance rewrite systems under free
+  delivery, with compensation as a separate step, so a switch can migrate a state between an event
+  and its repair. The live condition (`live_exact`) has three parts: (B) CC1 and CC2 of B on what B
+  reaches from m(s) for every reachable s, transient states included; (S1) an in-flight raw event
+  commutes with the switch; (S2) the switch absorbs a compensation step. The barrier results are
+  `barrier_exact`, `barrier_exact_faithful` and `barrier_sufficient`, and `classify_finite` decides
+  the outcome on finite instances.
+- **The deterministic model** (section `Det`): any deterministic steps stepA and stepB, an
+  equivalence on B-states that stepB respects, a migration M and the translation τ, under free
+  delivery. A live run applies part of the A-events, in any order, under A, migrates, then applies
+  the translated rest together with the B-events, in any order; a barrier run applies all the
+  A-events first. `det_live_exact`: live convergence from s₀ iff PermB(M s₀) (every permutation of
+  B-events from M s₀ agrees) and DS1 (M(stepA e t) equals stepB (τ e) (M t) at every reachable t).
+  `det_barrier_exact`: barrier convergence iff PermB at M t for every reachable t and A converges
+  modulo M (two permutations of the same A-events reach states with equal images).
+  `det_barrier_faithful`: when M reflects and preserves the equivalences, the second part is A's
+  own permutation convergence, PermA(s₀). `det_live_implies_barrier`.
+
+**gsm's runtime is the deterministic model.** `Machine.Apply` repairs before it returns (eager
+compensation, §6.5), so a switch happens between two `Apply` calls and never migrates a raw state.
+`CheckMigration` instantiates `Det` with stepA = the old registry's `Apply` (an input other than the
+zero state normalized first, then the guarded effect, then repair until valid), stepB = the new
+registry's `Apply`, M = the new registry's `Normalize` after the migration, the equivalence on B
+equality (so its laws and `stepB_ext` hold trivially), and τ from the event map. For
+`det_barrier_faithful` the A-states are the states reachable from s₀, a set every step maps into
+itself, with equality as the equivalence: its hypothesis is then that M is injective on the
+reachable states. The rewriting model's conditions quantify over states gsm's runtime never
+migrates (transient ones) and over CC2, which gsm does not check (§6.5), so they are not gsm's
+exact condition, and gsm does not check them.
+
+**What gsm checks, and the theorem per outcome.** Every check enumerates the states runs reach from
+the start (at most 2²⁰ on each side), not every state.
+
+| gsm checks | Condition | Direction | Theorem |
+|---|---|---|---|
+| Every pair of B's events commutes at every state B reaches from M s₀ (`PermB-start`) | PermB(M s₀) | Exact: commutation on a set closed under every step gives every permutation, and a failure at y gives two permutations (the path to y, then the pair in both orders) that differ | `run_tequiv`, `perm_tequiv_total` (with D the reachable set) |
+| M(Apply_A(t, e)) = Apply_B(M t, τ e) at every reachable t and A-event e (`DS1`) | DS1 | Exact | (the definition) |
+| Both | Safe online | Exact, both ways | `det_live_exact`; safe online implies safe behind a barrier, `det_live_implies_barrier` |
+| Every pair of B's events commutes at every state B reaches from M t, for every reachable t (`PermB-every`) | PermB at every M t | Exact | `run_tequiv`, `perm_tequiv_total` |
+| Every pair of A's events commutes at every reachable state (`PermA`) | PermA(s₀) | Exact | `run_tequiv`, `perm_tequiv_total` |
+| `PermB-every` and `PermA` | Safe behind a barrier | Sufficient (equal A results have equal images, so the A part of `det_barrier_exact` holds); exact when `Faithful` holds | `det_barrier_exact`; `det_barrier_faithful` |
+| M injective on the reachable states (`Faithful`) | The hypothesis of `det_barrier_faithful` | Decided by enumeration | |
+| Two orders of the same A-events that migrate apart (`AmodM`, searched when `PermA` fails; under `Faithful` the first failure of `PermA` is one) | The A part of `det_barrier_exact` | A witness refutes barrier convergence; no witness decides nothing | `det_barrier_exact` |
+
+The outcomes:
+
+- **Safe online**: `PermB-start` and `DS1` hold. Exact (`det_live_exact`).
+- **Safe behind a barrier**: not safe online, shown by a witness, and `PermB-every` and `PermA` hold.
+  Sufficient always, exact under `Faithful` (`det_barrier_exact`, `det_barrier_faithful`).
+- **Unsafe**: a witness of two barrier runs that diverge, from a failure of `PermB-every`, or of
+  `PermA` under `Faithful` (whose two orders reach different states, which an injective M keeps
+  apart), or from the `AmodM` search. The witness certifies the outcome by itself.
+- **Unknown**: `PermA` fails, M is not injective, and the search found no witness. The A part of
+  `det_barrier_exact` quantifies over every pair of permutations, with no finite form mechanized
+  (gap 20, residue (c)), so gsm claims neither outcome. The search explores the pairs of states
+  reached by swapping two adjacent events at a reachable state and then applying the same events
+  to both; any two permutations are connected by adjacent swaps, so if every such pair has equal
+  images, A converges modulo M. That argument would make the search exact; it is not mechanized,
+  so gsm does not rely on it, and the differential test only checks it empirically.
+
+**Witnesses.** Each failure is turned into two runs from the start, replayed before the report is
+returned, the runs of the necessity proofs of `det_live_exact` and `det_barrier_exact`:
+
+- `PermB-start` at y, reached from M s₀ by w, with events b₁, b₂: switch at once, then w, b₁, b₂
+  against w, b₂, b₁ under B.
+- `DS1` at t, reached by u, with event e: u then e under A, then switch, against u under A, then
+  switch with e in flight, then τ e under B.
+- `PermB-every` at y, reached from M t: u to t under A, switch, then the two orders as above.
+- `PermA` or `AmodM`: l, a₁, a₂, r against l, a₂, a₁, r under A, then switch, with nothing after.
+
+**The theory's instances, in gsm's model.** The instances are stated in the rewriting model; their
+gsm outcomes follow from the `Det` theorems and are checked by the tests named.
+
+| Instance | Rewriting model | gsm's model | Test |
+|---|---|---|---|
+| `cap_raise` (cap 5 to 10, an add in flight) | Barrier only; (S2) fails at the raw 6 | Safe behind a barrier; `DS1` fails at 5, the same results, 5 versus 6 | `TestCheckMigration_CapRaise` |
+| `doubling_migration` | Barrier only; (S1) fails at 0 | Safe behind a barrier; `DS1` fails at 0, 2 versus 1 | `TestCheckMigration_DoublingMigration` |
+| `migrated_transient` | Barrier only; (B) fails at m 1 only | Safe online: no gsm run migrates the raw 1 | `TestCheckMigration_MigratedTransientIsOnlineInGsmModel` |
+| `forgetful_migration` | Online, though A diverges | Safe online, `PermA` failing | `TestCheckMigration_ForgetfulMigration` |
+| `rescaled_cap` | Online from every start | Safe online from every start | `TestCheckMigration_RescaledCap` |
+| `lww_target` | Unsafe | Unsafe, a `PermB-every` witness | `TestCheckMigration_LWWTargetUnsafe` |
+
+`migrated_transient` is the case where the models differ: its divergence needs a switch between an
+event and its repair, which gsm's runtime does not have. Beyond the instances, the tests cover an
+A divergence a faithful migration keeps (unsafe), a non-injective migration that absorbs it
+(unknown, never unsafe) and one that does not (unsafe, with an `AmodM` witness), and
+`TestCheckMigration_DifferentialRandom` compares the classification with a brute-force enumeration
+of live and barrier runs on random small registries, migrations and event maps, replaying every
+witness in an independent model of `Apply`.
+
+**Not claimed, or not implemented.**
+
+- **A switch between an event and its repair**: the rewriting model, not gsm's runtime.
+- **Federations**: a topology change under `FedMachine` semantics is exact in the theory
+  (`fed_live_exact`, `fed_barrier_exact`; `late_edge`, `late_edge_fresh`), and `FedMachine.Apply` is
+  a deterministic step to which `Det` applies, but gsm does not implement it (a migration needs a
+  way to build a `FedState`).
+- **Collections and abstraction**: no theorem combines the switch with symmetry or abstraction; a
+  registry declared with `Abstract` is refused.
+- **Declared pairs, causal and at-least-once delivery across the switch** (gap 20, residue (b)): a
+  registry with `Independent` pairs is refused.
+- **Projection deployments**, where propagation is itself in flight (gap 20, residue (a)), and
+  cyclic deployments of that kind.
+
 ---
 
 ## 12. Relationship to the Paper
