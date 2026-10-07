@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-06
+
+A scaling release. gsm can now verify models far larger than its 2²⁰-state enumeration, each through
+a reduction with a mechanized theorem saying the small check decides the real model: keyed
+collections (check one item, conclude for any number of keys), abstraction over integer variables
+(check a few representative values, conclude for every value), and per-component checking by
+default for registries too large to enumerate. A new guide, `docs/scaling.md`, says which to use.
+No exported identifier is removed or changed; nothing that built on v0.14.0 fails to build.
+
 ### Added
 
 - **Docs: scaling guide.** New `docs/scaling.md` (linked from the README and Verification): which
@@ -96,6 +105,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `alo_cutoff`, `cross_commute`, `idem_reduces`, `declared_cutoff`; the aggregate boundary
   `aggregate_diverges`); `docs/theory.md` §11.8 maps each guarantee to its theorem and explains
   why gsm's per-key repair makes every reported condition cutoff 1.
+
+### Breaking / behavior changes (upgrading from v0.14.0)
+
+None that break a build. What can differ:
+
+- **`Build` accepts registries it used to refuse.** A registry too large to enumerate whose rules are
+  combinators and that splits into footprint components is now checked per component instead of
+  failing. Registries `Build` already accepted are checked exactly as before.
+- **Every report from a whole-machine check gains a line**, `Checked globally: <reason>`
+  (`Report.GlobalReason`). Parse the fields, not the text.
+- **`BuildCompositional`:** a combinator read outside an event's write set now joins the variables'
+  components instead of being refused (so the guarded shipment fails CC, as under `Build`);
+  `MaxRepairLen` is now the sum of the components' deepest chains; `NotIdempotent`, `Saturations` and
+  declared-only obligations are now reported; an identity event is accepted. See Changed below.
 
 ### Changed
 
@@ -1198,7 +1221,8 @@ Federated registry networks: gsm now composes multiple registries connected by d
 - Full test suite covering WFC, CC, compensation, and failures
 - Documentation with usage examples, API reference, and design rationale
 
-[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/blackwell-systems/gsm/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/blackwell-systems/gsm/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/blackwell-systems/gsm/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/blackwell-systems/gsm/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/blackwell-systems/gsm/compare/v0.11.0...v0.12.0
