@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Docs: scaling guide.** New `docs/scaling.md` (linked from the README and Verification): which
+  reduction fits a large model (collections, abstraction, per-component checking), the questions to
+  ask about your model, which combinations are supported, what each refuses and why, the assurance
+  each gives, and what to do when none fits.
 - **Compositional checking by default (roadmap item 1c).** `Build` now checks a registry too large
   to enumerate (more than 2²⁰ states) per footprint component when every rule is a combinator, the
   registry splits into more than one component, every component fits 20 bits and the zero state is

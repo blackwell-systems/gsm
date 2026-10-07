@@ -141,6 +141,7 @@ Verification is Go-only; a built machine exports to JSON and runs in any languag
 | [Concepts](docs/concepts.md) | Why it works: invariants, compensation, events, WFC and CC, where CRDTs fit, a glossary |
 | [Federation](docs/federation.md) | Many registries: morphisms, resolvers, C1 and C2, cycles, coordination, certificates |
 | [Deployment](docs/deployment.md) | What your runtime must provide: delivery, causal order, shared logs, projection deployments, reset epochs |
+| [Scaling your model](docs/scaling.md) | Which reduction to use for a large model: collections, abstraction, or per-component checking, what combines, and what each refuses |
 | [Verification](docs/verification.md) | The report, the extracted oracles, assurance levels, compositional verification, abstraction, synthesis, performance, limitations |
 | [Reference](docs/reference.md) | `Report` and `FedReport` fields, errors, build options, the export format, the test suite |
 | [Theory](docs/theory.md) | Formal definitions and proofs, the paper's sections mapped to the code |
