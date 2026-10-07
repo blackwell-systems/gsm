@@ -1536,9 +1536,16 @@ constants are the cap and the level's bounds (cutoff 3).
   against them, so it stays in `ord_frag`). That registry is in the model, and on the values in
   range its events are gsm's; outside the ranges an event does nothing. So a pass covers every
   value in range, and a failure has its parameter values in range. Every assignment outside the
-  ranges is the same event (the identity before repair), so gsm checks it once per parameterized
-  event instead of once per representative assignment: checking one function once instead of
-  several times. A copy of a parameter into a variable must keep its value in range (the
+  ranges is the same event, repair alone (`range_out_gov`, `range_same_step` in
+  `EventCollapse.v`), so gsm checks it once per parameterized event instead of once per
+  representative assignment: over gsm's list, the in-range assignments and one out-of-range one
+  (`gsm_params_ok`), the CC1 and idempotence checks return the full checks' boolean
+  (`range_cc1v`, `range_idemv`; general form `cover_cc1v`, `cover_idemv`), so they are exact for
+  every integer state and parameter value (`range_cc1_exact`, `range_gsm_exact`,
+  `range_idem_exact`, `range_idem_runtime`). Given repair within K steps, which Build checks
+  first, the out-of-range assignment is redundant (`range_inonly_cc1_exact`); without that check
+  it is needed (`slow_diverges`). The same theorems cover checking a parameterless event once and
+  padding a family with fewer than m parameters (`range_prefix_step`). A copy of a parameter into a variable must keep its value in range (the
   parameter's range inside the variable's), so no write saturates, as for variable copies. As in
   §11.9, a representative state may lie outside the variables' ranges, and a failure there is
   reported with `CCFailure.Abstract.InRange` false and not certified.
