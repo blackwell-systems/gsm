@@ -1,5 +1,7 @@
 package gsm
 
+import "fmt"
+
 // Combinator vocabulary (prototype): express invariants and events as DATA built
 // from a fixed, gsm-owned set of combinators, instead of arbitrary Go closures.
 // It still reads as Go (`Le(V(a), Lit(3))`, `Set(a, Add(V(a), Lit(1)))`), but the
@@ -257,6 +259,7 @@ func dedup(idx ...[]int) []int {
 // unique. The footprint is derived from the variables the
 // predicate and transform mention, so it is conformant by construction.
 func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
+	noArgs(fmt.Sprintf("invariant %q", name), holds, repair)
 	repair = repair.clone()
 	fp := dedup(holds.vars(), repair.readVars(), repair.writeVars())
 	r.invariants = append(r.invariants, invariantDef{
@@ -273,6 +276,7 @@ func (r *Registry) DeclInvariant(name string, holds Pred, repair Transform) {
 // derived from the assignments, so Writes need not be declared separately. The
 // name must be unique within the registry (see Registry.Event).
 func (r *Registry) DeclEvent(name string, effect Transform) {
+	noArgs(fmt.Sprintf("event %q", name), nil, effect)
 	effect = effect.clone()
 	r.events = append(r.events, eventDef{
 		name:      name,
@@ -285,6 +289,7 @@ func (r *Registry) DeclEvent(name string, effect Transform) {
 // DeclEventGuarded is DeclEvent with a precondition; the event is a no-op when the
 // guard is false. The name must be unique within the registry (see Registry.Event).
 func (r *Registry) DeclEventGuarded(name string, guard Pred, effect Transform) {
+	noArgs(fmt.Sprintf("event %q", name), guard, effect)
 	effect = effect.clone()
 	r.events = append(r.events, eventDef{
 		name:      name,

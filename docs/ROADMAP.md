@@ -3,26 +3,26 @@
 What gsm plans next, and why. Each item is backed by a theory item in normalization-confluence's
 [`docs/ROADMAP.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/docs/ROADMAP.md).
 gsm ships a feature only when its guarantee is mechanized there, so the theory item lands first.
-Items 1a (symmetry), 1b (abstraction, the comparison route), 1c (compositional checking by
-default), 2 (checking a change before you deploy it, for single registries) and 3 (the regime
-report) are implemented; nothing else here is implemented yet.
+Items 1a (symmetry), 1b (abstraction, the comparison route, with event parameters), 1c
+(compositional checking by default), 2 (checking a change before you deploy it, for single
+registries) and 3 (the regime report) are implemented; nothing else here is implemented yet.
 
 ## Coverage
 
 [Invariant coverage](invariant-coverage.md) measures what these items buy. Of 116 business
-invariants across ten domains, gsm expresses 95% today and verifies 41% at production scale:
+invariants across ten domains, gsm expresses 95% today and verifies 55% at production scale:
 rules about one entity at a time, through collections or one machine per entity, and projections
-across services. No balance, amount or cross-item rule verifies at scale, and only 4 of 16 totals
-and counts do. Ranked by the invariants each would move to verified at scale, the open parts of
+across services. Event parameters, the top-ranked extension, are implemented (1b) and moved 17
+invariants from toy scale to production scale: registers, owners, deadlines and snapshots whose
+values arrive on events. No balance or amount rule verifies at scale, and only 4 of 16 totals and
+counts do. Ranked by the invariants each would move to verified at scale, the open parts of
 item 1 come in this order:
 
-1. **Event parameters** (1b, deferred): 17 invariants alone, and on a route for 51. The theory
-   already has them (the cutoff n + 2m).
-2. **The linear route** (1b, deferred): with event parameters, 30 in all.
-3. **Aggregates** (1a, not covered): with both, 43, taking gsm from 41% to 78%. This one needs a
-   new theorem.
+1. **The linear route** (1b, deferred): 13 invariants alone, now that amounts arrive on events.
+2. **Aggregates** (1a, not covered): 13 alone; with the linear route, 26, taking gsm from 55% to
+   78%. This one needs a new theorem.
 
-Cross-item relational rules (pairs of items, not on this roadmap) come fourth. Composing the
+Cross-item relational rules (pairs of items, not on this roadmap) come third. Composing the
 reductions (1c, deferred) moves one catalogued invariant, and partial-order reduction (1d) moves
 none: it lowers the cost of checks over reachable states, not the domain sizes a rule needs.
 
@@ -74,15 +74,26 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
   normalization-confluence `coq/AbstractionCutoff.v`; see
   [Verification](verification.md#abstraction-check-relationships-not-values) and
   [Theory §11.9](theory.md#119-integer-variables-abstraction). The WFC transfer is `term_abs`; the
-  CC1 transfer for gsm's model (CC1 at valid states, events without parameters) is
-  `cc1_valid_abs` and `gsm_abs_exact` (normalization-confluence `coq/AbstractionGsm.v`), with
-  `gsm_abs_sound` for the runtime; `NotIdempotent` is exact for every value (`idem_valid_abs`).
+  CC1 transfer for gsm's model (CC1 at valid states) is `cc1_valid_abs` and `gsm_abs_exact`
+  (normalization-confluence `coq/AbstractionGsm.v`), with `gsm_abs_sound` for the runtime;
+  `NotIdempotent` is exact for every value (`idem_valid_abs`).
+- **Implemented: event parameters.** An event declares integer parameters
+  (`r.On("withdraw").Param("amount", 1, 5)`, read with `Arg`), applied with
+  `Machine.ApplyWith`. Without `Abstract`, the event is the family of its instances, one event
+  per value, each checked by `Build` (at most 1024 per event). With `Abstract`, a parameter that
+  is only compared and copied is checked at representative values with cutoff N = n + 2m: every
+  statement of `AbstractionGsm.v` is for general m. Arithmetic on a parameter is refused under
+  `Abstract`. See [Getting started](getting-started.md#events-with-parameters) and
+  [Theory §11.12](theory.md#1112-event-parameters).
 - **Deferred.**
   - **The linear route**: rules that add, subtract or multiply by a literal, through formulas an
     SMT solver decides (`lin_exact`). Not started in gsm: `Int` writes saturate, which the
     formulas over the integers do not model, and the formula generator needs a differential test
     against an extraction of the Coq construction. gsm takes no solver dependency.
-  - **Event parameters**: gsm events carry none (m = 0); with parameters the cutoff is n + 2m.
+  - **Parameters with arithmetic, at scale**: an event that adds its parameter to a variable
+    (a deposit) is checked only instance by instance. The difference route of the theory
+    (`DifferenceAbstraction.v`) is stated for events without parameters; its extension to
+    parameters is theory work in progress.
   - **One state per order type** (`cc1_order_type`): would shrink the representative states from
     |reps|^n to the ordered Bell numbers.
   - **Federations**: a component declared with `Abstract` is refused.

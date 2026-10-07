@@ -465,6 +465,10 @@ func newMigCheck(from, to *Registry, migrate Migration, events map[string]string
 	for _, ev := range from.events {
 		fromIdx[ev.name] = true
 	}
+	events, err := expandFamilyMap(from, to, events)
+	if err != nil {
+		return nil, err
+	}
 	for k := range events {
 		if !fromIdx[k] {
 			return nil, fmt.Errorf("gsm: CheckMigration: event map names %q, which is not an event of %q", k, from.name)
@@ -1141,4 +1145,57 @@ func amodMCondition(results []*startResult, state func(uint64) string, desc stri
 		}
 	}
 	return out
+}
+
+// expandFamilyMap returns the event map with each entry that maps a parameterized event of
+// from to one of to expanded into its instances: old(v...) translates to new(v...), for
+// every instance of old. The two events must declare the same number of parameters, and
+// every value of old's must be a value of new's. Other entries are kept as they are; an
+// instance may also be mapped on its own, which overrides the family entry.
+func expandFamilyMap(from, to *Registry, events map[string]string) (map[string]string, error) {
+	var out map[string]string
+	for k, v := range events {
+		fi := from.familyByName(k)
+		if fi < 0 {
+			continue
+		}
+		f := &from.families[fi]
+		ti := to.familyByName(v)
+		if ti < 0 {
+			return nil, fmt.Errorf("gsm: CheckMigration: event map translates the parameterized event %q of %q to %q, "+
+				"which is not a parameterized event of %q (map each instance of %q instead)", k, from.name, v, to.name, k)
+		}
+		g := &to.families[ti]
+		if len(g.params) != len(f.params) {
+			return nil, fmt.Errorf("gsm: CheckMigration: event map translates %s of %q to %s of %q, which declares a "+
+				"different number of parameters", f.signature(), from.name, g.signature(), to.name)
+		}
+		for i, p := range f.params {
+			if q := g.params[i]; p.Min < q.Min || p.Max > q.Max {
+				return nil, fmt.Errorf("gsm: CheckMigration: event map translates %s of %q to %s of %q, but parameter %s "+
+					"(%d..%d) has values outside %s (%d..%d)", f.signature(), from.name, g.signature(), to.name, p.Name,
+					p.Min, p.Max, q.Name, q.Min, q.Max)
+			}
+		}
+		if out == nil {
+			out = make(map[string]string, len(events))
+			for k2, v2 := range events {
+				if from.familyByName(k2) < 0 {
+					out[k2] = v2
+				}
+			}
+		}
+		for _, ev := range from.events {
+			if ev.family != fi+1 {
+				continue
+			}
+			if _, own := events[ev.name]; !own {
+				out[ev.name] = Instance(v, ev.args...)
+			}
+		}
+	}
+	if out == nil {
+		return events, nil
+	}
+	return out, nil
 }

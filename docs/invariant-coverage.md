@@ -7,9 +7,11 @@ classifies each on two axes: can gsm **express** it today, and can gsm **verify*
 production scale today. It then ranks the extensions that would move the most invariants to
 "verified at production scale".
 
-It describes gsm v0.15.0 plus the unreleased changes on `main` (the regime report and
-`CheckMigration`). Sixteen of the classifications are demonstrated by programs on this page that
-the doc test runs.
+It describes gsm v0.15.0 plus the unreleased changes on `main` (the regime report,
+`CheckMigration` and events with parameters). Nineteen of the classifications are demonstrated by
+programs on this page that the doc test runs. The page is generated from a data file
+([`docs/coverage/`](coverage/README.md)): edit the catalog or the template there and rerun the
+generator, never this page by hand.
 
 ## Contents
 
@@ -31,31 +33,34 @@ the doc test runs.
 | ... with a closure | 4 | 3% |
 | ... through an encoding | 67 | 58% |
 | Not expressible | 6 | 5% |
-| **Verifiable at production scale today** | **47** | **41%** |
-| Verifiable only at toy scale | 62 | 53% |
+| **Verifiable at production scale today** | **64** | **55%** |
+| Verifiable only at toy scale | 45 | 39% |
 | Not verifiable at any scale | 7 | 6% |
-| Verifiable at scale, excluding lifecycle rules and delivery or deadline guarantees | 32 of 95 | 34% |
+| Verifiable at scale, excluding lifecycle rules and delivery or deadline guarantees | 49 of 95 | 52% |
 
 - **gsm can state almost every invariant, at some size.** 95% are expressible: with
-  combinators, with a closure, or through an encoding (one event per value, one registry holding
-  the items a rule relates, facts recorded as flags). The 6 that are not ask for
+  combinators, with a closure, or through an encoding (an owner or last-writer-wins register, one
+  registry holding the items a rule relates, facts recorded as flags). The 6 that are not ask for
   something outside convergence by compensation: a deadline, an answer that must never be revised,
   or exactly-once delivery by the transport. One more (a two-way sync between services) is
   expressible only with coordination that gsm assumes rather than checks.
-- **It verifies 41% at production scale.** Each of these is a rule about one entity at a
-  time (an order, a payment, a hold, a request), checked through a collection or by reusing one
-  machine per entity, or a projection across services checked as a federation. Every lifecycle
-  rule in the catalog is in this group. Without lifecycle rules and delivery or deadline
-  guarantees, 34% (32 of 95) of the harder kinds verify at scale.
-- **No balance, amount or cross-item rule verifies at scale**, and of the totals and counts only
-  those that fit two small counters per entity do (4 of 16). Arithmetic over wide ranges, time and
-  precedence, cross-item constraints and aggregates block 62 invariants (53%) that
-  gsm checks only at toy scale.
-- **The biggest single lever is event parameters.** gsm events carry no values, so an amount, a
-  timestamp, a version or an id cannot arrive with an event. The theory already has them (the
-  abstraction cutoff n + 2m). Alone they move 17 invariants to verified at scale;
-  together with the linear route, 30; with the linear route and an aggregate reduction,
-  43, which would take gsm from 41% to 78%. All the listed extensions
+- **It verifies 55% at production scale.** Each of these is a rule about one entity at a
+  time (an order, a payment, a hold, a request, a room-night), checked through a collection or by
+  reusing one machine per entity, or a projection across services checked as a federation. Every
+  lifecycle rule in the catalog is in this group. Events with parameters added 17: registers,
+  owners, deadlines and snapshots whose values arrive on events and are only compared and copied,
+  checked by abstraction over values as wide as the domain needs. Without lifecycle rules and
+  delivery or deadline guarantees, 52% (49 of 95) of the harder kinds
+  verify at scale.
+- **No balance or amount rule verifies at scale**, cross-item rules only where a key turns them
+  into one owner register (2 of 11), and of the totals and counts only those that fit two small
+  counters per entity (4 of 16). Arithmetic over wide ranges, aggregates and cross-item
+  constraints block most of the 45 invariants (39%) that gsm checks only at toy scale.
+  Parameters can carry an amount, but abstraction refuses arithmetic on it, and expanding every
+  value of an amount is a toy.
+- **The next levers are the linear route and an aggregate reduction.** Each moves
+  13 invariants alone; together, LIN + AGG (26); with cross-item relational constraints,
+  36, which would take gsm from 55% to 86%. All the listed extensions
   together reach 93%; the remaining 8 need coordination, a liveness property, or
   nonlinear arithmetic.
 
@@ -119,13 +124,15 @@ coordination, a liveness property, a transport property, reductions that do not 
 
 **Would move with.** For each blocked row, the smallest sets of extensions (from
 [Ranked extensions](#ranked-extensions)) that would make the faithful model verifiable at
-production scale, written `PARAM + LIN`; alternatives are joined with "or". An extension "moves"
+production scale, written `LIN + AGG`; alternatives are joined with "or". Event parameters
+(`PARAM`) were the first extension on this list and are implemented, so they no longer appear in
+the sets. An extension "moves"
 a row alone when one of the row's sets is that extension by itself. The counts assume each
 extension ships with its theorem as sketched there, and that the rest of the row's model stays
 within the limits. They are estimates of reach, not implementations.
 
-**Validation.** Sixteen programs below build the models behind representative rows (six that
-verify at scale, seven that verify only as toys, three that cannot be expressed) and fail if gsm's
+**Validation.** Nineteen programs below build the models behind representative rows (ten that
+verify at scale, six that verify only as toys, three that cannot be expressed) and fail if gsm's
 behavior changes. Each is a `run` block the doc test executes, and the oracle job's
 example-machine gate checks every machine they make with the extracted checkers
 (`.github/oracle/machines.txt`).
@@ -137,26 +144,30 @@ docs it links.
 
 - **One registry's state is one 64-bit word.** A registry cannot hold more than 64 bits of state
   at all ([T3](#t3)), and `Build` enumerates at most 20 bits whole. A rule that relates many items
-  (every room-night of a hotel, every SKU of a warehouse) needs one registry holding them, so it is
-  expressible only at toy scale.
-- **Events carry no values.** gsm events have no parameters (the theory's m = 0,
-  [Theory §11.9](theory.md#119-integer-variables-abstraction)), so an amount, a timestamp, a
-  version or an id has to be spelled as one event per value. That is fine for a few values and
-  impossible for money or time.
-- **Abstraction compares and copies.** `Abstract` refuses arithmetic, `Bool` and `Enum` variables
-  and closures, and checks |representatives|ⁿ states, so it suits a few wide values fixed at
-  creation and compared ([V5](#v5)), not a balance that moves ([T2](#t2)).
+  (every SKU of a warehouse, every reservation that could claim a room-night) needs one registry
+  holding them, so it is expressible only at toy scale, unless a key turns it into one register
+  per item ([V7](#v7)).
+- **Events carry values.** An event declares integer parameters
+  ([Getting started](getting-started.md#events-with-parameters)). Without `Abstract` each value is
+  an event of its own, at most 1024 per event, which is fine for a few values and a toy for money
+  or time. With `Abstract`, a parameter that is only compared and copied is checked at a few
+  representative values, whatever its range ([Theory §11.12](theory.md#1112-event-parameters)).
+- **Abstraction compares and copies.** `Abstract` refuses arithmetic (on variables and parameters
+  alike), `Bool` and `Enum` variables and closures, and checks |representatives|ⁿ states, so it
+  suits a few wide values fixed at creation or carried by an event and compared or copied
+  ([V5](#v5), [V7](#v7) to [V10](#v10)), not a balance that moves ([T2](#t2)).
 - **A count that rises and falls must be two counters.** One bounded counter that one event
-  increments and another decrements fails CC at its bound, whatever the range ([T6](#t6)). Two
+  increments and another decrements fails CC at its bound, whatever the range ([T5](#t5)). Two
   counters that only rise commute, but each must cover lifetime totals, which doubles the bits.
 - **A federation target cannot react to its authority.** M1 requires the overwrite alone to keep
   the target valid, so a target invariant that repairs its own state from a shared fact is refused
   ([V6](#v6)). Cross-service rules verify as projections, or in one registry holding both facts.
 - **A closure sees outside data once.** A collection runs the template's tables, so a closure that
-  reads a catalog or a rate reads it at build time ([T7](#t7)). Outside data has to enter as state.
+  reads a catalog or a rate reads it at build time ([T6](#t6)). Outside data has to enter as state,
+  or on an event ([V10](#v10)).
 - **Convergence hides arrival order.** A rule whose outcome depends on which of two facts arrived
-  first is refused ([T4](#t4)); "which happened first in real time" has to be a value in the state,
-  which needs event parameters to scale.
+  first is refused ([V8](#v8)); "which happened first in real time" has to be a value, carried by
+  the event as a parameter and compared with a deadline in the state.
 - **One machine serves every entity.** A `Machine` is a function of a `State`; an application
   keeps one state per order, payment or request, and `Build`'s result holds for each. A rule about
   one entity therefore verifies at scale when that entity's model passes a path, whether or not it
@@ -174,14 +185,16 @@ docs it links.
 | Path | Invariants |
 |---|---:|
 | collection | 35 |
+| Abstract | 18 |
 | federation | 6 |
 | Build | 4 |
-| Abstract | 1 |
 | CheckMigration | 1 |
 
-Collections and per-entity machines carry the result; abstraction carries one row (a credit-limit
-hold over amounts fixed at creation) and per-component checking none. Per-component checking was
-never the path for a row, because every per-entity model that verifies fits `Build` whole, and
+Collections and per-entity machines carry the result. Abstraction carries 18 rows: a credit-limit
+hold over amounts fixed at creation, and the 17 rows whose values arrive on events as parameters
+(owner and last-writer-wins registers, deadlines, versions and snapshots, per entity or per key).
+Per-component checking carries none: it was never the path for a
+row, because every per-entity model that verifies fits `Build` whole, and
 every model too large for it is blocked by arithmetic, aggregation or the 64-bit word first.
 
 ### By kind
@@ -191,25 +204,25 @@ every model too large for it is blocked by arithmetic, aggregation or the 64-bit
 | Lifecycle and status rules | 15 | 15 | 0 | 0 |
 | Ordering ("only moves forward") | 5 | 4 | 1 | 0 |
 | Referential and cross-service | 12 | 9 | 2 | 1 |
-| Uniqueness | 11 | 5 | 6 | 0 |
-| Temporal (expiry, windows, "never twice", precedence) | 25 | 10 | 15 | 0 |
+| Uniqueness | 11 | 9 | 2 | 0 |
+| Temporal (expiry, windows, "never twice", precedence) | 25 | 21 | 4 | 0 |
 | Totals, counts and aggregates | 16 | 4 | 12 | 0 |
 | Balances and amounts with arithmetic | 15 | 0 | 15 | 0 |
-| Cross-item (double booking, overlap) | 11 | 0 | 11 | 0 |
+| Cross-item (double booking, overlap) | 11 | 2 | 9 | 0 |
 | Delivery, deadline and no-revision guarantees | 6 | 0 | 0 | 6 |
 
 ### By blocking reason
 
 | Blocking reason | Invariants | Share of the blocked |
 |---|---:|---:|
-| arithmetic over wide ranges | 17 | 25% |
-| history or time | 15 | 22% |
-| cross-item constraint | 11 | 16% |
-| aggregate across items | 10 | 14% |
-| unbounded or relational data | 8 | 12% |
+| arithmetic over wide ranges | 17 | 33% |
+| history or time | 4 | 8% |
+| cross-item constraint | 9 | 17% |
+| aggregate across items | 10 | 19% |
+| unbounded or relational data | 4 | 8% |
 | closure prevents reductions | 0 | 0% |
-| other (needs coordination 4, liveness 2, transport 1, reductions do not combine 1) | 8 | 12% |
-| **Total blocked** | **69** | |
+| other (needs coordination 4, liveness 2, transport 1, reductions do not combine 1) | 8 | 15% |
+| **Total blocked** | **52** | |
 
 "Closure prevents reductions" is never the first blocker. Closures appear in rows that verify
 (collection templates are enumerated, so closures are fine there) and in rows that need
@@ -219,16 +232,16 @@ multiplication or rounding, which are blocked by arithmetic first.
 
 | Domain | Invariants | Expressible | Yes at scale | Toy only | No | Main blocker |
 |---|---:|---:|---:|---:|---:|---|
-| Inventory and warehouse | 11 | 11 | 3 (27%) | 8 | 0 | arithmetic over wide ranges (3), aggregate across items (2) |
-| Orders and fulfillment | 12 | 11 | 7 (58%) | 4 | 1 | arithmetic over wide ranges (2), aggregate across items (1) |
-| Payments, wallets and ledgers | 13 | 12 | 4 (31%) | 8 | 1 | arithmetic over wide ranges (5), aggregate across items (1) |
-| Bookings and reservations | 14 | 12 | 6 (43%) | 6 | 2 | cross-item constraint (3), history or time (3) |
+| Inventory and warehouse | 11 | 11 | 5 (45%) | 6 | 0 | arithmetic over wide ranges (3), aggregate across items (2) |
+| Orders and fulfillment | 12 | 11 | 8 (67%) | 3 | 1 | arithmetic over wide ranges (2), aggregate across items (1) |
+| Payments, wallets and ledgers | 13 | 12 | 5 (38%) | 7 | 1 | arithmetic over wide ranges (5), aggregate across items (1) |
+| Bookings and reservations | 14 | 12 | 10 (71%) | 2 | 2 | cross-item constraint (2), other (2) |
 | Loyalty points | 10 | 10 | 5 (50%) | 5 | 0 | history or time (2), arithmetic over wide ranges (1) |
-| Subscriptions and billing | 10 | 10 | 4 (40%) | 6 | 0 | arithmetic over wide ranges (4), history or time (1) |
-| Approvals and workflows | 10 | 10 | 6 (60%) | 4 | 0 | history or time (3), aggregate across items (1) |
-| Access control and quotas | 11 | 11 | 2 (18%) | 9 | 0 | unbounded or relational data (3), history or time (2) |
-| Scheduling and capacity | 10 | 10 | 2 (20%) | 8 | 0 | cross-item constraint (6), aggregate across items (1) |
-| Multi-service consistency | 15 | 13 | 8 (53%) | 4 | 3 | other (4), history or time (2) |
+| Subscriptions and billing | 10 | 10 | 5 (50%) | 5 | 0 | arithmetic over wide ranges (4), aggregate across items (1) |
+| Approvals and workflows | 10 | 10 | 8 (80%) | 2 | 0 | aggregate across items (1), history or time (1) |
+| Access control and quotas | 11 | 11 | 4 (36%) | 7 | 0 | unbounded or relational data (2), arithmetic over wide ranges (2) |
+| Scheduling and capacity | 10 | 10 | 3 (30%) | 7 | 0 | cross-item constraint (5), aggregate across items (1) |
+| Multi-service consistency | 15 | 13 | 11 (73%) | 1 | 3 | other (4) |
 
 Approvals, orders and multi-service consistency score highest because their rules are mostly about
 one entity's lifecycle. Access control, scheduling and inventory score lowest: quotas, rolling
@@ -237,67 +250,53 @@ windows, overlapping intervals and quantities on hand are arithmetic, time and c
 ## Ranked extensions
 
 Each candidate, with the number of catalogued invariants it would move to "verified at production
-scale". **Alone** counts rows one of whose minimal sets is that extension by itself; **with PARAM**
-counts rows moved by that extension and event parameters together; **on some route** counts rows
-where it appears in some minimal set; **greedy gain** is what it adds when extensions are added
+scale", now that event parameters are implemented. **Alone** counts rows one of whose minimal sets
+is that extension by itself (with parameters, which every set may now use); **on some route**
+counts rows where it appears in some minimal set; **greedy gain** is what it adds when extensions are added
 in the order of the table, each time picking the one that moves the most.
 
-| Rank | Extension | Alone | With PARAM | On some route | Greedy gain | Theory difficulty |
-|---:|---|---:|---:|---:|---:|---|
-| 1 | Event parameters (`PARAM`) | 17 | - | 51 | +17 | Low (in the mechanized model already) |
-| 2 | General linear arithmetic (`LIN`) | 0 | 30 | 15 | +13 | Medium (theorem exists; solver and saturation open) |
-| 3 | Aggregate reduction (counter abstraction) (`AGG`) | 5 | 30 | 19 | +13 | High (new theorem) |
-| 4 | Cross-item relational constraints (`XREL`) | 0 | 22 | 11 | +10 | High (new theorem) |
-| 5 | Set and uniqueness constraints (`SET`) | 0 | 19 | 3 | +3 | Medium to high |
-| 6 | Time and expiry encodings (`TIME`) | 5 | 18 | 7 | +3 | Medium (PARAM plus DIFF) |
-| 7 | Difference-constraint arithmetic (`DIFF`) | 4 | 22 | 6 | +1 | Medium |
-| 8 | Combining reductions (`COMB`) | 1 | 18 | 1 | +1 | Low to medium |
-| 9 | A larger enumeration limit (`BITS`) | 2 | 19 | 2 | +0 | None (engineering) |
-| 10 | History encoding helpers (`HIST`) | 0 | 17 | 0 | +0 | None (sugar) |
+| Rank | Extension | Alone | On some route | Greedy gain | Theory difficulty |
+|---:|---|---:|---:|---:|---|
+| 1 | General linear arithmetic (`LIN`) | 13 | 15 | +13 | Medium (theorem exists; solver and saturation open) |
+| 2 | Aggregate reduction (counter abstraction) (`AGG`) | 13 | 19 | +13 | High (new theorem) |
+| 3 | Cross-item relational constraints (`XREL`) | 5 | 11 | +10 | High (new theorem) |
+| 4 | Set and uniqueness constraints (`SET`) | 2 | 3 | +3 | Medium to high |
+| 5 | Time and expiry encodings (`TIME`) | 1 | 3 | +3 | Medium (PARAM plus DIFF) |
+| 6 | Difference-constraint arithmetic (`DIFF`) | 5 | 6 | +1 | Medium |
+| 7 | Combining reductions (`COMB`) | 1 | 1 | +1 | Low to medium |
+| 8 | A larger enumeration limit (`BITS`) | 2 | 2 | +0 | None (engineering) |
+| 9 | History encoding helpers (`HIST`) | 0 | 0 | +0 | None (sugar) |
 
 Cumulative, in the greedy order:
 
 | Step | Add | Invariants moved by this step | Cumulative yes at scale |
 |---:|---|---:|---:|
-| 1 | PARAM | +17 | 64 (55%) |
-| 2 | LIN | +13 | 77 (66%) |
-| 3 | AGG | +13 | 90 (78%) |
-| 4 | XREL | +10 | 100 (86%) |
-| 5 | SET | +3 | 103 (89%) |
-| 6 | TIME | +3 | 106 (91%) |
-| 7 | DIFF | +1 | 107 (92%) |
-| 8 | COMB | +1 | 108 (93%) |
+| 1 | LIN | +13 | 77 (66%) |
+| 2 | AGG | +13 | 90 (78%) |
+| 3 | XREL | +10 | 100 (86%) |
+| 4 | SET | +3 | 103 (89%) |
+| 5 | TIME | +3 | 106 (91%) |
+| 6 | DIFF | +1 | 107 (92%) |
+| 7 | COMB | +1 | 108 (93%) |
 
-The best pairs are PARAM + LIN and PARAM + AGG, tied at 30; the best triple, PARAM + LIN + AGG, moves 43. The
+The best pair is LIN + AGG (26); the best triple, LIN + AGG + XREL, moves 36. The
 8 rows no listed extension moves are ORD-11, PAY-12, BKG-11, BKG-13, SUB-03, MSV-05, MSV-06, MSV-12: coordination, liveness, the transport,
 and one nonlinear proration formula.
 
-### 1. Event parameters (`PARAM`)
+Event parameters (`PARAM`), first on this list before they were implemented, moved 17 rows: every
+last-writer-wins register, every "earliest claim wins" owner (a room-night, a bin, an email
+address, a meeting slot), every rule that compares an event's time to a deadline fixed at
+creation, and every snapshot ("the rate locked at booking"), because comparing a parameter and
+copying it stays in abstraction's comparison fragment ([V7](#v7) to [V10](#v10)). They remain on
+the route of most rows the extensions below would move, since an amount has to arrive on an event
+before arithmetic can help.
 
-Events that carry values: an amount, a timestamp, a version, an id. Alone it moves
-17 rows (INV-05, INV-11, ORD-09, PAY-11, BKG-01, BKG-06, BKG-07, BKG-08, SUB-06, APR-05, APR-08, ACL-02, ACL-08, SCH-06, MSV-08, MSV-09, MSV-11): every last-writer-wins register, every "earliest claim wins"
-owner (a room-night, a bin, an email address, a meeting slot), every rule that compares an event's
-time to a deadline fixed at creation, and every snapshot ("the rate locked at booking"), because
-comparing a parameter and copying it stays in abstraction's comparison fragment. It is on a route
-for 51 rows, more than any other extension, since every amount-moving rule needs a
-value on the event before arithmetic can help.
-
-- **Theory difficulty: low.** normalization-confluence's abstraction model already has events with
-  m integer parameters and states the cutoff N = n + 2m (and n + m for idempotence),
-  `AbstractionCutoff.v`; gsm implements m = 0 ([Roadmap 1b](ROADMAP.md#1b-abstraction-check-relationships-not-values),
-  deferred).
-- **Engineering: medium.** An event API with values, the fragment check for parameter uses, CC
-  over pairs of parameterized events, `NotIdempotent` per value, and an event identity for
-  deduplication. Representative states still grow as |reps|ⁿ, so it serves rules over a few
-  variables, which is what registers and owners are.
-- **Precedent:** data independence (Wolper, 1986) and cutoffs for parameterized systems.
-
-### 2. General linear arithmetic (`LIN`)
+### 1. General linear arithmetic (`LIN`)
 
 Rules that add, subtract and multiply by literals over unbounded integers, decided by formulas
-instead of enumeration. It moves nothing alone, because an amount must first reach the state on an
-event, and with `PARAM` it moves 30: wallets, captures and refunds, ledgers, seat
-counts, spend limits, invoices with a tax rate. On some route for 15 rows.
+instead of enumeration. An amount now reaches the state on an event (a parameter), so it moves
+13 rows alone: wallets, captures and refunds, ledgers, seat counts, spend limits, invoices
+with a tax rate. On some route for 15 rows.
 
 - **Theory difficulty: medium, mostly done.** `lin_exact`, `phi_cc1_exact` and `lin_frag_linear`
   in `AbstractionCutoff.v` generate each condition as a quantifier-free linear-arithmetic formula
@@ -307,11 +306,11 @@ counts, spend limits, invoices with a tax rate. On some route for 15 rows.
 - **Precedent:** Presburger arithmetic (Presburger, 1929; Cooper, 1972), SMT solvers, and
   solver-backed verifiers such as Ivy and Apalache.
 
-### 3. Aggregate reduction (`AGG`)
+### 2. Aggregate reduction (`AGG`)
 
 A total or count over items, tracked as a variable that each item's events change by their
 contribution, checked with one or two representative items and the aggregate rather than every
-item. Alone it moves 5 rows (ORD-06, PAY-06, SUB-10, ACL-04, ACL-10); on some route for 19, among them
+item. Alone it moves 13 rows (INV-03, INV-04, ORD-06, PAY-06, PAY-07, LOY-05, SUB-09, SUB-10, APR-07, ACL-04, ACL-06, ACL-10, SCH-05); on some route for 19, among them
 warehouse capacity, storefront availability, ledger conservation, storage quotas and weekly hours.
 
 - **Theory difficulty: high.** There is no positive theorem yet: normalization-confluence has
@@ -322,12 +321,12 @@ warehouse capacity, storefront availability, ledger conservation, storage quotas
 - **Precedent:** counter abstraction (Pnueli, Xu and Zuck, 2002), threshold automata and their
   reductions (Konnov, Veith and Widder, 2017).
 
-### 4. Cross-item relational constraints (`XREL`)
+### 3. Cross-item relational constraints (`XREL`)
 
 Rules over a pair, or a small fixed number, of items: two shifts of one employee overlap, two
-legs of a transfer, the nights of one stay, the next slot that takes the overflow. It moves
-nothing alone (the items' times or amounts must arrive as values), and is on some route for
-11 rows; after `PARAM`, `LIN` and `AGG` it adds 10.
+legs of a transfer, the nights of one stay, the next slot that takes the overflow. With the
+items' times arriving as parameters, it moves 5 rows alone (INV-08, ACL-01, ACL-03, SCH-01, SCH-10), and is on
+some route for 11 rows; after `LIN` and `AGG` it adds 10.
 
 - **Theory difficulty: high.** Repair across items breaks the per-key independence the collection
   theorems rest on (`cross_commute`). `SymmetryCutoff.v` already shows a cutoff of 2 for CC1 in
@@ -336,33 +335,33 @@ nothing alone (the items' times or amounts must arrive as values), and is on som
   invisible invariants (Pnueli, Ruah and Zuck, 2001), environment abstraction (Clarke, Talupur and
   Veith, 2006).
 
-### 5. Set and uniqueness constraints (`SET`)
+### 4. Set and uniqueness constraints (`SET`)
 
 All-different and exactly-one over a set whose members change: one primary on call per day when
 claims are released, at least one admin, one welcome bonus per person across member numbers.
 Uniqueness over an immutable key does not need it: re-keyed by the unique value, it is an owner
-register, which `PARAM` covers. On some route for 3 rows.
+register, which event parameters now cover ([V7](#v7)). On some route for 3 rows.
 
 - **Theory difficulty: medium to high.** Equality-only reasoning has small cutoffs, but the rows
   here also need release and re-assignment.
 - **Precedent:** data independence (Wolper, 1986; Lazić and Nowak, 2000).
 
-### 6. Time and expiry encodings (`TIME`)
+### 5. Time and expiry encodings (`TIME`)
 
 Timestamps as values, with deadlines and windows (t ≤ t₀ + w), packaged: in effect `PARAM` plus
-`DIFF` over a time domain. Alone it moves 5 rows (INV-11, PAY-11, BKG-06, BKG-08, LOY-04). `PARAM` alone also moves
-the first four, whose rules only compare times; points that expire 24 months after the last
-activity (LOY-04) need the window arithmetic, so `TIME` is that row's only single extension. With
+`DIFF` over a time domain. Alone it moves 1 row (LOY-04). Event parameters moved
+the rows whose rules only compare times; points that expire 24 months after the last activity
+(LOY-04) need the window arithmetic, so `TIME` is that row's only single extension. With
 `AGG` it also covers rolling rate limits (ACL-05).
 
 - **Theory difficulty: medium**, following `PARAM` and `DIFF`.
 - **Precedent:** timed automata regions and zones (Alur and Dill, 1994; difference-bound matrices,
   Dill, 1989).
 
-### 7. Difference-constraint arithmetic (`DIFF`)
+### 6. Difference-constraint arithmetic (`DIFF`)
 
 Counters that move by constants, with guards x - y ≤ c, over unbounded integers. Alone it moves
-4 rows (PAY-06, SUB-10, ACL-04, ACL-10): counters that need no amounts on events, only more range than
+5 rows (PAY-06, LOY-04, SUB-10, ACL-04, ACL-10): counters that need no amounts on events, only more range than
 20 bits allow, or a net count (open disputes, concurrent sessions) whose two monotone counters
 must cover lifetime totals.
 
@@ -371,13 +370,13 @@ must cover lifetime totals.
   solver, which fits gsm's no-solver rule.
 - **Precedent:** difference-bound matrices (Dill, 1989; Bengtsson and Yi, 2004).
 
-### 8. A larger enumeration limit (`BITS`)
+### 7. A larger enumeration limit (`BITS`)
 
 Raise `Build`'s 20-bit limit. Alone it moves 2 rows (SUB-10, ACL-04), the ones a bit
 or two over the limit. No theory; the cost doubles with each bit (step tables of 2ⁿ entries per
 event), so the gain is a few bits, or symbolic enumeration (Burch et al., 1990; McMillan, 1993).
 
-### 9. Combining reductions (`COMB`)
+### 8. Combining reductions (`COMB`)
 
 Abstraction with federations, with per-component checking, and collections with per-component
 checking or migration. Alone it moves 1 row (MSV-14: amounts compared across
@@ -388,7 +387,7 @@ with every path, and every per-entity model that verifies fits `Build` whole.
   (`sym_abs`) and `SymmetryCutoff.v` reduces C1 and C2 to one item (`c1_cutoff`, `c2_cutoff`);
   abstraction with C1, C2 and M1 needs stating.
 
-### 10. History encoding helpers (`HIST`)
+### 9. History encoding helpers (`HIST`)
 
 Sugar for facts that only rise, milestones with a derived status, max-registers and rounds. It
 moves no row: every history encoding that verifies today already verifies ([V1](#v1)), and the
@@ -632,7 +631,7 @@ fmt.Println(report.Assurance, "|", report.Symmetry)
 #### V5. Credit-limit hold over amounts in cents (ORD-12), Abstract
 
 Totals and limits up to 10⁹ cents, fixed at creation and only compared: abstraction checks 12
-representative values per variable. This is the one catalogued row abstraction carries; a balance
+representative values per variable. Values that arrive on events instead are V7 to V10; a balance
 that moves is refused ([T2](#t2)).
 
 <!-- gocheck: run -->
@@ -720,6 +719,180 @@ if _, _, err := fed2.Build(); err == nil {
 _ = queued
 ```
 
+<a id="v7"></a>
+#### V7. No double booking of a room-night (BKG-01), collection with Abstract: an owner register
+
+Keyed by room-night, the claim carries the reservation id as a parameter and the lowest id holds
+the night. Abstraction checks the id at 12 representative values for ids up to 2⁴⁰, and the
+collection covers every room-night. No claim needs deduplication. One registry holding the
+candidates instead does not fit ([T3](#t3)).
+
+<!-- gocheck: run -->
+```go
+// BKG-01: no room is assigned to two reservations on the same night. Keyed by room-night, the
+// rule is an owner register: each reservation's claim carries its id, and the lowest id holds
+// the room-night (the others are walked). The id is a parameter, compared and copied, so
+// abstraction checks it at a few representative values for ids up to 2^40, and the collection
+// covers every room-night of every hotel. INV-05 (bin occupant), ORD-09 (unit claimant),
+// ACL-08 (email owner), SCH-06 (meeting slot) and MSV-08 (external id) are the same register.
+night := gsm.NewRegistry("room_night_owner")
+holder := night.Int("holder", 0, 1<<40) // 0: free
+night.On("claim").Param("reservation", 1, 1<<40).
+    OnlyIf(gsm.Or(gsm.Is(holder, 0), gsm.Lt(gsm.Arg("reservation"), gsm.V(holder)))).
+    Does(gsm.SetToArg(holder, "reservation")).Add()
+night.Abstract(0)
+
+type RoomNight struct {
+    Room  int
+    Night string
+}
+nights, report, err := gsm.NewCollection[RoomNight]("RoomNight", night).Build()
+if err != nil {
+    panic(fmt.Sprintf("%v\n%s", err, report))
+}
+if len(report.NotIdempotent) != 0 {
+    panic("a claim is safe to redeliver")
+}
+s := nights.NewState()
+key := RoomNight{Room: 412, Night: "2026-12-31"}
+nights.ApplyWith(s, key, "claim", 88_100_217)
+nights.ApplyWith(s, key, "claim", 88_100_009) // arrives later, but the lower id holds the night
+fmt.Println(s.Item(key).GetInt(holder))     // 88100009
+fmt.Println(report.Abstraction)
+```
+
+<a id="v8"></a>
+#### V8. Free-cancellation window (BKG-06), Abstract: the cancellation carries its time
+
+Two facts whose arrival order decides the fee are refused. The cancellation carrying its time,
+compared with a deadline fixed at creation, verifies over every minute until the year 6000.
+
+<!-- gocheck: run -->
+```go
+// BKG-06: a cancellation inside the free window costs nothing; after it, one night's fee.
+// As two facts whose arrival order decides the fee, the rule is order-dependent, and Build
+// refuses it.
+naive := gsm.NewRegistry("cancellation_naive")
+deadlinePassed, cancelled, fee := naive.Bool("deadline_passed"), naive.Bool("cancelled"), naive.Bool("fee")
+naive.Event("deadline").Writes(deadlinePassed).
+    Apply(func(s gsm.State) gsm.State { return s.SetBool(deadlinePassed, true) }).Add()
+naive.Event("cancel").Writes(cancelled, fee).
+    Apply(func(s gsm.State) gsm.State {
+        return s.SetBool(cancelled, true).SetBool(fee, s.GetBool(deadlinePassed)) // reads the order
+    }).Add()
+_, rep, err := naive.Build()
+if err == nil || rep.CCFailure == nil {
+    panic("expected the order-dependent rule to be refused")
+}
+fmt.Println(err)
+
+// Faithful: the cancellation carries its time (minutes since 1970), and the deadline is fixed
+// when the booking is created. The earliest cancellation counts; the fee is derived from it.
+// Times compare only, so abstraction checks them at a few representative values. PAY-11
+// (capture before expiry), BKG-08 (pickup before the cutoff) and APR-08 (approval inside the
+// delegation window) compare an event's time with a deadline the same way.
+r := gsm.NewRegistry("cancellation")
+deadline := r.Int("deadline", 0, 1<<31-1)
+at := r.Int("cancelled_at", 0, 1<<31-1) // 0: not cancelled
+charged := r.Int("fee", 0, 1)
+r.On("cancel").Param("at", 1, 1<<31-1).
+    OnlyIf(gsm.Or(gsm.Is(at, 0), gsm.Lt(gsm.Arg("at"), gsm.V(at)))).
+    Does(gsm.SetToArg(at, "at")).Add()
+late := gsm.And(gsm.IsNot(at, 0), gsm.AboveVar(at, deadline))
+r.Rule("fee if late").Require(gsm.Or(gsm.Not(late), gsm.Is(charged, 1))).RepairWith(gsm.SetTo(charged, 1)).Add()
+r.Rule("no fee otherwise").Require(gsm.Or(late, gsm.Is(charged, 0))).RepairWith(gsm.SetTo(charged, 0)).Add()
+m, rep2, err := r.Abstract(0, 1).Build()
+if err != nil {
+    panic(fmt.Sprintf("%v\n%s", err, rep2))
+}
+s := m.NewState().SetInt(deadline, 29_800_000)
+fmt.Println(m.ApplyWith(s, "cancel", 29_799_000).GetInt(charged), m.ApplyWith(s, "cancel", 29_801_000).GetInt(charged)) // 0 1
+```
+
+<a id="v9"></a>
+#### V9. Revocation beats earlier grants (ACL-02); latest address wins (MSV-11), Abstract
+
+Versions and times on events, each register keeping the latest; a two-parameter update with a
+tie-break on the version.
+
+<!-- gocheck: run -->
+```go
+// ACL-02: a revocation beats any grant issued before it, but a later re-grant restores
+// access. Grants and revocations carry versions; each register keeps the latest, and access
+// is derived from the two. APR-05 (edits after the signature's version are rejected) is the
+// same comparison.
+acl := gsm.NewRegistry("access")
+granted := acl.Int("granted", 0, 1<<30)
+revoked := acl.Int("revoked", 0, 1<<30)
+access := acl.Int("access", 0, 1)
+acl.On("grant").Param("version", 1, 1<<30).
+    OnlyIf(gsm.Lt(gsm.V(granted), gsm.Arg("version"))).Does(gsm.SetToArg(granted, "version")).Add()
+acl.On("revoke").Param("version", 1, 1<<30).
+    OnlyIf(gsm.Lt(gsm.V(revoked), gsm.Arg("version"))).Does(gsm.SetToArg(revoked, "version")).Add()
+acl.Rule("on").Require(gsm.Or(gsm.AtMostVar(granted, revoked), gsm.Is(access, 1))).RepairWith(gsm.SetTo(access, 1)).Add()
+acl.Rule("off").Require(gsm.Or(gsm.AboveVar(granted, revoked), gsm.Is(access, 0))).RepairWith(gsm.SetTo(access, 0)).Add()
+m, report, err := acl.Abstract(0, 1).Build()
+if err != nil {
+    panic(fmt.Sprintf("%v\n%s", err, report))
+}
+s := m.ApplyWith(m.ApplyWith(m.NewState(), "grant", 10), "revoke", 20) // revoked
+t := m.ApplyWith(s, "grant", 30)                                        // re-granted
+fmt.Println(s.GetInt(access), t.GetInt(access), m.ApplyWith(t, "grant", 15).GetInt(access)) // 0 1 1
+
+// MSV-11: the latest address update wins in every service. The update carries the address
+// version and its time; a later time wins, and a tie goes to the higher version. INV-11
+// (latest scan wins) and SUB-06 (latest plan request wins) are the same register.
+addr := gsm.NewRegistry("address")
+version := addr.Int("version", 0, 1<<20)
+stamp := addr.Int("stamp", 0, 1<<40)
+addr.On("update").Param("v", 0, 1<<20).Param("at", 1, 1<<40).
+    OnlyIf(gsm.Or(gsm.Lt(gsm.V(stamp), gsm.Arg("at")),
+        gsm.And(gsm.Eq(gsm.V(stamp), gsm.Arg("at")), gsm.Lt(gsm.V(version), gsm.Arg("v"))))).
+    Does(gsm.Do(gsm.Set(version, gsm.Arg("v")), gsm.Set(stamp, gsm.Arg("at")))).Add()
+am, report, err := addr.Abstract().Build()
+if err != nil {
+    panic(fmt.Sprintf("%v\n%s", err, report))
+}
+a := am.ApplyWith(am.ApplyWith(am.NewState(), "update", 4, 1_700_000_000), "update", 9, 1_700_000_050)
+b := am.ApplyWith(am.ApplyWith(am.NewState(), "update", 9, 1_700_000_050), "update", 4, 1_700_000_000)
+fmt.Println(a.GetInt(version), b.GetInt(version)) // 9 9
+```
+
+<a id="v10"></a>
+#### V10. Price shown at checkout is the price charged (MSV-09), Abstract: a snapshot
+
+The checkout carries the price it showed. The report asks for the checkouts of one order to be
+causally ordered (there is one per order), and nothing else.
+
+<!-- gocheck: run -->
+```go
+// MSV-09: the price charged equals the price shown at checkout. The checkout carries the price
+// it showed, and the charge is derived from it, so a later catalog change cannot reach the
+// order. BKG-07 (the rate locked at booking) is the same snapshot. One checkout per order:
+// two checkouts of one order with different prices would not commute, so the checkout is
+// declared independent of the payment only, and the report asks for the checkouts of one order
+// to be causally ordered.
+order := gsm.NewRegistry("order_checkout")
+price := order.Int("price", 0, 1<<30)     // in cents, as shown at checkout
+charged := order.Int("charged", 0, 1<<30) // what the payment captures
+paid := order.Int("paid", 0, 1)
+order.On("checkout").Param("price", 1, 1<<30).Does(gsm.SetToArg(price, "price")).Add()
+order.On("pay").Does(gsm.SetTo(paid, 1)).Add()
+order.Rule("charge the shown price").Require(gsm.Or(gsm.Is(paid, 0), gsm.SameAs(charged, price))).
+    RepairWith(gsm.Copy(charged, price)).Add()
+order.Independent("checkout", "pay")
+m, report, err := order.Abstract(0, 1).Build()
+if err != nil {
+    panic(fmt.Sprintf("%v\n%s", err, report))
+}
+if len(report.CausalOrderRequired) != 1 {
+    panic("expected the checkouts of one order to need causal order")
+}
+a := m.ApplyWith(m.Apply(m.NewState(), "pay"), "checkout", 12_999)
+b := m.Apply(m.ApplyWith(m.NewState(), "checkout", 12_999), "pay")
+fmt.Println(a.GetInt(charged), b.GetInt(charged)) // 12999 12999
+```
+
 ### Verified only at toy scale
 
 <a id="t1"></a>
@@ -758,9 +931,9 @@ fmt.Println(errAbs)
 <!-- gocheck: run -->
 ```go
 // PAY-01: a wallet balance never goes below zero; withdrawals beyond the available funds stay
-// pending until a deposit covers them. Amounts are cents up to $10M (30 bits per counter).
-// gsm events carry no amount, so even the toy model uses one fixed amount per event.
-mk := func(name string, max int) *gsm.Registry {
+// pending until a deposit covers them. Amounts are cents up to $10M (30 bits per counter), and
+// each deposit or withdrawal carries its amount as a parameter.
+mk := func(name string, max, maxAmount int) *gsm.Registry {
     w := gsm.NewRegistry(name)
     deposited := w.Int("deposited", 0, max) // counters that only rise, so the events commute
     withdrawn := w.Int("withdrawn", 0, max)
@@ -768,14 +941,15 @@ mk := func(name string, max int) *gsm.Registry {
     covered := gsm.AtMostVar(withdrawn, deposited)
     w.Rule("pending_when_short").Require(gsm.Or(gsm.Is(pending, 1), covered)).RepairWith(gsm.Raise(pending)).Add()
     w.Rule("clear_when_covered").Require(gsm.Or(gsm.Is(pending, 0), gsm.Not(covered))).RepairWith(gsm.Lower(pending)).Add()
-    w.On("deposit_100").Does(gsm.IncBy(deposited, 100)).Add()
-    w.On("withdraw_100").Does(gsm.IncBy(withdrawn, 100)).Add()
+    w.On("deposit").Param("amount", 1, maxAmount).Does(gsm.IncByArg(deposited, "amount")).Add()
+    w.On("withdraw").Param("amount", 1, maxAmount).Does(gsm.IncByArg(withdrawn, "amount")).Add()
     return w
 }
 // At production size the model needs 30 + 30 + 1 = 61 bits, far past Build's 20, and its one
-// rule ties the counters, so per-component checking has nothing to split. Abstract refuses it.
-_, _, errAbs := mk("wallet_cents", 1_000_000_000).Abstract(0, 1, 100).Build()
-_, _, errToy := mk("wallet_toy", 255).Build() // $2.55 of headroom: 8 + 8 + 1 = 17 bits
+// rule ties the counters, so per-component checking has nothing to split. Abstract refuses the
+// arithmetic on the amount, and Build without it checks one event per amount (at most 1024).
+_, _, errAbs := mk("wallet_cents", 1_000_000_000, 1_000_000_000).Abstract(0, 1).Build()
+_, _, errToy := mk("wallet_toy", 255, 5).Build() // $2.55 of headroom, amounts up to 5 cents: 17 bits
 if errAbs == nil || errToy != nil {
     panic("expected the production wallet refused and the toy wallet verified")
 }
@@ -783,13 +957,14 @@ fmt.Println(errAbs)
 ```
 
 <a id="t3"></a>
-#### T3. No double booking of a room-night (BKG-01): cross-item, and past 64 bits
+#### T3. No double booking as one registry (BKG-01): cross-item, and past 64 bits
 
 <!-- gocheck: run -->
 ```go
-// BKG-01: no room is assigned to two reservations on the same night. The rule relates two
-// reservations, so it cannot be written through a collection keyed by reservation; it needs
-// one registry holding every reservation that could claim the room-night. Toy: one
+// BKG-01: no room is assigned to two reservations on the same night. Keyed by room-night with
+// the claim carrying the reservation id, it verifies at scale (V7). Without event parameters
+// the rule relates two reservations, so it cannot be written through a collection keyed by
+// reservation; it needs one registry holding every reservation that could claim the room-night. Toy: one
 // room-night, two reservations, the lower-numbered one wins and the other is walked.
 r := gsm.NewRegistry("room_night")
 wantA, wantB := r.Bool("res_a_requested"), r.Bool("res_b_requested")
@@ -827,57 +1002,7 @@ fmt.Println(err)
 ```
 
 <a id="t4"></a>
-#### T4. Free-cancellation window (BKG-06): precedence in real time
-
-<!-- gocheck: run -->
-```go
-// BKG-06: a cancellation inside the free window costs nothing; after it, one night's fee.
-// The rule depends on which came first in real time, the cancellation or the deadline. As
-// two facts whose order decides the fee, it is order-dependent, and Build refuses it.
-naive := gsm.NewRegistry("cancellation_naive")
-deadlinePassed, cancelled, fee := naive.Bool("deadline_passed"), naive.Bool("cancelled"), naive.Bool("fee")
-naive.Event("deadline").Writes(deadlinePassed).
-    Apply(func(s gsm.State) gsm.State { return s.SetBool(deadlinePassed, true) }).Add()
-naive.Event("cancel").Writes(cancelled, fee).
-    Apply(func(s gsm.State) gsm.State {
-        return s.SetBool(cancelled, true).SetBool(fee, s.GetBool(deadlinePassed)) // reads the order
-    }).Add()
-_, rep, err := naive.Build()
-if err == nil || rep.CCFailure == nil {
-    panic("expected the order-dependent rule to be refused")
-}
-fmt.Println(err)
-
-// Faithful: the cancellation carries its time. gsm events carry no value, so the toy model
-// has one event per time slot (4 slots, deadline after slot 1), and the earliest cancel wins.
-const slots, deadline = 4, 1
-r := gsm.NewRegistry("cancellation_timed")
-at := r.Int("cancelled_at", 0, slots) // slots = not cancelled
-charged := r.Bool("fee")
-feeDue := func(s gsm.State) bool { return s.GetInt(at) < slots && s.GetInt(at) > deadline }
-r.Invariant("fee_iff_late").Watches(at, charged).
-    Holds(func(s gsm.State) bool { return s.GetBool(charged) == feeDue(s) }).
-    Repair(func(s gsm.State) gsm.State { return s.SetBool(charged, feeDue(s)) }).Add()
-for t := 0; t < slots; t++ {
-    t := t
-    r.Event(fmt.Sprintf("cancel_at_%d", t)).Writes(at).
-        Apply(func(s gsm.State) gsm.State {
-            if t < s.GetInt(at) {
-                return s.SetInt(at, t)
-            }
-            return s
-        }).Add()
-}
-m, rep2, err := r.Build()
-if err != nil {
-    panic(fmt.Sprintf("timed toy model should verify: %v\n%s", err, rep2))
-}
-s := m.NewState().SetInt(at, slots)
-fmt.Println(m.Apply(s, "cancel_at_1").GetBool(charged), m.Apply(s, "cancel_at_3").GetBool(charged)) // false true
-```
-
-<a id="t5"></a>
-#### T5. Warehouse pick capacity across SKUs (INV-03): an aggregate
+#### T4. Warehouse pick capacity across SKUs (INV-03): an aggregate
 
 <!-- gocheck: run -->
 ```go
@@ -914,8 +1039,8 @@ if err != nil {
 fmt.Println(report.StateCount) // 1024
 ```
 
-<a id="t6"></a>
-#### T6. Payouts frozen while a dispute is open (PAY-06): a net counter fails at its bound
+<a id="t5"></a>
+#### T5. Payouts frozen while a dispute is open (PAY-06): a net counter fails at its bound
 
 <!-- gocheck: run -->
 ```go
@@ -952,15 +1077,15 @@ if _, rep, err := mono.Build(); err != nil {
 }
 ```
 
-<a id="t7"></a>
-#### T7. Price equals the live catalog price (MSV-09): a closure is not a way out
+<a id="t6"></a>
+#### T6. Price equals the live catalog price (MSV-09): a closure is not a way out
 
 <!-- gocheck: run -->
 ```go
 // MSV-09: the price charged equals the catalog's current price. A closure that reads the
 // catalog from outside its State does not express it: a collection runs the template's
 // tables, so the closure ran only while Build verified the template, and the price it read
-// then is frozen in.
+// then is frozen in. The checkout carrying the price it showed is the faithful model (V10).
 catalogPrice := map[string]int{"standard": 3}
 line := gsm.NewRegistry("order_line")
 priced := line.Int("price", 0, 7)
@@ -1083,17 +1208,17 @@ validates the row, where there is one.
 
 | ID | Invariant | Expressible today | At production scale | Blocker | Would move with |
 |---|---|---|---|---|---|
-| INV-01 | On-hand quantity never goes negative; a pick beyond on-hand is recorded as a backorder. | combinator: received and picked counters that only rise; backorder flag when picked > received | toy | arithmetic over wide ranges | PARAM + LIN |
-| INV-02 | Reserved quantity never exceeds on-hand per SKU and location; reservations beyond it wait. | combinator: as INV-01 with a reserved counter; waiting flag derived | toy | arithmetic over wide ranges | PARAM + LIN |
-| INV-03 ([T5](#t5)) | Units reserved across all SKUs in a warehouse stay within its daily pick capacity; reservations beyond it are deferred. | encoding: one registry holding every SKU's reserved count, deferred flag over the sum | toy | aggregate across items | AGG + PARAM |
-| INV-04 | A SKU's available-to-sell on the storefront equals on-hand summed over its locations minus reservations. | encoding: one registry holding every location's counters plus the derived total | toy | aggregate across items | AGG + PARAM |
-| INV-05 | A bin holds at most one SKU; a put-away of a second SKU into an occupied bin is redirected. | encoding: per bin, the occupant as a min-register with one event per SKU | toy | unbounded or relational data | PARAM |
+| INV-01 | On-hand quantity never goes negative; a pick beyond on-hand is recorded as a backorder. | combinator: received and picked counters that only rise; backorder flag when picked > received | toy | arithmetic over wide ranges | LIN |
+| INV-02 | Reserved quantity never exceeds on-hand per SKU and location; reservations beyond it wait. | combinator: as INV-01 with a reserved counter; waiting flag derived | toy | arithmetic over wide ranges | LIN |
+| INV-03 ([T4](#t4)) | Units reserved across all SKUs in a warehouse stay within its daily pick capacity; reservations beyond it are deferred. | encoding: one registry holding every SKU's reserved count, deferred flag over the sum | toy | aggregate across items | AGG |
+| INV-04 | A SKU's available-to-sell on the storefront equals on-hand summed over its locations minus reservations. | encoding: one registry holding every location's counters plus the derived total | toy | aggregate across items | AGG |
+| INV-05 | A bin holds at most one SKU; a put-away of a second SKU into an occupied bin is redirected. | encoding: per bin, the occupant as an owner register (the lowest SKU id wins), the put-away carrying the SKU id as a parameter | **yes** (Abstract) |  |  |
 | INV-06 | A lot on QA hold is never shipped; a pick confirmed before the hold arrives is reversed. | combinator: per lot, picked and hold facts, outcome derived | **yes** (collection) |  |  |
 | INV-07 | An expired lot is not allocated; an unpicked allocation that meets the expiry is released. | encoding: expiry as a fact event from a scheduler; picked wins over a later expiry | **yes** (collection) |  |  |
-| INV-08 | Lots of a SKU are allocated first-expiry-first-out. | encoding: one registry holding the SKU's lots and their expiry ranks | toy | cross-item constraint | XREL + PARAM |
-| INV-09 | A cycle-count adjustment equals the counted quantity minus the system quantity at count time. | combinator: Sub of two counters; the count event carries no quantity, so one event per value | toy | arithmetic over wide ranges | PARAM + LIN |
+| INV-08 | Lots of a SKU are allocated first-expiry-first-out. | encoding: one registry holding the SKU's lots and their expiry ranks | toy | cross-item constraint | XREL |
+| INV-09 | A cycle-count adjustment equals the counted quantity minus the system quantity at count time. | combinator: Sub of two counters; the count event carries the quantity as a parameter, one instance per value (abstraction refuses the arithmetic) | toy | arithmetic over wide ranges | LIN |
 | INV-10 | A stock transfer only moves forward (requested, shipped, received); a late 'shipped' never reopens a received transfer. | encoding: one fact per milestone, status derived as the furthest | **yes** (collection) |  |  |
-| INV-11 | A serialized unit is in exactly one location: the latest scan wins. | encoding: per serial, location and scan time as a last-writer-wins pair, one event per (location, time) | toy | history or time | PARAM or TIME |
+| INV-11 | A serialized unit is in exactly one location: the latest scan wins. | encoding: per serial, location and scan time as a last-writer-wins pair, the scan carrying both as parameters | **yes** (Abstract) |  |  |
 
 ### Orders and fulfillment
 
@@ -1102,12 +1227,12 @@ validates the row, where there is one.
 | ORD-01 | An order never ships unpaid. | combinator: the README example (facts and a derived status) | **yes** (collection) |  |  |
 | ORD-02 | Cancellation wins over a shipment request, in every arrival order. | combinator: the README example | **yes** (collection) |  |  |
 | ORD-03 ([V1](#v1)) | Order status only moves forward; a late 'packed' never moves a delivered order back. | encoding: one Bool per milestone, status derived as the furthest | **yes** (collection) |  |  |
-| ORD-04 | Shipped quantity per order line never exceeds the ordered quantity; excess shipments are flagged. | combinator: shipped counter against the ordered quantity | toy | arithmetic over wide ranges | PARAM + LIN |
-| ORD-05 | Order total = sum of (quantity × unit price) - discounts + tax. | closure: multiplication needs a closure | toy | arithmetic over wide ranges | PARAM + LIN |
+| ORD-04 | Shipped quantity per order line never exceeds the ordered quantity; excess shipments are flagged. | combinator: shipped counter against the ordered quantity | toy | arithmetic over wide ranges | LIN |
+| ORD-05 | Order total = sum of (quantity × unit price) - discounts + tax. | closure: multiplication needs a closure | toy | arithmetic over wide ranges | LIN |
 | ORD-06 | An order is complete iff every line is shipped or cancelled. | encoding: two Bools per line in one registry, 100 bits at 50 lines | toy | aggregate across items | AGG |
 | ORD-07 | A return is accepted only for a delivered order, and the refund is issued only after the return is received. | combinator: per order facts, outcome derived | **yes** (collection) |  |  |
 | ORD-08 | Each order is fulfilled by exactly one fulfillment center; conflicting assignments resolve to the lowest-numbered center. | encoding: min-register Int(0,100), one event per center (100 events, 4,950 pairs) | **yes** (collection) |  |  |
-| ORD-09 | No serialized unit is claimed by two orders. | encoding: per unit, the claimant as a min-register with one event per order | toy | unbounded or relational data | PARAM |
+| ORD-09 | No serialized unit is claimed by two orders. | encoding: per unit, the claimant as an owner register, the claim carrying the order id as a parameter | **yes** (Abstract) |  |  |
 | ORD-10 | An order not shipped by its promise date is flagged late. | encoding: promise-date-passed as a fact event; late = passed and not shipped | **yes** (collection) |  |  |
 | ORD-11 | Every paid order ships within 48 hours. | no: a deadline on when events happen (liveness), not a property of the states events reach | no | other: liveness | none listed |
 | ORD-12 ([V5](#v5)) | An order whose total exceeds the customer's credit limit is held until a manager approves an override; a frozen credit line holds every order. | combinator: amounts fixed at creation, compared only; flags as 0/1 Ints | **yes** (Abstract) |  |  |
@@ -1116,17 +1241,17 @@ validates the row, where there is one.
 
 | ID | Invariant | Expressible today | At production scale | Blocker | Would move with |
 |---|---|---|---|---|---|
-| PAY-01 ([T2](#t2)) | A wallet balance never goes below zero; withdrawals beyond the available funds stay pending until covered. | combinator: deposited and withdrawn counters that only rise; one event per fixed amount | toy | arithmetic over wide ranges | PARAM + LIN |
-| PAY-02 | Every journal entry balances: total debits equal total credits. | combinator: one variable per posting, sum compared | toy | arithmetic over wide ranges | PARAM + LIN |
-| PAY-03 | Captured never exceeds authorized, and refunded never exceeds captured. | combinator: three amount counters | toy | arithmetic over wide ranges | PARAM + LIN |
+| PAY-01 ([T2](#t2)) | A wallet balance never goes below zero; withdrawals beyond the available funds stay pending until covered. | combinator: deposited and withdrawn counters that only rise; the amount as a parameter, one instance per value (abstraction refuses the arithmetic) | toy | arithmetic over wide ranges | LIN |
+| PAY-02 | Every journal entry balances: total debits equal total credits. | combinator: one variable per posting, sum compared | toy | arithmetic over wide ranges | LIN |
+| PAY-03 | Captured never exceeds authorized, and refunded never exceeds captured. | combinator: three amount counters | toy | arithmetic over wide ranges | LIN |
 | PAY-04 ([V4](#v4)) | A payment is captured at most once; redelivered capture messages are absorbed. | combinator: captured Bool; Report.NotIdempotent empty | **yes** (collection) |  |  |
 | PAY-05 ([V4](#v4)) | A refund that arrives before the capture is held, then applied after it. | combinator: refund_requested fact; refunded derived | **yes** (collection) |  |  |
-| PAY-06 ([T6](#t6)) | Payouts are frozen while a merchant has any open dispute. | encoding: opened and closed counters that only rise (a net counter fails CC at its bound); lifetime counts beyond 511 do not fit | toy | arithmetic over wide ranges | DIFF or AGG |
-| PAY-07 | Customer wallet balances plus fees equal the funds held at the bank. | encoding: one registry holding every wallet | toy | aggregate across items | AGG + PARAM |
-| PAY-08 | A transfer debits one wallet and credits another; no money is created or destroyed. | encoding: one registry holding both wallets | toy | cross-item constraint | XREL + PARAM + LIN |
-| PAY-09 | Card spend per calendar day stays within the daily limit; transactions beyond it are held for review. | encoding: key by card and day; spend counter against the limit | toy | arithmetic over wide ranges | PARAM + LIN |
+| PAY-06 ([T5](#t5)) | Payouts are frozen while a merchant has any open dispute. | encoding: opened and closed counters that only rise (a net counter fails CC at its bound); lifetime counts beyond 511 do not fit | toy | arithmetic over wide ranges | DIFF or AGG |
+| PAY-07 | Customer wallet balances plus fees equal the funds held at the bank. | encoding: one registry holding every wallet | toy | aggregate across items | AGG |
+| PAY-08 | A transfer debits one wallet and credits another; no money is created or destroyed. | encoding: one registry holding both wallets | toy | cross-item constraint | XREL + LIN |
+| PAY-09 | Card spend per calendar day stays within the daily limit; transactions beyond it are held for review. | encoding: key by card and day; spend counter against the limit | toy | arithmetic over wide ranges | LIN |
 | PAY-10 ([V4](#v4)) | One charge per idempotency key. | combinator: collection keyed by the idempotency key | **yes** (collection) |  |  |
-| PAY-11 | An authorization expires after 7 days unless captured; a capture after expiry fails. | encoding: capture time against the expiry time, one event per time slot | toy | history or time | PARAM or TIME |
+| PAY-11 | An authorization expires after 7 days unless captured; a capture after expiry fails. | encoding: the capture carries its time; the expiry is fixed at creation; the earliest capture counts | **yes** (Abstract) |  |  |
 | PAY-12 | An ATM approves a withdrawal against the current balance and never revokes an approval. | no: an irrevocable answer that depends on arrival order, so it needs coordination | no | other: needs coordination | none listed |
 | PAY-13 | A posted ledger entry is never edited; it is only ever corrected by a reversing entry. | combinator: per entry, posted and reversed facts | **yes** (collection) |  |  |
 
@@ -1134,14 +1259,14 @@ validates the row, where there is one.
 
 | ID | Invariant | Expressible today | At production scale | Blocker | Would move with |
 |---|---|---|---|---|---|
-| BKG-01 ([T3](#t3)) | No room is assigned to two reservations on the same night. | encoding: one registry holding the room-night's candidate reservations; or per room-night a min-register over reservation ids, one event per id | toy | cross-item constraint | PARAM |
+| BKG-01 ([V7](#v7)) | No room is assigned to two reservations on the same night. | encoding: per room-night an owner register over reservation ids, the claim carrying the id as a parameter (one registry holding the candidates does not fit, T3) | **yes** (Abstract) |  |  |
 | BKG-02 ([V2](#v2)) | Stop-sell: a room type closes for a night once net bookings reach rooms plus the overbooking allowance, and reopens when cancellations bring it below. | encoding: booked and cancelled counters that only rise, per (room type, night); 20 bits for up to 511 bookings | **yes** (collection) |  |  |
-| BKG-03 | Confirmed room-nights per type never exceed rooms plus allowance; the excess is walked, latest booking first. | encoding: one registry holding the night's bookings and their ranks | toy | cross-item constraint | AGG + XREL + PARAM |
+| BKG-03 | Confirmed room-nights per type never exceed rooms plus allowance; the excess is walked, latest booking first. | encoding: one registry holding the night's bookings and their ranks | toy | cross-item constraint | AGG + XREL |
 | BKG-04 | A multi-night stay is confirmed only if every night is available (all or nothing). | encoding: one registry holding the stay and every night it spans | toy | cross-item constraint | AGG + XREL |
 | BKG-05 | Check-in only on or after the arrival date; check-out only after check-in. | encoding: arrival-date-reached as a fact event; status derived | **yes** (collection) |  |  |
-| BKG-06 ([T4](#t4)) | A cancellation inside the free-cancellation window costs nothing; after it, one night's fee. | encoding: cancellation time against the deadline; one event per time slot | toy | history or time | PARAM or TIME |
-| BKG-07 | The rate charged is the rate locked at booking, even if the rate plan changes later. | encoding: the booking must carry its rate, one event per rate | toy | history or time | PARAM |
-| BKG-08 | Pickups from a group block stop at the cutoff date; later pickups go to general inventory. | encoding: pickup time against the cutoff; one event per time slot | toy | history or time | PARAM or TIME |
+| BKG-06 ([V8](#v8)) | A cancellation inside the free-cancellation window costs nothing; after it, one night's fee. | encoding: the cancellation carries its time; the deadline is fixed at creation; the fee is derived | **yes** (Abstract) |  |  |
+| BKG-07 | The rate charged is the rate locked at booking, even if the rate plan changes later. | encoding: the booking carries its rate as a parameter; one booking per reservation, causally ordered | **yes** (Abstract) |  |  |
+| BKG-08 | Pickups from a group block stop at the cutoff date; later pickups go to general inventory. | encoding: the pickup carries its time; the cutoff is fixed at creation | **yes** (Abstract) |  |  |
 | BKG-09 | A room is assignable to an arriving guest only when it is inspected clean and vacant. | combinator: per room facts, assignable derived | **yes** (collection) |  |  |
 | BKG-10 | A no-show fee is charged at most once, and only after the arrival date passes without check-in; a late check-in reverses it. | encoding: arrival-passed fact; fee = passed and not checked in | **yes** (collection) |  |  |
 | BKG-11 ([N1](#n1)) | Two guests are never told that the last room is theirs, not even briefly. | no: an answer that must never be revised, needs coordination | no | other: needs coordination | none listed |
@@ -1153,16 +1278,16 @@ validates the row, where there is one.
 
 | ID | Invariant | Expressible today | At production scale | Blocker | Would move with |
 |---|---|---|---|---|---|
-| LOY-01 | A points balance never goes negative; redemptions beyond it stay pending. | combinator: earned and redeemed counters; one event per fixed amount | toy | arithmetic over wide ranges | PARAM + LIN |
-| LOY-02 | A member is Gold iff qualifying points over the last 12 months reach 50,000. | encoding: monthly buckets in one registry, rolled by month events | toy | history or time | PARAM + LIN + TIME |
+| LOY-01 | A points balance never goes negative; redemptions beyond it stay pending. | combinator: earned and redeemed counters; the points as a parameter, one instance per value (abstraction refuses the arithmetic) | toy | arithmetic over wide ranges | LIN |
+| LOY-02 | A member is Gold iff qualifying points over the last 12 months reach 50,000. | encoding: monthly buckets in one registry, rolled by month events | toy | history or time | LIN + TIME |
 | LOY-03 | Points for a stay post once, only after checkout, and reverse if the stay is refunded. | combinator: per stay facts, posted derived | **yes** (collection) |  |  |
-| LOY-04 | Points expire 24 months after the member's last activity. | encoding: last activity as a max-register, now as a time slot | toy | history or time | PARAM + DIFF or TIME |
-| LOY-05 | A member's balance equals points earned minus redeemed minus expired. | encoding: one registry holding the member's postings | toy | aggregate across items | AGG + PARAM |
+| LOY-04 | Points expire 24 months after the member's last activity. | encoding: last activity as a max-register, now as a time slot | toy | history or time | DIFF or TIME |
+| LOY-05 | A member's balance equals points earned minus redeemed minus expired. | encoding: one registry holding the member's postings | toy | aggregate across items | AGG |
 | LOY-06 | A reward certificate is used at most once; a redelivered redemption does not use it twice. | combinator: per certificate, used Bool | **yes** (collection) |  |  |
 | LOY-07 | A tier never drops during the membership year. | encoding: key by (member, year); tier as a max-register over 4 levels | **yes** (collection) |  |  |
 | LOY-08 | A points transfer to an airline partner completes on both sides or is reversed on both. | combinator: per transfer saga, debited, credited, failed facts | **yes** (collection) |  |  |
 | LOY-09 | Redemptions are disabled while the member is under fraud review. | combinator: per member facts | **yes** (collection) |  |  |
-| LOY-10 | The welcome bonus is earned once per person, even across re-enrollment under a new member number. | encoding: one registry holding the person's member numbers | toy | unbounded or relational data | SET + PARAM |
+| LOY-10 | The welcome bonus is earned once per person, even across re-enrollment under a new member number. | encoding: one registry holding the person's member numbers | toy | unbounded or relational data | SET |
 
 ### Subscriptions and billing
 
@@ -1171,12 +1296,12 @@ validates the row, where there is one.
 | SUB-01 | Access for a billing period is granted iff its invoice is paid or still in grace. | encoding: key by (subscription, period); grace expiry as a fact event | **yes** (collection) |  |  |
 | SUB-02 | A subscription is never invoiced twice for the same period. | combinator: key by (subscription, period); invoiced Bool | **yes** (collection) |  |  |
 | SUB-03 | A mid-cycle plan change credits unused days / days in period × old price. | closure: division and multiplication of variables | toy | arithmetic over wide ranges | none listed |
-| SUB-04 | Seats assigned never exceed seats purchased; assignments beyond wait for a seat. | combinator: counters that only rise; 10,000 seats need 14 bits per counter | toy | arithmetic over wide ranges | PARAM + LIN |
+| SUB-04 | Seats assigned never exceed seats purchased; assignments beyond wait for a seat. | combinator: counters that only rise; 10,000 seats need 14 bits per counter | toy | arithmetic over wide ranges | LIN |
 | SUB-05 | One free trial per payment card, ever. | combinator: key by card fingerprint; trial_used Bool | **yes** (collection) |  |  |
-| SUB-06 | A downgrade takes effect at period end and an upgrade at once; the latest request wins. | encoding: request time as a last-writer-wins register; one event per time slot | toy | history or time | PARAM |
+| SUB-06 | A downgrade takes effect at period end and an upgrade at once; the latest request wins. | encoding: plan and request time as a last-writer-wins register, carried by the request | **yes** (Abstract) |  |  |
 | SUB-07 | After three failed payment attempts the subscription is suspended; a successful payment reactivates it. | combinator: per invoice, failures Int(0,3), paid Bool; payment_failed needs exactly-once delivery | **yes** (collection) |  |  |
-| SUB-08 | Invoice total = line items + tax - credits, with tax = rate × subtotal, rounded. | closure: multiplication by a rate and rounding | toy | arithmetic over wide ranges | PARAM + LIN |
-| SUB-09 | Each usage record is billed exactly once, in exactly one period. | encoding: one registry holding the period's usage records | toy | aggregate across items | AGG + PARAM |
+| SUB-08 | Invoice total = line items + tax - credits, with tax = rate × subtotal, rounded. | closure: multiplication by a rate and rounding | toy | arithmetic over wide ranges | LIN |
+| SUB-09 | Each usage record is billed exactly once, in exactly one period. | encoding: one registry holding the period's usage records | toy | aggregate across items | AGG |
 | SUB-10 | Usage beyond the plan's included units is billed as overage. | combinator: usage counter against a constant; 1,000,000 units plus the flag is 21 bits | toy | arithmetic over wide ranges | DIFF or BITS or AGG |
 
 ### Approvals and workflows
@@ -1186,11 +1311,11 @@ validates the row, where there is one.
 | APR-01 ([V3](#v3)) | A purchase order over $10,000 needs two approvals; others need one. | encoding: threshold stored as a Bool at creation; one Bool per approver in the cost center's pool | **yes** (Build) |  |  |
 | APR-02 ([V3](#v3)) | A rejection at any level is final; a request is approved only when every required approval is in. | combinator: rejected fact wins in the derived outcome | **yes** (Build) |  |  |
 | APR-03 ([V3](#v3)) | No one approves their own request. | encoding: requester stored as an index into the approver pool | **yes** (Build) |  |  |
-| APR-04 | An expense report's total per category stays within the policy limit, else it goes to exception review. | closure: sum of line amounts | toy | aggregate across items | PARAM + LIN |
-| APR-05 | A signed document never changes; edits that arrive after the signature are rejected. | encoding: version numbers on edits and on the signature; one event per version | toy | history or time | PARAM |
+| APR-04 | An expense report's total per category stays within the policy limit, else it goes to exception review. | closure: sum of line amounts | toy | aggregate across items | LIN |
+| APR-05 | A signed document never changes; edits that arrive after the signature are rejected. | encoding: versions on edits and on the signature, carried as parameters; edits above the signed version rejected | **yes** (Abstract) |  |  |
 | APR-06 | A request pending for more than 48 hours escalates to the next level. | encoding: SLA-breached fact; escalated = breached and undecided | **yes** (collection) |  |  |
-| APR-07 | A withdrawn request returns to draft, and approvals from an earlier submission round never count. | encoding: per approver, the latest round approved, against the current round; approvals must carry their round | toy | history or time | PARAM + AGG |
-| APR-08 | A delegation of approval authority is valid only between its start and end dates. | encoding: approval time against the window; one event per time slot | toy | history or time | PARAM |
+| APR-07 | A withdrawn request returns to draft, and approvals from an earlier submission round never count. | encoding: per approver, the latest round approved, against the current round; approvals must carry their round | toy | history or time | AGG |
+| APR-08 | A delegation of approval authority is valid only between its start and end dates. | encoding: the approval carries its time; the window is fixed at creation | **yes** (Abstract) |  |  |
 | APR-09 | Every approved request has an audit record of the approval. | encoding: federation, workflow is the authority over the audit service's approval record (a projection) | **yes** (federation) |  |  |
 | APR-10 | An approver's approval counts only up to their personal approval limit. | encoding: amount and limits are fixed at creation, so each approver's eligibility is stored as a Bool | **yes** (Build) |  |  |
 
@@ -1198,14 +1323,14 @@ validates the row, where there is one.
 
 | ID | Invariant | Expressible today | At production scale | Blocker | Would move with |
 |---|---|---|---|---|---|
-| ACL-01 | A user can access a resource iff a role they currently hold grants it. | encoding: per (user, role), grant and revoke need precedence (ACL-02); access joins the roles that grant the resource | toy | unbounded or relational data | PARAM + XREL |
-| ACL-02 | A revocation beats any grant issued before it, but a later re-grant restores access. | encoding: versions on grants and revocations; one event per version | toy | history or time | PARAM |
-| ACL-03 | Sessions issued before an account suspension stop working. | encoding: session issue time against the suspension time, for every session of the account | toy | unbounded or relational data | PARAM + XREL |
+| ACL-01 | A user can access a resource iff a role they currently hold grants it. | encoding: per (user, role), grant and revoke need precedence (ACL-02); access joins the roles that grant the resource | toy | unbounded or relational data | XREL |
+| ACL-02 ([V9](#v9)) | A revocation beats any grant issued before it, but a later re-grant restores access. | encoding: versions on grants and revocations, carried as parameters; access derived from the latest of each | **yes** (Abstract) |  |  |
+| ACL-03 | Sessions issued before an account suspension stop working. | encoding: session issue time against the suspension time, for every session of the account | toy | unbounded or relational data | XREL |
 | ACL-04 ([T1](#t1)) | Requests per API key per month stay within 1,000,000; requests beyond are throttled. | combinator: used Int(0,1000000) + throttled, 21 bits | toy | arithmetic over wide ranges | BITS or DIFF or AGG |
 | ACL-05 | At most 100 requests per key in any rolling 60 seconds. | encoding: the timestamps of the last 100 requests | toy | history or time | AGG + TIME |
-| ACL-06 | A tenant's stored bytes stay within the plan limit; uploads beyond it are held. | encoding: one registry holding the tenant's files | toy | aggregate across items | AGG + PARAM |
+| ACL-06 | A tenant's stored bytes stay within the plan limit; uploads beyond it are held. | encoding: one registry holding the tenant's files | toy | aggregate across items | AGG |
 | ACL-07 | An organization always keeps at least one admin; removing the last admin is undone. | encoding: one registry holding the organization's members | toy | aggregate across items | AGG + SET |
-| ACL-08 | Each email address belongs to at most one account. | encoding: key by email; owner as a min-register with one event per account id | toy | unbounded or relational data | PARAM |
+| ACL-08 | Each email address belongs to at most one account. | encoding: key by email; owner register over account ids, the claim carrying the id as a parameter | **yes** (Abstract) |  |  |
 | ACL-09 | Privileged roles take effect only after MFA enrollment. | combinator: per user facts, effective role derived | **yes** (collection) |  |  |
 | ACL-10 | A license allows at most 5 concurrent sessions; extra sessions are queued. | encoding: login and logout counters that only rise, over the license's lifetime | toy | arithmetic over wide ranges | DIFF or AGG |
 | ACL-11 | A suspended user has no privileged access, whatever order the suspension and grants arrive in. | combinator: suspension wins in the derived access | **yes** (collection) |  |  |
@@ -1214,16 +1339,16 @@ validates the row, where there is one.
 
 | ID | Invariant | Expressible today | At production scale | Blocker | Would move with |
 |---|---|---|---|---|---|
-| SCH-01 | An employee is never on two overlapping shifts. | encoding: one registry holding the employee's shifts and their intervals | toy | cross-item constraint | XREL + PARAM |
+| SCH-01 | An employee is never on two overlapping shifts. | encoding: one registry holding the employee's shifts and their intervals | toy | cross-item constraint | XREL |
 | SCH-02 | Class enrollment never exceeds capacity; enrollments beyond it are waitlisted (by count). | encoding: enrolled and dropped counters that only rise per class (8 bits each) | **yes** (collection) |  |  |
-| SCH-03 | When a seat frees up, the earliest waitlisted student gets it. | encoding: one registry holding the class's waitlist | toy | cross-item constraint | AGG + XREL + PARAM |
-| SCH-04 | At least 11 hours of rest between an employee's consecutive shifts. | encoding: one registry holding the employee's shifts | toy | cross-item constraint | XREL + PARAM + DIFF |
-| SCH-05 | Weekly hours per employee stay within 40 unless overtime is approved. | encoding: one registry holding the week's shifts | toy | aggregate across items | AGG + PARAM |
-| SCH-06 | A meeting room holds at most one meeting per 15-minute slot. | encoding: key by (room, slot); holder as a min-register with one event per meeting | toy | cross-item constraint | PARAM |
+| SCH-03 | When a seat frees up, the earliest waitlisted student gets it. | encoding: one registry holding the class's waitlist | toy | cross-item constraint | AGG + XREL |
+| SCH-04 | At least 11 hours of rest between an employee's consecutive shifts. | encoding: one registry holding the employee's shifts | toy | cross-item constraint | XREL + DIFF |
+| SCH-05 | Weekly hours per employee stay within 40 unless overtime is approved. | encoding: one registry holding the week's shifts | toy | aggregate across items | AGG |
+| SCH-06 | A meeting room holds at most one meeting per 15-minute slot. | encoding: key by (room, slot); holder register over meeting ids, the claim carrying the id as a parameter | **yes** (Abstract) |  |  |
 | SCH-07 | Every shift has at least one certified supervisor assigned. | encoding: per shift, certified-assigned and certified-unassigned counters that only rise | **yes** (collection) |  |  |
 | SCH-08 | A pickup slot takes at most 50 orders; overflow rolls to the next slot. | encoding: one registry holding consecutive slots | toy | cross-item constraint | AGG + XREL |
-| SCH-09 | Exactly one doctor is primary on call each day. | encoding: one registry holding the day's claimants | toy | unbounded or relational data | SET + PARAM |
-| SCH-10 | Equipment under maintenance is not assigned to jobs during the maintenance interval. | encoding: one registry holding the equipment's jobs and intervals | toy | cross-item constraint | XREL + PARAM |
+| SCH-09 | Exactly one doctor is primary on call each day. | encoding: one registry holding the day's claimants | toy | unbounded or relational data | SET |
+| SCH-10 | Equipment under maintenance is not assigned to jobs during the maintenance interval. | encoding: one registry holding the equipment's jobs and intervals | toy | cross-item constraint | XREL |
 
 ### Multi-service consistency
 
@@ -1236,10 +1361,10 @@ validates the row, where there is one.
 | MSV-05 ([N2](#n2)) | Every committed order publishes exactly one OrderPlaced message. | no: a property of the outbox and transport; gsm states it as an obligation (NotIdempotent) | no | other: transport | none listed |
 | MSV-06 | Two-way availability sync between the hotel PMS and an OTA channel manager. | encoding: a federation cycle that is not monotone; BuildCoordinated verifies only the residual | no | other: needs coordination | none listed |
 | MSV-07 ([V6](#v6)) | A GDPR erasure recorded in the identity service reaches CRM and marketing. | combinator: federation, identity is the authority over each target's erased flag | **yes** (federation) |  |  |
-| MSV-08 | An external order id maps to at most one internal order across shards. | encoding: key by external id; owner as a min-register with one event per internal id | toy | unbounded or relational data | PARAM |
-| MSV-09 ([T7](#t7)) | The price charged equals the price shown at checkout. | encoding: checkout must carry the price; a closure reading the catalog is frozen at build time | toy | history or time | PARAM |
+| MSV-08 | An external order id maps to at most one internal order across shards. | encoding: key by external id; owner register over internal ids, the claim carrying the id as a parameter | **yes** (Abstract) |  |  |
+| MSV-09 ([V10](#v10)) | The price charged equals the price shown at checkout. | encoding: the checkout carries the price it showed, and the charge is derived from it (a closure reading the catalog is frozen at build time, T6); one checkout per order, causally ordered | **yes** (Abstract) |  |  |
 | MSV-10 | Raising the per-guest hold limit from 5 to 10 while holds are in flight keeps every replica converging. | combinator: CheckMigration on the per-entity registry, SAFE ONLINE | **yes** (CheckMigration) |  |  |
-| MSV-11 | The latest address update wins in every service. | encoding: update time as a last-writer-wins register; one event per time slot | toy | history or time | PARAM |
+| MSV-11 ([V9](#v9)) | The latest address update wins in every service. | encoding: address version and update time as a last-writer-wins register, carried by the update | **yes** (Abstract) |  |  |
 | MSV-12 | Invoice numbers are sequential and gap-free across the company. | no: a number once issued must never change, needs coordination | no | other: needs coordination | none listed |
 | MSV-13 | The PMS's room status drives the front desk's assignable flag and housekeeping's task list. | combinator: federation, PMS is the authority over both projections | **yes** (federation) |  |  |
 | MSV-14 | Fulfillment releases an order only if the payment service's authorized amount covers the order total. | encoding: amounts fixed at creation, compared only, but in two registries; a federation refuses Abstract components | toy | other: reductions do not combine | COMB |

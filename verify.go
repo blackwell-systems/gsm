@@ -135,6 +135,13 @@ type Report struct {
 	// rule and the reason). Nothing was checked: WFC and CC are false for that reason.
 	AbstractionRefused string
 
+	// Families describes the parameterized events (OnBuilder.Param), in declaration order:
+	// their parameters, how many instances Build checked, and which instances are not
+	// idempotent. Each instance is an event of the machine, named Instance(name, values...),
+	// and EventCount, NotIdempotent, CausalOrderRequired and CCFailure name instances. Nil
+	// when the registry declares none.
+	Families []EventFamily
+
 	// Regime is the regime report (see RegimeSummary): the configuration this report
 	// describes, what its checks guarantee (each line with its theorems), what the
 	// deployment must provide, and what is not covered. Set by Build, BuildCompositional
@@ -345,7 +352,7 @@ func (r *Report) obligations() string {
 			perKey = " per " + r.Symmetry.Over
 		}
 		fmt.Fprintf(&b, "  Delivery: exactly once%s for %s (applying one twice differs from once); "+
-			"deduplicate redelivered events\n", perKey, strings.Join(r.NotIdempotent, ", "))
+			"deduplicate redelivered events\n", perKey, groupEvents(r.NotIdempotent, r.Families))
 	}
 	for _, sat := range r.Saturations {
 		fmt.Fprintf(&b, "  Saturation: %s (silently; an invariant testing the bound never sees the overflow)\n", sat)
@@ -625,6 +632,9 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 	}
 
 	packedCount := 1 << r.totalBits
+	if berr := r.paramBudget(packedCount, stateCount); berr != nil {
+		return nil, nil, berr
+	}
 
 	report := &Report{
 		Name:       r.name,
@@ -671,6 +681,7 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 			return nil, report, err
 		}
 		report.NotIdempotent = r.notIdempotent(packedCount, valid, nf, step)
+		report.Families = r.reportFamilies(report.NotIdempotent)
 	}
 
 	if err := r.checkUnchanged(before); err != nil {
@@ -688,6 +699,7 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 		dom:      newDomainCheck(r.vars),
 		ccPairs:  r.ccPairs(),
 		allPairs: r.allIndependent,
+		families: familiesOf(r),
 	}
 	for i, ev := range r.events {
 		m.events[ev.name] = i

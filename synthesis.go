@@ -516,7 +516,7 @@ func (s *Synthesis) Machine() *Machine {
 // machine builds the synthesized machine, certified or not.
 func (s *Synthesis) machine() *Machine {
 	m := &Machine{name: s.r.name, vars: s.vars, events: make(map[string]int, len(s.events)), step: s.step, nf: s.nf,
-		dom: newDomainCheck(s.vars), ccPairs: s.ccPairs, allPairs: s.allPairs}
+		dom: newDomainCheck(s.vars), ccPairs: s.ccPairs, allPairs: s.allPairs, families: familiesOf(s.r)}
 	for name, i := range s.events {
 		m.events[name] = i
 	}

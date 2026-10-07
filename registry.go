@@ -20,6 +20,13 @@ type Registry struct {
 	independent    [][2]int // pairs of event indices declared independent
 	allIndependent bool     // if true, check all pairs
 	abs            *absDecl // non-nil once Abstract is called: Build verifies by abstraction
+
+	// families are the parameterized events (params.go), in declaration order. An expanded
+	// family's instances are ordinary events in events.
+	families []familyDef
+	// indepNames are the Independent declarations by name, in order, for the abstraction
+	// check, which pairs event kinds (a parameterized event as a whole) rather than events.
+	indepNames [][2]string
 }
 
 // CheckFunc is a predicate over State.
@@ -61,6 +68,10 @@ type eventDef struct {
 	// foreign names a variable passed to Writes that is not a variable of this
 	// registry; checkNames reports it (every build path calls checkNames).
 	foreign string
+	// family is 1 + the index of the parameterized event this event is an instance of
+	// (Registry.families), or 0; args are the instance's parameter values.
+	family int
+	args   []int
 }
 
 // NewRegistry creates a Registry for a named state machine.
@@ -85,13 +96,44 @@ func NewRegistry(name string) *Registry {
 // Report.CausalOrderRequired, with a witness state; the report's convergence line
 // says convergence holds under causal delivery of those pairs. An empty
 // CausalOrderRequired means every pair commutes and the declarations cost nothing.
+//
+// A parameterized event (OnBuilder.Param) is named by its name, which declares every one
+// of its instances independent of the other event's (and, for Independent(e, e), the
+// instances of e of each other), or by an instance name (Instance), which declares that
+// instance alone.
 func (r *Registry) Independent(e1name, e2name string) *Registry {
 	// Auto-switch to declared-only mode when Independent is used
 	r.allIndependent = false
-	r.independent = append(r.independent, [2]int{
-		r.eventIndex(e1name),
-		r.eventIndex(e2name),
-	})
+	r.indepNames = append(r.indepNames, [2]string{e1name, e2name})
+	f1, f2 := r.familyByName(e1name), r.familyByName(e2name)
+	if f1 < 0 && f2 < 0 {
+		r.independent = append(r.independent, [2]int{
+			r.eventIndex(e1name),
+			r.eventIndex(e2name),
+		})
+		return r
+	}
+	side := func(name string, fi int) []int {
+		if fi < 0 {
+			return []int{r.eventIndex(name)}
+		}
+		var out []int
+		for i, ev := range r.events {
+			if ev.family == fi+1 {
+				out = append(out, i)
+			}
+		}
+		return out
+	}
+	a, b := side(e1name, f1), side(e2name, f2)
+	for _, i := range a {
+		for _, j := range b {
+			if f1 >= 0 && f1 == f2 && i >= j {
+				continue // within one family: each unordered pair of instances once
+			}
+			r.independent = append(r.independent, [2]int{i, j})
+		}
+	}
 	return r
 }
 
@@ -121,7 +163,16 @@ func (r *Registry) OnlyDeclaredPairs() *Registry {
 // check (checkUnchanged), so the registry they build from has the same declarations
 // as the one checked.
 func (r *Registry) checkNames() error {
+	return r.checkNamesFor(false)
+}
+
+// checkNamesFor is checkNames; allowWide accepts a parameterized event too wide to expand,
+// which only the abstraction check (Build on a registry declared with Abstract) can check.
+func (r *Registry) checkNamesFor(allowWide bool) error {
 	if err := r.checkDeclaredVars(); err != nil {
+		return err
+	}
+	if err := r.checkFamilies(allowWide); err != nil {
 		return err
 	}
 	seen := make(map[string]bool, len(r.events))
@@ -190,12 +241,13 @@ func (r *Registry) owns(v Var) bool {
 // registry while that registry is being verified. Declarations only append, so
 // the counts identify the registry that was checked.
 type registryShape struct {
-	vars, invariants, events, independent int
-	allIndependent                        bool
+	vars, invariants, events, independent, families int
+	allIndependent                                  bool
 }
 
 func (r *Registry) shape() registryShape {
-	return registryShape{len(r.vars), len(r.invariants), len(r.events), len(r.independent), r.allIndependent}
+	return registryShape{len(r.vars), len(r.invariants), len(r.events), len(r.independent), len(r.families),
+		r.allIndependent}
 }
 
 // checkUnchanged rejects a registry that changed since before was taken. Build,
@@ -215,6 +267,10 @@ func (r *Registry) eventIndex(name string) int {
 		if ev.name == name {
 			return i
 		}
+	}
+	if fi := r.familyByName(name); fi >= 0 {
+		panic(fmt.Sprintf("gsm: event %q has parameters and %s instances, too many to name each; "+
+			"it can be declared Independent only as a whole", name, countText(r.families[fi].count)))
 	}
 	panic(fmt.Sprintf("gsm: unknown event %q", name))
 }
@@ -357,6 +413,11 @@ func (ib *InvariantBuilder) Add() {
 type EventBuilder struct {
 	r   *Registry
 	def eventDef
+
+	// Parameterized closure events (params.go).
+	params    []Param
+	guardArgs func(State, Args) bool
+	applyArgs func(State, Args) State
 }
 
 // Event begins declaring a named event. The name is how the event is addressed
@@ -402,10 +463,32 @@ func (eb *EventBuilder) Apply(fn EffectFunc) *EventBuilder {
 	return eb
 }
 
-// Add registers the event with the registry.
+// Add registers the event with the registry. An event with parameters (Param) is
+// registered as the family of its instances (see OnBuilder.Param).
 func (eb *EventBuilder) Add() {
-	if eb.def.effect == nil {
+	if len(eb.params) == 0 {
+		if eb.applyArgs != nil || eb.guardArgs != nil {
+			panic(fmt.Sprintf("gsm: event %q sets GuardArgs or ApplyArgs but declares no parameter (Param)", eb.def.name))
+		}
+		if eb.def.effect == nil {
+			panic(fmt.Sprintf("gsm: event %q has no effect function", eb.def.name))
+		}
+		eb.r.events = append(eb.r.events, eb.def)
+		return
+	}
+	if eb.applyArgs == nil && eb.def.effect == nil {
 		panic(fmt.Sprintf("gsm: event %q has no effect function", eb.def.name))
 	}
-	eb.r.events = append(eb.r.events, eb.def)
+	f := familyDef{name: eb.def.name, params: append([]Param(nil), eb.params...),
+		writes: append([]int(nil), eb.def.writes...), guardFn: eb.guardArgs, effectFn: eb.applyArgs,
+		foreign: eb.def.foreign}
+	if f.effectFn == nil {
+		fn := eb.def.effect
+		f.effectFn = func(s State, _ Args) State { return fn(s) }
+	}
+	if f.guardFn == nil && eb.def.guard != nil {
+		fn := eb.def.guard
+		f.guardFn = func(s State, _ Args) bool { return fn(s) }
+	}
+	eb.r.declareFamily(f)
 }

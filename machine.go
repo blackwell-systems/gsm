@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +47,11 @@ type Machine struct {
 	// lazy, and Apply normalizes every invalid input first, the zero state included:
 	// abstraction certifies CC1 at the valid states only.
 	abstract bool
+
+	// families are the parameterized events, by name (params.go): ApplyWith resolves
+	// them, and a lazy machine applies an instance of a family it did not expand (one
+	// checked by abstraction) from the family's rules.
+	families map[string]*machineFamily
 }
 
 // Name returns the machine's name.
@@ -93,6 +99,20 @@ func (m *Machine) NewState() State {
 func (m *Machine) Apply(s State, event string) State {
 	ei, ok := m.events[event]
 	if !ok {
+		if m.lazy {
+			if ev, ok := m.lazyInstance(event); ok {
+				m.mustBeInput("Apply", s)
+				if (s.packed != 0 || m.abstract) && !m.allHold(s) {
+					s = m.lazyNormalize(s)
+				}
+				return m.lazyApply(ev, s)
+			}
+		}
+		if f, args, ok := m.parseInstance(event); ok {
+			if why := f.def.argsError(args); why != "" {
+				panic("gsm: unknown event " + strconv.Quote(event) + ": " + why)
+			}
+		}
 		panic(fmt.Sprintf("gsm: unknown event %q", event))
 	}
 	if m.lazy {

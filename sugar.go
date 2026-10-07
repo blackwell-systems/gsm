@@ -138,10 +138,11 @@ func (b *RuleBuilder) Add() { b.r.DeclInvariant(b.name, b.when, b.fix) }
 // OnBuilder accumulates an event declared in fluent style. (Named OnBuilder to sit
 // alongside the closure-based EventBuilder, which Registry.Event returns.)
 type OnBuilder struct {
-	r     *Registry
-	name  string
-	eff   Transform
-	guard Pred
+	r      *Registry
+	name   string
+	eff    Transform
+	guard  Pred
+	params []Param // declared by Param (params.go)
 }
 
 // On begins a fluent event: r.On("inc_a").Does(Inc(a)).Add().
@@ -154,8 +155,20 @@ func (b *OnBuilder) Does(t Transform) *OnBuilder { b.eff = t; return b }
 // OnlyIf gates the event on a precondition (a no-op when false).
 func (b *OnBuilder) OnlyIf(p Pred) *OnBuilder { b.guard = p; return b }
 
-// Add lowers the event to a combinator event on the registry.
+// Add lowers the event to a combinator event on the registry. An event with parameters
+// (Param) lowers to the family of its instances, each a combinator event with the
+// parameters replaced by the instance's values (see OnBuilder.Param). It panics if the
+// guard or effect reads a parameter the event does not declare.
 func (b *OnBuilder) Add() {
+	if len(b.params) > 0 {
+		if b.eff == nil {
+			panic(fmt.Sprintf("gsm: event %q has no effect (Does)", b.name))
+		}
+		checkArgs(b.name, b.params, b.guard, b.eff)
+		b.r.declareFamily(familyDef{name: b.name, params: append([]Param(nil), b.params...),
+			guardAST: b.guard, effectAST: b.eff.clone()})
+		return
+	}
 	if b.guard == nil {
 		b.r.DeclEvent(b.name, b.eff)
 		return

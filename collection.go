@@ -135,6 +135,22 @@ func (c *CollectionMachine[K]) Apply(s *CollectionState[K], key K, event string)
 	return next
 }
 
+// ApplyWith applies an instance of the template's parameterized event called event to the
+// item at key, with the parameters' values in declaration order: c.ApplyWith(s, key,
+// "reserve", 3) is c.Apply(s, key, Instance("reserve", 3)). It panics as Apply does, and as
+// Machine.ApplyWith does on arguments that do not match the event's parameters.
+func (c *CollectionMachine[K]) ApplyWith(s *CollectionState[K], key K, event string, args ...int) State {
+	f, ok := c.item.families[event]
+	if !ok {
+		panic(fmt.Sprintf("gsm: collection over %s: event %q has no parameters (use Apply) or is not an event of "+
+			"the template", c.over, event))
+	}
+	if why := f.def.argsError(args); why != "" {
+		panic(fmt.Sprintf("gsm: collection over %s: ApplyWith: %s", c.over, why))
+	}
+	return c.Apply(s, key, Instance(event, args...))
+}
+
 // CollectionState is the state of a collection: the item state of each key an event has
 // reached. Make one with CollectionMachine.NewState.
 type CollectionState[K comparable] struct {

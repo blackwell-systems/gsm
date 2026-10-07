@@ -37,7 +37,17 @@ with a counterexample from the model you declared.
    fooled by arithmetic (`triangle_diverges`), so gsm refuses it. Keep those fields' ranges small
    enough for `Build`, or move the arithmetic out of guards where you can. The arithmetic route
    (solver-checked formulas) is on the [roadmap](ROADMAP.md#1b-abstraction-check-relationships-not-values).
-5. **Is the model wide but loosely coupled?** Do nothing: when the whole machine is too large to
+5. **Do events carry values?** An event with parameters
+   ([Getting started](getting-started.md#events-with-parameters)) is checked as one event per
+   value: `withdraw` with `amount` in 1..5 is five events. The ranges multiply the event count and
+   CC checks every pair, so keep parameter ranges small (an event may have at most 1024 instances,
+   and `Build` refuses a registry whose instances make the step tables or the pair check too large).
+   When a parameter is only compared and copied (a timestamp, a version, a level), declare
+   `Abstract` instead: the parameter is checked at representative values and its range can be as
+   wide as you like. The cutoff grows with the parameters, N = n + 2m for m parameters per event,
+   and each event runs at |representatives|^m values, so one or two parameters over a few
+   variables is the comfortable size.
+6. **Is the model wide but loosely coupled?** Do nothing: when the whole machine is too large to
    enumerate, every rule is a combinator and it splits into components, `Build` checks it per
    component. Write rules as combinators (`On`, `Rule`) so gsm can see what each one reads; a rule
    written as a Go closure keeps the model on the global path.
@@ -68,6 +78,8 @@ what would go wrong.
 | Abstraction | Literals you did not declare (`Is(amount, 13)` without `Abstract(13)`) | The check could pass and the model still diverge (`exact13_diverges`) |
 | Abstraction | Arithmetic in guards, invariants or writes | Same reason (`triangle_diverges`) |
 | Abstraction | `Bool` and `Enum` variables, writes that could saturate | Outside what the theorems model |
+| Abstraction | Arithmetic on an event parameter | Same as arithmetic on a variable (`triangle_diverges`); the difference route is stated for events without parameters |
+| `Build` | An event with more than 1024 instances | Each instance is an event; declare `Abstract` if the parameter is only compared and copied |
 | Compositional | A read missing from a footprint | Reads are always included for combinators; with writes alone the check would pass and the machine diverge (`ws_diverges`) |
 | Compositional | A repair that writes outside its component | Components are merged instead, or a closure repair is refused (`rc_diverges`) |
 
