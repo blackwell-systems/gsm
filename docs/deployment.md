@@ -257,6 +257,7 @@ runtime with one change of configuration in each replica's life:
 2. **Apply an old event that arrives after the switch as its translation**, the event of the same
    name in the new registry or the one the map names.
 3. **Apply each event once, by one configuration.** Events may arrive in any order (free delivery).
+   Under another delivery class, deliver as that class says (below).
 4. **For a barrier, drain before switching**: every replica applies every event submitted under the
    old configuration, then switches.
 
@@ -288,14 +289,111 @@ migrates a state between an event and its repair. In that model (normalization-c
   [`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
   gap 20, residue (c), closed in this model).
 
+**Delivery classes.** By default every event is applied exactly once, in any order. Check the
+change under the class your deployment provides:
+
+- **Declared independence.** When either registry declares `Independent` pairs, only declared
+  pairs are reordered and every other pair reaches every replica in one fixed order. The check
+  then covers the declared pairs only (`live_declared_exact`, `barrier_declared_exact`): the old
+  registry's pairs (as in-flight events), the new registry's pairs, and an in-flight old event
+  with a new event when the new registry declares the translation with that event.
+  `MigrationInFlightIndependent(oldEvent, newEvent)` declares more such cross pairs, for a
+  deployment where an in-flight event can arrive after a new one submitted later.
+- **At-least-once** (`MigrationDeliveryClass(gsm.MigrationAtLeastOnce)`): an event may be
+  delivered more than once, a redelivery possibly arriving after the switch
+  (`live_free_alo_exact`, `barrier_free_alo_exact`). The new registry's events must also absorb a
+  redelivery (`Idem-start`, `Idem-every`), an old event applied before a barrier switch and
+  redelivered after it must change nothing (`AbsorbS`), and runs of the old registry with the same
+  set of events must migrate to one state (`AmodA`). Combined with `Independent` pairs it is not
+  covered, so refused.
+
+A publishing flow adds an `unpublish` event. The new registry declares no pair, so a replica
+applies `publish` and `unpublish` in the order they were submitted, in-flight ones included: safe
+online. If an in-flight `publish` can arrive after an `unpublish` submitted later, declare that
+cross pair, and the change needs a barrier:
+
+<!-- gocheck: run -->
+```go
+v1 := gsm.NewRegistry("docs v1")
+pub1 := v1.Bool("published")
+v1.Event("publish").Writes(pub1).Apply(func(s gsm.State) gsm.State { return s.SetBool(pub1, true) }).Add()
+v2 := gsm.NewRegistry("docs v2")
+pub2 := v2.Bool("published")
+v2.Event("publish").Writes(pub2).Apply(func(s gsm.State) gsm.State { return s.SetBool(pub2, true) }).Add()
+v2.Event("unpublish").Writes(pub2).Apply(func(s gsm.State) gsm.State { return s.SetBool(pub2, false) }).Add()
+v2.OnlyDeclaredPairs() // every pair delivered in submission order
+migrate := func(old, blank gsm.State) gsm.State { return blank.SetBool(pub2, old.GetBool(pub1)) }
+
+ordered, err := gsm.CheckMigration(v1, v2, migrate, nil)
+if err != nil {
+    panic(err)
+}
+crossed, err := gsm.CheckMigration(v1, v2, migrate, nil, gsm.MigrationInFlightIndependent("publish", "unpublish"))
+if err != nil {
+    panic(err)
+}
+fmt.Println(ordered.Outcome, "/", crossed.Outcome, crossed.Failed)
+fmt.Print(crossed.LiveWitness.Run2.InFlight, " in flight, ", crossed.LiveWitness.Run2.After, "\n")
+if ordered.Outcome != gsm.MigrationSafeOnline || crossed.Outcome != gsm.MigrationSafeBehindBarrier {
+    panic("want online in submission order, a barrier with the cross pair declared")
+}
+```
+
+```
+SAFE ONLINE / SAFE BEHIND A BARRIER PermB-start
+[publish] in flight, [unpublish publish]
+```
+
+A migration that starts a new epoch of read receipts clears every `read` flag. Exactly once, an
+in-flight `read` is applied after the reset, so the change needs a barrier. At least once, even a
+drained switch diverges: a `read` applied before the switch and redelivered after it sets the
+cleared flag again, and the report names that straddling duplicate (`AbsorbS`):
+
+<!-- gocheck: run -->
+```go
+receipts := func(name string) (*gsm.Registry, gsm.Var) {
+    r := gsm.NewRegistry(name)
+    read := r.Bool("read")
+    r.Event("read").Writes(read).Apply(func(s gsm.State) gsm.State { return s.SetBool(read, true) }).Add()
+    return r, read
+}
+v1, _ := receipts("receipts v1")
+v2, _ := receipts("receipts v2")
+newEpoch := func(old, blank gsm.State) gsm.State { return blank }
+
+once, err := gsm.CheckMigration(v1, v2, newEpoch, nil)
+if err != nil {
+    panic(err)
+}
+atLeastOnce, err := gsm.CheckMigration(v1, v2, newEpoch, nil, gsm.MigrationDeliveryClass(gsm.MigrationAtLeastOnce))
+if err != nil {
+    panic(err)
+}
+fmt.Println(once.Outcome, "/", atLeastOnce.Outcome, atLeastOnce.Failed)
+w := atLeastOnce.BarrierWitness
+fmt.Println(w.Run2.Before, "then", w.Run2.InFlight, "redelivered:", w.Result1, "versus", w.Result2)
+if once.Outcome != gsm.MigrationSafeBehindBarrier || atLeastOnce.Failed != gsm.MigrationAbsorbS {
+    panic("want a barrier exactly once, unsafe by AbsorbS at least once")
+}
+```
+
+```
+SAFE BEHIND A BARRIER / UNSAFE AbsorbS
+[read] then [read] redelivered: {read=false} versus {read=true}
+```
+
+Causal delivery across the switch is not supported: gsm has no happens-before declaration
+(normalization-confluence `live_causal_exact` and `barrier_causal_exact` would back it).
+
 The registries need not pass `Build`: `CheckMigration` checks the states runs reach from the start
 (the old registry's zero state, or the states you pass with `MigrationFrom`, such as a running
 system's current state), not every state. Its cost is those states, at most 2²⁰ on each side; a
 larger instance is an error.
 
-**Not covered.** `CheckMigration` refuses a registry declared with `Abstract` or with `Independent`
-pairs (declared independence and causal or at-least-once delivery across the switch are open:
-gap 20, residue (b)). It takes single registries: a topology change of a federation is covered
+**Not covered.** `CheckMigration` refuses a registry declared with `Abstract`, and `Independent`
+pairs under at-least-once delivery (declared pairs combined with at-least-once delivery across the
+switch are not covered by the theorems; causal delivery is not supported, above: the rest of gap
+20, residue (b)). It takes single registries: a topology change of a federation is covered
 by the theory under `FedMachine` semantics (`fed_live_exact`, `fed_barrier_exact`; adding an edge
 an in-flight event reads is unsafe online, `late_edge`) but not implemented, and a collection
 migrated through its template and a projection deployment, where propagation is itself in flight

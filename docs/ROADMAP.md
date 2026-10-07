@@ -243,12 +243,25 @@ reports one of the three outcomes with its witness.
   `amodm_witness_exact`), and every negative outcome carries a replayed witness. See
   [Deployment](deployment.md#changing-a-running-system) and
   [Theory §11.11](theory.md#1111-changing-a-running-system-migration).
+- **Implemented, the delivery class across the switch** (gap 20, residue (b), closed in the
+  deterministic model by `coq/ReconfigurationDelivery.v`). Registries with `Independent` pairs
+  are checked under declared independence: the declared pairs of the combined alphabet from the
+  migrated start, the new registry's declared pairs at every migrated state, and the pair closure
+  seeded with the old registry's declared pairs (`live_declared_exact`, `barrier_declared_exact`,
+  `closureI_swap_exact`, `closureI_witness_exact`); `MigrationInFlightIndependent` declares cross
+  pairs of an in-flight event with a new one. `MigrationDeliveryClass(MigrationAtLeastOnce)`
+  checks at-least-once delivery: idempotence of the new events, the straddling duplicate
+  (`AbsorbS`) and runs with the same set of events (`AmodA`, a search over a state and the set
+  of events applied) (`live_free_alo_exact`, `barrier_free_alo_exact`). Both are exact, with no
+  unknown case short of the size limit.
 - **Residue.**
   - **Federations**: exact in the theory under `FedMachine` semantics (`fed_live_exact`,
     `fed_barrier_exact`, `late_edge`), not implemented: the same check applies to
     `FedMachine.Apply`, but a migration needs a way to build a `FedState`.
-  - **Delivery across the switch**: declared `Independent` pairs, causal and at-least-once delivery
-    (gap 20, residue (b)); such registries are refused.
+  - **Delivery across the switch**: causal delivery (gsm has no happens-before declaration;
+    `live_causal_exact`, `barrier_causal_exact` would back it), and declared `Independent` pairs
+    combined with at-least-once delivery, which the theorems do not cover and `CheckMigration`
+    refuses.
   - **Projection deployments**, where propagation is in flight at the switch (gap 20, residue (a)),
     and collections migrated through their template (no combined theorem with symmetry).
   - **Partial-order reduction** (item 1d) would cut the cost, which is the reachable states.

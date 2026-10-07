@@ -361,8 +361,9 @@ func (r *Report) regimeSummary() *RegimeSummary {
 		})
 	case declared:
 		s.NotCovered = append(s.NotCovered, RegimeLine{
-			Text: "changing these rules while events are in flight: CheckMigration refuses a registry with Independent pairs; " +
-				"declared independence and causal or at-least-once delivery across the switch are open",
+			Text: "changing these rules while events are in flight under at-least-once delivery: CheckMigration checks " +
+				"declared independence across the switch exactly once, and refuses a registry with Independent pairs " +
+				"under at-least-once delivery, a combination not covered",
 			Ref: refMigration + "; " + refGap20Delivery,
 		})
 	case r.Abstraction != nil:
@@ -585,39 +586,60 @@ func (r *FedReport) regimeSummary() *RegimeSummary {
 // regimeSummary derives the summary of a migration report.
 func (r *MigrationReport) regimeSummary() *RegimeSummary {
 	s := &RegimeSummary{}
+	class := "free delivery, each event applied once"
+	switch {
+	case r.Delivery == MigrationAtLeastOnce:
+		class = "at-least-once delivery, any order: each submitted event applied at least once, redeliveries " +
+			"across the switch included"
+	case r.Declared:
+		class = "declared independence, each event applied once: only the declared pairs are reordered (each " +
+			"registry's Independent pairs, and an in-flight event with an event of " + r.To + " as " + r.To +
+			" declares its translation with it or MigrationInFlightIndependent declares them)"
+	}
 	s.Regime = []string{
 		fmt.Sprintf("change of a single registry, %s -> %s", r.From, r.To),
 		"gsm's runtime (each Apply repairs before it returns)",
-		"free delivery, each event applied once",
+		class,
 		fmt.Sprintf("checked from %d start(s)", len(r.Starts)),
+	}
+	liveThms, impl := []string{"det_live_exact", "run_tequiv", "perm_tequiv_total"}, "det_live_implies_barrier"
+	switch {
+	case r.Delivery == MigrationAtLeastOnce:
+		liveThms, impl = []string{"live_free_alo_exact"}, "live_implies_barrier_d"
+	case r.Declared:
+		liveThms, impl = []string{"live_declared_exact", "classify_declared_complete"}, "live_implies_barrier_d"
 	}
 	barrierThms := func() []string {
 		var out []string
 		for _, t := range r.Theorems {
-			if t != "det_live_exact" {
+			if t != "det_live_exact" && t != "live_declared_exact" && t != "live_free_alo_exact" {
 				out = append(out, t)
 			}
 		}
 		return out
 	}
+	same := "the same events"
+	if r.Delivery == MigrationAtLeastOnce {
+		same = "the same set of events, each delivered at least once,"
+	}
 	switch r.Outcome {
 	case MigrationSafeOnline:
 		s.Guaranteed = []RegimeLine{
 			{
-				Text: fmt.Sprintf("a switch at any time, with events of %s in flight: every run converges, the same events "+
-					"from a checked start reaching one state", r.From),
-				Theorems: []string{"det_live_exact", "run_tequiv", "perm_tequiv_total"},
+				Text: fmt.Sprintf("a switch at any time, with events of %s in flight: every run converges, %s "+
+					"from a checked start reaching one state", r.From, same),
+				Theorems: liveThms,
 			},
 			{
 				Text:     "a switch behind a barrier converges too",
-				Theorems: []string{"det_live_implies_barrier"},
+				Theorems: []string{impl},
 			},
 		}
 	case MigrationSafeBehindBarrier:
 		s.Guaranteed = []RegimeLine{{
 			Text: fmt.Sprintf("a switch after draining, every event submitted under %s applied first: every run converges, "+
-				"the same events from a checked start reaching one state; a switch with events in flight can diverge, as "+
-				"LiveWitness shows", r.From),
+				"%s from a checked start reaching one state; a switch with events in flight can diverge, as "+
+				"LiveWitness shows", r.From, same),
 			Theorems: barrierThms(),
 		}}
 	}
@@ -626,7 +648,18 @@ func (r *MigrationReport) regimeSummary() *RegimeSummary {
 			{Text: "the system runs from a checked start (the zero state of " + r.From + ", or the states passed with MigrationFrom)"},
 			{Text: "migrate every replica's state with the same migration, then Normalize it under " + r.To},
 			{Text: "apply an event of " + r.From + " that arrives after the switch as its translation"},
-			{Text: "apply each event once, by one configuration"},
+		}
+		switch {
+		case r.Delivery == MigrationAtLeastOnce:
+			s.MustProvide = append(s.MustProvide, RegimeLine{
+				Text: "deliver each event at least once; a redelivery may arrive at any time, under either configuration"})
+		case r.Declared:
+			s.MustProvide = append(s.MustProvide,
+				RegimeLine{Text: "apply each event once, by one configuration"},
+				RegimeLine{Text: "deliver every undeclared pair in one fixed order at every replica, an in-flight event " +
+					"with an event of " + r.To + " included"})
+		default:
+			s.MustProvide = append(s.MustProvide, RegimeLine{Text: "apply each event once, by one configuration"})
 		}
 		if r.Outcome == MigrationSafeBehindBarrier {
 			s.MustProvide = append(s.MustProvide, RegimeLine{
@@ -642,7 +675,9 @@ func (r *MigrationReport) regimeSummary() *RegimeSummary {
 	}
 	s.NotCovered = append(s.NotCovered,
 		RegimeLine{Text: "a switch between an event and its repair, which is not gsm's runtime", Ref: refMigration},
-		RegimeLine{Text: "declared Independent pairs, causal or at-least-once delivery across the switch", Ref: refGap20Delivery},
+		RegimeLine{Text: "declared Independent pairs combined with at-least-once delivery across the switch (refused), and " +
+			"causal delivery across the switch: gsm has no happens-before declaration (normalization-confluence " +
+			"live_causal_exact and barrier_causal_exact would back it)", Ref: refMigration + "; " + refGap20Delivery},
 		RegimeLine{
 			Text: "federations, collections, and projection deployments with propagation in flight",
 			Ref:  refMigration + "; " + refGap20Projected,

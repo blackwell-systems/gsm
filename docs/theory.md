@@ -1331,7 +1331,9 @@ normalization-confluence
 and
 [`ReconfigurationClosure.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/ReconfigurationClosure.v)
 (axiom-free; the notes are its `coq/docs/reconfiguration.md`), gap 20 of the
-[regime audit](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md).
+[regime audit](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md),
+and, for the delivery class across the switch (declared independence, at-least-once delivery),
+[`ReconfigurationDelivery.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/ReconfigurationDelivery.v).
 
 **Two models of the switch.** A run starts under configuration A, switches once to configuration
 B, and finishes under B. The switch migrates the state, and A-events still in flight become
@@ -1467,6 +1469,74 @@ a search stopped by the size limit (the one unknown case), and
 of live and barrier runs on random small registries, migrations and event maps, replaying every
 witness in an independent model of `Apply`.
 
+**Delivery classes across the switch (gap 20, residue (b), closed in the deterministic model).**
+`ReconfigurationDelivery.v` states the switch for any delivery class: a run is a delivery sequence
+of the combined alphabet (A-events submitted before the switch, B-events after it, an A-event
+delivered after the switch applied as its translation), and a class is a prefix-closed set of
+sequences compared by a relation reflexive on it. `live_delivery_exact` and `barrier_delivery_exact`
+are the generic forms; gsm checks two instances, chosen with `MigrationDeliveryClass` and the
+registries' `Independent` declarations, and reports the class in `MigrationReport.Delivery` and
+`MigrationReport.Declared`.
+
+| Class | gsm checks | Guarantee | Theorem |
+|---|---|---|---|
+| Free delivery, each event once (the default, no `Independent` pairs) | As above | Online and barrier outcomes exact | `det_live_exact`, `det_barrier_closure_exact` (recovered by `free_live_exact`, `free_barrier_closure_exact`) |
+| Declared independence, each event once (a registry declares `Independent` pairs) | `PermB-start` for the declared pairs of the combined alphabet: A's pairs translated, B's pairs, and an in-flight A-event a with a B-event b when B declares (τ a, b) or `MigrationInFlightIndependent` declares (a, b); `DS1` unchanged | Safe online, exact both ways | `live_declared_exact` |
+| | `PermB-every` for B's declared pairs; `PermA` and the `AmodM` closure seeded with A's declared pairs only | Safe behind a barrier, exact both ways; an exhausted search is a certificate | `barrier_declared_exact`, `closureI_swap_exact`, `closureI_witness_exact` |
+| | The three outcomes | Decided on finite instances, no unknown case | `classify_declared_complete` |
+| At-least-once, any order (`MigrationAtLeastOnce`, no `Independent` pairs) | `PermB-start`, `Idem-start` (every B-event idempotent at every state B reaches from M s₀), `DS1` | Safe online, exact both ways | `live_free_alo_exact` |
+| | `PermB-every`, `Idem-every`, `AbsorbS` (for every state t reached by a run that applied a, and every z B reaches from M t, Apply_B(z, τ a) = z), `AmodA` (runs with the same set of A-events migrate to one state) | Safe behind a barrier, exact both ways; an exhausted `AmodA` search is a certificate | `barrier_free_alo_exact` |
+| Causal delivery | Not supported: gsm has no happens-before declaration | | `live_causal_exact`, `barrier_causal_exact` would back it |
+
+Online implies barrier in every class (`live_implies_barrier_d`). Every witness names the failing
+condition, and an at-least-once witness has `Redelivery` set: its two runs deliver the same set of
+events, a repeated event read as a redelivery. A straddling duplicate (an event applied before a
+barrier switch and redelivered after it) is its own failure, `AbsorbS`, with a witness whose
+second run lists the redelivery in `InFlight` at its position (`InFlightAt`).
+
+*Declared pairs.* The declared relation on the combined alphabet is symmetric, as the theorems
+require. Cross pairs default to B's declaration of the translation: an in-flight a and a B-event b
+are reordered iff B reorders τ a and b; `MigrationInFlightIndependent` declares further cross pairs
+(the theory takes any symmetric relation). Only one entry per pair of B-events is checked, since
+the condition depends only on the B-steps. The closure search keeps gsm's pruning (one orientation
+per declared pair, equal pairs skipped): the declared relation is symmetric, so a pair and its
+mirror are both in `ClosureI`'s closure and are separated together, and equal states stay equal.
+That pruning argument is gsm's; `gsm_closure_exact` mechanizes it for the full seed set.
+
+*At-least-once: the message reading.* The theorems' alphabet is the messages delivered, and a
+repeated message is a redelivery. In gsm an event may be submitted any number of times, each
+submission one message, so gsm instantiates the free at-least-once theorems at the alphabet of
+pairs (event, submission). Fresh submissions make every state a sequence of events reaches also
+reachable by a duplicate-free sequence of messages, so the theorems' commutation and idempotence
+after duplicate-free prefixes (`CommND`, `IdemND`) are exactly `PermB-start`, `PermB-every`,
+`Idem-start` and `Idem-every` at every reachable state; `AbsorbFree` is `AbsorbS` at every state
+reached by a run containing the event; and `AmodFree` (runs with the same set of messages) is runs
+with the same set of events, each any number of times. That last condition depends on which events
+were applied, not only on the state, so `AmodA` searches pairs of a state and the set of events
+applied: a witness refutes it, an exhausted search certifies it, and only a search stopped at the
+size limit leaves the outcome unknown. This reduction from messages to events is gsm's argument (a
+few lines, stated here), not a mechanized theorem. `classify_alo_complete` decides the class on a
+finite alphabet in which each event is one message, which is not gsm's reading: there, a second
+delivery of an event is always a redelivery, never a second submission.
+
+*The instances of `ReconfigurationDelivery.v`, in gsm's model.*
+
+| Instance | Theory | gsm | Test |
+|---|---|---|---|
+| `cross_declared_online` (A sets a flag; B has set and toggle; nothing declared) | Online | Safe online | `TestCheckMigrationDelivery_CrossDeclared` |
+| `cross_declared_barrier` (only the cross pair (in-flight set, toggle) declared) | Barrier only | Safe behind a barrier with `MigrationInFlightIndependent("set", "toggle")`, `PermB-start` failing on the in-flight set; declaring (set, toggle) in B instead declares B's own pair too, and is unsafe | `TestCheckMigrationDelivery_CrossDeclared` |
+| `count_dup_prefix` (A counts, B saturates at 1) | Exactly once online; at least once the live switch diverges (S1 at the duplicate prefix) | `DS1` fails at 1 under both classes: in gsm the prefix inc, inc is two submissions, a run under exactly-once delivery too; exactly once, safe behind a barrier; at least once, unsafe by `AmodA` (inc once against twice) | `TestCheckMigrationDelivery_CountDupPrefix` |
+| `reset_straddle` (A and B set a flag, the migration resets it) | Exactly once barrier only; at least once unsafe by `AbsorbS` alone | The same: safe behind a barrier (`DS1`), and unsafe by `AbsorbS` at least once, the other barrier conditions holding | `TestCheckMigrationDelivery_ResetStraddle` |
+| `rescaled_max` (max-registers, M and τ doubling) | Every condition of every class holds | Safe online exactly once, under declared pairs, and at least once | `TestCheckMigrationDelivery_RescaledMax` |
+
+`TestCheckMigration_DeclaredDifferentialRandom` and `TestCheckMigration_AtLeastOnceDifferentialRandom`
+compare the classification with a brute-force enumeration of the class's delivery sequences on
+random small registries (random declarations and cross pairs; at least once, sets of up to two
+messages per side, an event possibly submitted twice, each delivered at least once), and replay
+every witness as two runs the class relates (trace equivalent under the declared relation; the
+same set of events at least once). `TestCheckMigration_AmodASearchStops` is the at-least-once
+unknown case.
+
 **Not claimed, or not implemented.**
 
 - **A switch between an event and its repair**: the rewriting model, not gsm's runtime.
@@ -1476,8 +1546,13 @@ witness in an independent model of `Apply`.
   way to build a `FedState`).
 - **Collections and abstraction**: no theorem combines the switch with symmetry or abstraction; a
   registry declared with `Abstract` is refused.
-- **Declared pairs, causal and at-least-once delivery across the switch** (gap 20, residue (b)): a
-  registry with `Independent` pairs is refused.
+- **Causal delivery across the switch, and declared pairs with at-least-once delivery** (the rest of
+  gap 20, residue (b)): declared independence and at-least-once delivery are checked, each on its
+  own (above). Causal delivery needs a happens-before declaration, which gsm does not have
+  (`live_causal_exact` and `barrier_causal_exact` would back it). Declared pairs combined with
+  at-least-once delivery across a switch are not covered by the theorems, so `CheckMigration`
+  refuses `Independent` pairs under `MigrationAtLeastOnce`. The delivery classes in the rewriting
+  model are not covered either, and are not gsm's runtime.
 - **Projection deployments**, where propagation is itself in flight (gap 20, residue (a)), and
   cyclic deployments of that kind.
 

@@ -141,6 +141,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   small registries, migrations and event maps with a brute-force enumeration of live and barrier
   runs, replays every witness in a model of `Apply` written from the rule tables, and anchors that
   model to each side's built machine.
+- **`CheckMigration` under the deployment's delivery class.** A change is now checked under the
+  delivery class the deployment provides (normalization-confluence `coq/ReconfigurationDelivery.v`,
+  `REGIME-AUDIT.md` gap 20, residue (b), closed in the deterministic model, gsm's runtime).
+  - *Declared independence.* A registry with `Independent` pairs is no longer refused: only the
+    declared pairs are checked. `PermB-start` covers the declared pairs of the combined alphabet
+    (the old registry's pairs as in-flight events, the new registry's pairs, and an in-flight old
+    event with a new event when the new registry declares the translation with it), `PermB-every`
+    the new registry's declared pairs, and `PermA` and the `AmodM` closure the old registry's
+    declared pairs only; `DS1` is unchanged. Exact both ways (`live_declared_exact`,
+    `barrier_declared_exact`, `closureI_swap_exact`, `closureI_witness_exact`,
+    `classify_declared_complete`). `MigrationInFlightIndependent(oldEvent, newEvent)` declares
+    further cross pairs.
+  - *At-least-once delivery.* `MigrationDeliveryClass(MigrationAtLeastOnce)` (type
+    `MigrationDelivery`, default `MigrationExactlyOnce`) adds the conditions of a redelivery:
+    `MigrationIdemStart` and `MigrationIdemEvery` (the new registry's events absorb a redelivery),
+    `MigrationAbsorbS` (an event applied before a barrier switch and redelivered after it changes
+    nothing, the straddling duplicate, with its own witness) and `MigrationAmodA` (runs of the old
+    registry with the same set of events migrate to one state, decided by a search over a state
+    and the set of events applied; `MigrationUnknown` only when that search stops at the size
+    limit). Exact both ways (`live_free_alo_exact`, `barrier_free_alo_exact`), with each submission
+    of an event read as one message. `Independent` pairs under at-least-once delivery are refused
+    (the combination is not covered); causal delivery is not supported (gsm has no happens-before
+    declaration).
+  - `MigrationReport.Delivery` and `MigrationReport.Declared` name the class checked, the regime
+    summary states it and cites its theorems, `MigrationRun.InFlightAt` gives where each in-flight
+    event's translation is applied (a cross pair or a redelivery can follow native events), and
+    `MigrationWitness.Redelivery` marks an at-least-once witness whose runs deliver the same set of
+    events. Tests mirror `cross_declared_online`, `cross_declared_barrier`, `count_dup_prefix`
+    (where gsm's model differs: an event submitted twice makes the duplicate prefix an
+    exactly-once run), `reset_straddle` and `rescaled_max`, and
+    `TestCheckMigration_DeclaredDifferentialRandom` and
+    `TestCheckMigration_AtLeastOnceDifferentialRandom` compare each class with a brute-force
+    enumeration of its delivery sequences. `docs/theory.md` §11.11 (the delivery-class table),
+    `docs/deployment.md` (an example per class), `docs/reference.md` and `docs/ROADMAP.md` are
+    updated.
 
 ### Changed
 - Theory §11.12: the single out-of-range check per parameterized event now cites `EventCollapse.v` (`range_out_gov`, `range_cc1v`, `range_idemv`, `range_cc1_exact`, `range_gsm_exact`, `range_idem_exact`), so every guarantee of event parameters cites a gated theorem.
