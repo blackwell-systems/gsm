@@ -269,7 +269,7 @@ func TestCheckMigration_DifferentialRandom(t *testing.T) {
 	}
 	const ka, kb = 4, 3
 	seen := map[gsm.MigrationOutcome]int{}
-	anchored := 0
+	anchored, closureCertified := 0, 0
 	for trial := 0; trial < trials; trial++ {
 		nA, nB := 2+rng.Intn(3), 2+rng.Intn(3)
 		eA, eB := 1+rng.Intn(3), 1+rng.Intn(3)
@@ -330,6 +330,11 @@ func TestCheckMigration_DifferentialRandom(t *testing.T) {
 			t.Fatalf("%s: %v", where, err)
 		}
 		seen[rep.Outcome]++
+		// No limit is hit on these instances, so the outcome is always decided
+		// (det_classify_complete): Unknown only when the AmodM search stops at the limit.
+		if rep.Outcome == gsm.MigrationUnknown || rep.SearchStopped != "" {
+			t.Fatalf("%v, search %q, with no limit hit", rep.Outcome, rep.SearchStopped)
+		}
 		liveDiv := inst.diverges(false, s0, ka, kb)
 		barDiv := inst.diverges(true, s0, ka, kb)
 		ctx := func() string {
@@ -340,11 +345,17 @@ func TestCheckMigration_DifferentialRandom(t *testing.T) {
 			if liveDiv {
 				t.Fatalf("SAFE ONLINE, but two live runs diverge: %s", ctx())
 			}
-		case gsm.MigrationSafeBehindBarrier, gsm.MigrationUnknown:
-			// Unknown claims nothing; that no barrier divergence exists then is what the AmodM
-			// search's failure to find a witness predicts, and is checked here, not claimed.
+		case gsm.MigrationSafeBehindBarrier:
+			// Every barrier certificate, by PermA or by an exhausted AmodM search, must agree
+			// with the brute-force enumeration of barrier runs.
 			if barDiv {
 				t.Fatalf("%v, but two barrier runs diverge: %s", rep.Outcome, ctx())
+			}
+			if c, ok := rep.Condition(gsm.MigrationAmodM); ok {
+				if !c.Decided || !c.Holds {
+					t.Fatalf("SAFE BEHIND A BARRIER with AmodM %+v: %s", c, ctx())
+				}
+				closureCertified++
 			}
 		case gsm.MigrationUnsafe:
 			inst.checkWitness(t, where, rep.BarrierWitness, x, y, true)
@@ -362,10 +373,14 @@ func TestCheckMigration_DifferentialRandom(t *testing.T) {
 			t.Fatalf("two barrier runs diverge, outcome %v: %s", rep.Outcome, ctx())
 		}
 	}
-	t.Logf("outcomes over %d trials: %v; %d sides anchored to a built machine's Apply", trials, seen, anchored)
-	for _, o := range []gsm.MigrationOutcome{gsm.MigrationSafeOnline, gsm.MigrationSafeBehindBarrier, gsm.MigrationUnsafe, gsm.MigrationUnknown} {
+	t.Logf("outcomes over %d trials: %v; %d barrier outcomes certified by the closure search; %d sides anchored "+
+		"to a built machine's Apply", trials, seen, closureCertified, anchored)
+	for _, o := range []gsm.MigrationOutcome{gsm.MigrationSafeOnline, gsm.MigrationSafeBehindBarrier, gsm.MigrationUnsafe} {
 		if seen[o] == 0 {
 			t.Errorf("no trial produced %v", o)
 		}
+	}
+	if closureCertified == 0 {
+		t.Error("no trial certified a barrier by the closure search")
 	}
 }

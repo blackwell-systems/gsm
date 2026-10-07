@@ -333,27 +333,138 @@ func unknownPair(keep func(x int) int) (a, b *gsm.Registry, mig gsm.Migration, e
 	return a, b, mig, map[string]string{"set1": "noop", "set2": "noop"}
 }
 
-// A non-injective migration that absorbs A's divergence: the barrier is in fact safe (the
-// migration drops x, and c converges), but with A diverging on its own and the migration not
-// faithful, no mechanized finite condition decides it. CheckMigration reports Unknown, never
-// Unsafe, and the live witness.
-func TestCheckMigration_NonInjectiveUnknown(t *testing.T) {
+// closureTheorems are the theorems that make an exhausted AmodM search a certificate
+// (normalization-confluence coq/ReconfigurationClosure.v).
+var closureTheorems = []string{"det_barrier_closure_exact", "amodm_closure_exact", "gsm_closure_exact", "amodm_witness_exact"}
+
+// A non-injective migration that absorbs A's divergence: the migration drops x, and c
+// converges. A diverges on its own and the migration is not faithful, so PermA does not
+// decide the barrier; the AmodM search exhausts the pair closure with no witness, which
+// certifies it (det_barrier_closure_exact). Safe behind a barrier, with the live witness.
+func TestCheckMigration_NonInjectiveAbsorbingSafeBehindBarrier(t *testing.T) {
 	a, b, mig, events := unknownPair(func(int) int { return 0 })
 	rep := mustCheck(t, a, b, mig, events)
-	if rep.Outcome != gsm.MigrationUnknown {
-		t.Fatalf("outcome %v, want UNKNOWN", rep.Outcome)
+	if rep.Outcome != gsm.MigrationSafeBehindBarrier || rep.SearchStopped != "" {
+		t.Fatalf("outcome %v, search %q, want SAFE BEHIND A BARRIER", rep.Outcome, rep.SearchStopped)
 	}
 	if rep.Faithful || cond(t, rep, gsm.MigrationPermA).Holds || !cond(t, rep, gsm.MigrationPermBEvery).Holds {
 		t.Errorf("want PermA failing, PermB-every holding, not faithful")
 	}
-	if c := cond(t, rep, gsm.MigrationAmodM); c.Decided || c.Holds || !strings.Contains(c.Detail, "not a certificate") {
+	if c := cond(t, rep, gsm.MigrationAmodM); !c.Decided || !c.Holds || !strings.Contains(c.Detail, "closure is exhausted") {
 		t.Errorf("AmodM: %+v", c)
 	}
 	if rep.LiveWitness == nil || rep.LiveWitness.Condition != gsm.MigrationDS1 || rep.BarrierWitness != nil {
 		t.Errorf("want a DS1 live witness and no barrier witness")
 	}
-	if !strings.Contains(rep.String(), "UNKNOWN (not certified") || !strings.Contains(rep.String(), "[AmodM]: NOT DECIDED") {
+	for _, th := range closureTheorems {
+		if !hasTheorem(rep, th) {
+			t.Errorf("theorems %v lack %s", rep.Theorems, th)
+		}
+	}
+	if !strings.Contains(rep.String(), "[AmodM]: PASS") {
 		t.Errorf("report:\n%s", rep)
+	}
+}
+
+// The closure instances of normalization-confluence coq/ReconfigurationClosure.v: A is
+// last-writer-wins on option bool (x = 0 is None, the start; set1 writes Some true, x = 1;
+// set2 writes Some false, x = 2), so A diverges; B is one Bool with one event, tick, that
+// every A event translates to.
+func closureInstance(stepB func(y gsm.Var) func(gsm.State) gsm.State, m func(x int) bool) (a, b *gsm.Registry, mig gsm.Migration, events map[string]string) {
+	a, ax := lwwRegistry("lwwA")
+	b = gsm.NewRegistry("boolB")
+	y := b.Bool("y")
+	b.Event("tick").Writes(y).Apply(stepB(y)).Add()
+	mig = func(old, blank gsm.State) gsm.State { return blank.SetBool(y, m(old.GetInt(ax))) }
+	return a, b, mig, map[string]string{"set1": "tick", "set2": "tick"}
+}
+
+// flagB sets the flag; idleB leaves it.
+func flagB(y gsm.Var) func(gsm.State) gsm.State {
+	return func(s gsm.State) gsm.State { return s.SetBool(y, true) }
+}
+func idleB(gsm.Var) func(gsm.State) gsm.State { return func(s gsm.State) gsm.State { return s } }
+
+// mergeM merges the two writes (None to false, either write to true); partialM merges the
+// start with one write (None and Some true to true, Some false to false).
+func mergeM(x int) bool   { return x != 0 }
+func partialM(x int) bool { return x != 2 }
+
+// merged_barrier: B ignores the translated events, so an in-flight write is lost and the live
+// switch diverges (DS1 fails at the start). A diverges and mergeM is not injective, but every
+// pair of the closure is two writes, which mergeM merges: safe behind a barrier, certified by
+// the exhausted closure search. Before the closure theorems this case was Unknown.
+func TestCheckMigration_ClosureMergedBarrier(t *testing.T) {
+	a, b, mig, events := closureInstance(idleB, mergeM)
+	rep := mustCheck(t, a, b, mig, events)
+	if rep.Outcome != gsm.MigrationSafeBehindBarrier || rep.Failed != gsm.MigrationDS1 {
+		t.Fatalf("outcome %v failed %q, want SAFE BEHIND A BARRIER on DS1", rep.Outcome, rep.Failed)
+	}
+	if rep.Faithful || cond(t, rep, gsm.MigrationPermA).Holds || !cond(t, rep, gsm.MigrationPermBEvery).Holds {
+		t.Errorf("want PermA failing, PermB-every holding, not faithful")
+	}
+	if c := cond(t, rep, gsm.MigrationAmodM); !c.Decided || !c.Holds {
+		t.Errorf("AmodM: %+v", c)
+	}
+	if rep.BarrierWitness != nil || rep.LiveWitness == nil {
+		t.Errorf("want a live witness and no barrier witness")
+	}
+	for _, th := range closureTheorems {
+		if !hasTheorem(rep, th) {
+			t.Errorf("theorems %v lack %s", rep.Theorems, th)
+		}
+	}
+
+	// From the start and from Some true (a twin declaration, since lwwA does not Build). From
+	// Some true every write migrates to true either way, so that start is safe online and the
+	// search runs from the other; the combined report is safe behind a barrier.
+	twin := gsm.NewRegistry("twin")
+	tx := twin.Int("x", 0, 2)
+	tm := mustBuild(t, twin)
+	rep = mustCheck(t, a, b, mig, events, gsm.MigrationFrom(tm.NewState(), tm.NewState().SetInt(tx, 1)))
+	if rep.Outcome != gsm.MigrationSafeBehindBarrier {
+		t.Fatalf("from two starts: outcome %v, want SAFE BEHIND A BARRIER", rep.Outcome)
+	}
+	if c := cond(t, rep, gsm.MigrationAmodM); !c.Decided || !c.Holds || !strings.HasPrefix(c.Detail, "from {x=0}: ") {
+		t.Errorf("from two starts, AmodM: %+v", c)
+	}
+}
+
+// partial_merge: the same, with partialM. The closure has a pair partialM separates, at the
+// start: set1 then set2 gives Some false, set2 then set1 gives Some true, which migrate to
+// false and true. Unsafe, with that barrier witness.
+func TestCheckMigration_ClosurePartialMerge(t *testing.T) {
+	a, b, mig, events := closureInstance(idleB, partialM)
+	rep := mustCheck(t, a, b, mig, events)
+	if rep.Outcome != gsm.MigrationUnsafe || rep.Failed != gsm.MigrationAmodM || rep.Faithful {
+		t.Fatalf("outcome %v failed %q faithful %v, want UNSAFE on AmodM, not faithful", rep.Outcome, rep.Failed, rep.Faithful)
+	}
+	if c := cond(t, rep, gsm.MigrationAmodM); !c.Decided || c.Holds {
+		t.Errorf("AmodM: %+v", c)
+	}
+	w := rep.BarrierWitness
+	if w == nil || !w.Barrier || len(w.Run1.After) != 0 || len(w.Run2.After) != 0 ||
+		strings.Join(w.Run1.Before, ",") != "set1,set2" || strings.Join(w.Run2.Before, ",") != "set2,set1" {
+		t.Fatalf("barrier witness %+v", w)
+	}
+	if w.Result1.ID() == w.Result2.ID() {
+		t.Errorf("witness does not diverge: %s versus %s", w.Result1, w.Result2)
+	}
+}
+
+// merged_online: B sets a flag, and every write becomes the flag event. Safe online, though A
+// diverges and mergeM is not injective.
+func TestCheckMigration_ClosureMergedOnline(t *testing.T) {
+	a, b, mig, events := closureInstance(flagB, mergeM)
+	rep := mustCheck(t, a, b, mig, events)
+	if rep.Outcome != gsm.MigrationSafeOnline || rep.LiveWitness != nil {
+		t.Fatalf("outcome %v, want SAFE ONLINE", rep.Outcome)
+	}
+	if rep.Faithful || cond(t, rep, gsm.MigrationPermA).Holds {
+		t.Errorf("want PermA failing and not faithful")
+	}
+	if _, ok := rep.Condition(gsm.MigrationAmodM); ok {
+		t.Errorf("AmodM evaluated; it is searched only when the change is not safe online")
 	}
 }
 

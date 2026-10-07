@@ -53,6 +53,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runs, replays every witness in a model of `Apply` written from the rule tables, and anchors that
   model to each side's built machine.
 
+### Changed
+
+- **`CheckMigration`: an exhausted closure search certifies the barrier.** When the change is
+  not safe online, the new registry converges from every migrated reachable state (`PermB-every`),
+  the old registry diverges on its own and the migration is not injective, `CheckMigration` now
+  reports `MigrationSafeBehindBarrier` when its `MigrationAmodM` search exhausts the pair closure
+  with no witness, where it reported `MigrationUnknown`. The search is proved exact in the
+  deterministic model, which is gsm's runtime (normalization-confluence
+  `coq/ReconfigurationClosure.v`, `REGIME-AUDIT.md` gap 20, residue (c)): the barrier converges iff
+  the migration sends both states of every closure pair to one state (`det_barrier_closure_exact`,
+  `amodm_closure_exact`), the pruned search gsm runs computes that closure (`gsm_closure_exact`),
+  and it finds a witness iff one exists (`amodm_witness_exact`). The `MigrationAmodM` condition is
+  now decided and holds in that case, the report cites those four theorems, and
+  `MigrationUnknown` means only that the search stopped at the size limit (`SearchStopped`); on
+  finite instances the outcome is otherwise always decided (`det_classify_complete`). Tests mirror
+  the theory's closure instances: `merged_barrier` (safe behind a barrier, previously unknown),
+  `partial_merge` (unsafe, with the closure witness) and `merged_online` (safe online); the
+  absorbing non-injective case and the exhausted search are now safe behind a barrier, a stopped
+  search is still unknown, and `TestCheckMigration_DifferentialRandom` asserts no unknown outcome
+  when no limit is hit and checks every barrier certificate against the brute-force enumeration of
+  barrier runs. `docs/theory.md` §11.11, `docs/deployment.md`, `docs/reference.md` and
+  `docs/ROADMAP.md` (residue (c) removed from item 2) are updated.
+
 ## [0.15.0] - 2026-10-06
 
 A scaling release. gsm can now verify models far larger than its 2²⁰-state enumeration, each through
