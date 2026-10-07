@@ -192,6 +192,21 @@ func (r *Report) regimeSummary() *RegimeSummary {
 	default:
 		s.Regime = append(s.Regime, "checked globally")
 	}
+	if len(r.Families) > 0 {
+		fams := make([]string, len(r.Families))
+		for i, f := range r.Families {
+			parts := make([]string, len(f.Params))
+			for j, p := range f.Params {
+				parts[j] = p.String()
+			}
+			fams[i] = f.Name + "(" + strings.Join(parts, ", ") + ")"
+		}
+		how := "each instance checked as its own event"
+		if r.Abstraction != nil {
+			how = "checked over representative parameter values"
+		}
+		s.Regime = append(s.Regime, fmt.Sprintf("events with parameters %s, %s", strings.Join(fams, ", "), how))
+	}
 	if declared {
 		s.Regime = append(s.Regime, fmt.Sprintf("declared Independent pairs (%d undeclared pair(s), %d need causal order)",
 			r.PairsUndeclared, len(r.CausalOrderRequired)))
@@ -208,6 +223,9 @@ func (r *Report) regimeSummary() *RegimeSummary {
 	switch {
 	case r.Abstraction != nil:
 		conv.Text = order + ", for every value in the declared ranges, NewState included"
+		if r.Abstraction.Params > 0 {
+			conv.Text = order + ", for every value of every variable and event parameter in the declared ranges, NewState included"
+		}
 		if declared {
 			conv.Theorems = []string{"gsm_abs_sound"}
 		} else {
@@ -282,11 +300,11 @@ func (r *Report) regimeSummary() *RegimeSummary {
 	}
 	if len(r.NotIdempotent) > 0 {
 		l := RegimeLine{Text: fmt.Sprintf("if your transport can redeliver: deduplicate %s%s before Apply "+
-			"(an event id and a dedupe set); the other events absorb duplicates", strings.Join(r.NotIdempotent, ", "), perKey)}
+			"(an event id and a dedupe set); the other events absorb duplicates", groupEvents(r.NotIdempotent, r.Families), perKey)}
 		switch {
 		case tested:
 			l.Text = fmt.Sprintf("if your transport can redeliver: deduplicate %s%s before Apply (an event id and a dedupe set)",
-				strings.Join(r.NotIdempotent, ", "), perKey)
+				groupEvents(r.NotIdempotent, r.Families), perKey)
 		case allCommute:
 			l.Theorems = []string{"alo_exact"}
 		default:
@@ -297,7 +315,7 @@ func (r *Report) regimeSummary() *RegimeSummary {
 	if causal {
 		pairs := make([]string, len(r.CausalOrderRequired))
 		for i, f := range r.CausalOrderRequired {
-			pairs[i] = fmt.Sprintf("(%s, %s)", f.Event1, f.Event2)
+			pairs[i] = fmt.Sprintf("(%s, %s)", kindName(f.Event1, r.Families), kindName(f.Event2, r.Families))
 		}
 		s.MustProvide = append(s.MustProvide, RegimeLine{
 			Text: fmt.Sprintf("causal order for the undeclared pair(s) %s%s: each pair reaches every replica in the same order",

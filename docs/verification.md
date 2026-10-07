@@ -599,6 +599,25 @@ and the reason (also in `Report.AbstractionRefused`). Nothing is checked after a
 | A `Bool` or `Enum` variable | The theorems are about integer variables. Use an `Int` whose values are declared constants |
 | A copy into a narrower range, or a constant written outside its target's range | The write could saturate, which the theorems (over all integers) do not model |
 | More than 64 bits of state, more than 2²⁰ representative states, or a constant within n of the int limits | The state must fit one machine word, the check must stay enumerable, and the representatives must not overflow |
+| Arithmetic on an event parameter (`Sub(V(balance), Arg("amount"))`) | As for variables (`triangle_diverges`). The difference route of the theory is stated for events without parameters; check such an event with `Build` without `Abstract`, over small ranges |
+| A parameter copied into a narrower variable, a closure event with parameters, or an `Independent` declaration naming one instance | The write could saturate; gsm cannot inspect the closure; abstraction pairs an event with parameters as a whole |
+
+**Events with parameters.** An event declared with parameters
+([Getting started](getting-started.md#events-with-parameters)) is checked at every assignment of
+representative values to its parameters, and the result holds for every value in the parameters'
+ranges, which may be as wide as an `Int` allows (a family too wide for `Build` without `Abstract`
+is accepted here). A parameter may be compared and copied, like a variable, against variables,
+other parameters and the declared constants. The cutoff is N = n + 2m, m the most parameters one
+event declares (`cc1_valid_abs`; `Report.Abstraction.Cutoff` and `Params`), so the representatives
+are C, the N integers above each constant and the N below the least. Each parameter's bounds join
+C: the check runs the event with its range test added to its guard, so a value outside the range
+is an event that does nothing, and a failure always has its parameter values in range. Every pair of representative
+instances is checked, two values of one event included. `NotIdempotent` lists a parameterized
+event by its signature (`push(v)`) with a representative witness in `Report.Families`, since
+idempotence transfers per event, for every value (`idem_valid_abs`). The check runs each event at
+|representatives|^m values, so it suits events with one or two parameters over a few variables:
+registers, owners, max and min updates, deadlines fixed at creation.
+[Theory §11.12](theory.md#1112-event-parameters) maps each condition to its theorem.
 
 **Ranges and wrap-around.** The theorems are about mathematical integers. The fragment has no
 arithmetic, so a rule never computes a value: it can only write a value some variable already

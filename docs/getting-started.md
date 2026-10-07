@@ -19,6 +19,7 @@ report means, see [Verification](verification.md).
 - [Declarative rules (combinators)](#declarative-rules-combinators)
 - [Independence declarations](#independence-declarations)
 - [Collections: one template, every key](#collections-one-template-every-key)
+- [Events with parameters](#events-with-parameters)
 - [Next steps](#next-steps)
 
 ---
@@ -243,6 +244,101 @@ the template's `NewState`. `Apply(s, key, event)` updates `s` in place and retur
 item state, `Item(key)` reads one item, and `Keys`, `Len` and `Clone` list, count and copy the
 items. A `CollectionState` is not safe for concurrent use. `Item()` on the machine returns the
 template's `Machine`.
+
+## Events with parameters
+
+An event can carry values: "deposit an amount", "reserve a quantity", "book n rooms". Declare each
+parameter with its range on the event, read it in the guard and effect with `Arg`, and pass the
+values when you apply the event:
+
+<!-- gocheck: run -->
+```go
+r := gsm.NewRegistry("ledger")
+deposited := r.Int("deposited", 0, 20) // facts that only rise
+requested := r.Int("requested", 0, 20)
+overdraft := r.Int("overdraft", 0, 1) // derived: requested > deposited
+
+r.On("deposit").Param("amount", 1, 5).Does(gsm.IncByArg(deposited, "amount")).Add()
+r.On("withdraw").Param("amount", 1, 5).Does(gsm.IncByArg(requested, "amount")).Add()
+r.Rule("flag on").Require(gsm.Or(gsm.AtMostVar(requested, deposited), gsm.Is(overdraft, 1))).
+    RepairWith(gsm.SetTo(overdraft, 1)).Add()
+r.Rule("flag off").Require(gsm.Or(gsm.AboveVar(requested, deposited), gsm.Is(overdraft, 0))).
+    RepairWith(gsm.SetTo(overdraft, 0)).Add()
+
+m, report, err := r.Build() // checks deposit(1) .. deposit(5) and withdraw(1) .. withdraw(5)
+if err != nil {
+    panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+}
+fmt.Println(report.EventCount) // 10
+
+s := m.ApplyWith(m.NewState(), "withdraw", 4) // requested 4 before any deposit: overdrawn
+s = m.ApplyWith(s, "deposit", 5)               // the deposit covers it: the flag clears
+fmt.Println(s.GetInt(overdraft), m.Apply(s, gsm.Instance("withdraw", 2)).GetInt(overdraft)) // 0 1
+```
+
+**A parameterized event is the family of its instances.** `withdraw` with `amount` in 1..5 is five
+events, `withdraw(1)` to `withdraw(5)`, and `Build` checks each one as its own event: WFC, CC for
+every pair of instances (two withdrawals of different amounts included), idempotence per
+instance. Nothing new is proved or assumed: a finite family of events is what `Build` has always
+checked, so every guarantee, path and tool applies as it does to events written out by hand, the
+oracles included. `Instance("withdraw", 4)` is the instance's name, `"withdraw(4)"`, and any API
+that takes an event name takes it (`Apply`, `Independent`, a collection's `Apply`,
+`FedMachine.ApplyNamed`, `CheckMigration`'s event map, the names in an exported machine).
+`m.ApplyWith(s, "withdraw", 4)` is `m.Apply(s, gsm.Instance("withdraw", 4))`, and panics on a
+value outside the range. A closure event declares parameters the same way and reads them through
+`GuardArgs` and `ApplyArgs`.
+
+**Reading the report.** The report names instances: a CC failure between `deposit(1)` and
+`withdraw(1)`, say. Obligations are grouped by event: `Delivery: exactly once for deposit(amount)
+(every value), withdraw(amount) (every value)`. `Report.Families` lists each parameterized event,
+its parameters, how many instances were checked and which are not idempotent.
+`Independent("deposit", "withdraw")` declares every instance of one independent of every instance
+of the other; `Independent("withdraw", "withdraw")` declares the instances of `withdraw` independent
+of each other.
+
+**Record facts, here too.** The ledger above records what was deposited and requested, and derives
+the overdraft. The natural first draft, `withdraw` guarded on the balance covering the amount,
+fails CC exactly as the guarded shipment does
+([above](#why-not-guard-the-shipment-on-payment)): `Build` reports `(deposit(1), withdraw(1))` from
+a balance of 0. The counters saturate at 20, which `Report.Saturations` lists: size the ranges past
+the totals you expect.
+
+**Size.** Each instance is an event of the machine, so the ranges multiply the event count, and CC
+checks every pair. An event may have at most 1024 instances (the product of its parameters' range
+sizes); `Build` refuses a wider one with an error that suggests `Abstract`, and refuses up front a
+registry whose instances would make the step tables or the pair check too large.
+
+**Wide parameters: abstraction.** When the rules only compare and copy a parameter (a timestamp, a
+version, a level), declare `Abstract` and the range can be as wide as an `Int` allows. `Build`
+checks the parameter at representative values, and the result holds for every value:
+
+<!-- gocheck: run -->
+```go
+r := gsm.NewRegistry("register")
+value := r.Int("value", 0, 1<<20)
+stamp := r.Int("stamp", 0, 1<<40)
+
+// Last writer wins: a write with a later stamp replaces the value (ties go to the larger value).
+r.On("write").Param("v", 0, 1<<20).Param("at", 1, 1<<40).
+    OnlyIf(gsm.Or(gsm.Lt(gsm.V(stamp), gsm.Arg("at")),
+        gsm.And(gsm.Eq(gsm.V(stamp), gsm.Arg("at")), gsm.Lt(gsm.V(value), gsm.Arg("v"))))).
+    Does(gsm.Do(gsm.Set(value, gsm.Arg("v")), gsm.Set(stamp, gsm.Arg("at")))).Add()
+
+m, report, err := r.Abstract().Build()
+if err != nil {
+    panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+}
+fmt.Println(report.Abstraction.Cutoff) // 6: n + 2m, for 2 variables and 2 parameters
+
+a := m.ApplyWith(m.ApplyWith(m.NewState(), "write", 7, 1_700_000_000), "write", 3, 1_700_000_500)
+b := m.ApplyWith(m.ApplyWith(m.NewState(), "write", 3, 1_700_000_500), "write", 7, 1_700_000_000)
+fmt.Println(a.GetInt(value), b.GetInt(value)) // 3 3
+```
+
+Abstraction refuses arithmetic on a parameter (`Sub(V(balance), Arg("amount"))`): an amount that
+moves a balance needs `Build` without `Abstract` over small ranges, as in the ledger. The rules
+and the theorems are in [Verification](verification.md#abstraction-check-relationships-not-values)
+and [Theory §11.12](theory.md#1112-event-parameters).
 
 ## Next steps
 

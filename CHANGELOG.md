@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Events with parameters.** An event declares integer parameters with ranges and reads them in
+  its guard and effect: `r.On("withdraw").Param("amount", 1, 5).OnlyIf(Ge(V(balance),
+  Arg("amount"))).Does(DecByArg(balance, "amount")).Add()` (`OnBuilder.Param`, `Arg`, and the sugar
+  `IncByArg`, `DecByArg`, `SetToArg`; closure events take `EventBuilder.Param` with `GuardArgs` and
+  `ApplyArgs`, which receive `Args`). `Machine.ApplyWith(s, "withdraw", 25)` applies an instance,
+  and `Instance("withdraw", 25)` is its name, `withdraw(25)`, which every API that takes an event
+  name accepts; `CollectionMachine.ApplyWith`, `Machine.Params` and `Machine.Families` complete the
+  surface. Without `Abstract`, a parameterized event is the family of its instances: declaration
+  expands it into one ordinary event per assignment of values, so `Build`, the per-component
+  check, `BuildCompositional`, `Synthesize`, collections, federations (`FedMachine.ApplyNamed`
+  with an instance name), certificates, the oracle tables and `Export` (format unchanged, instances
+  as event names) all check and run instances, and no new theorem is needed. An event may have at
+  most 1024 instances; a wider one, or a registry whose instances would make the step tables
+  (2²⁶ entries) or the CC pairs (2³² pair-states) too large, is refused with an error that
+  suggests `Abstract`. `CheckMigration`'s event map takes a parameterized event as a whole
+  (`"raise": "bump"` maps each instance to the one with the same values). `Independent` names a
+  parameterized event as a whole (every pair of instances) or one instance. Reports name
+  instances, and group them in obligations (`withdraw(amount) (every value)`); `Report.Families`
+  (`[]EventFamily`) lists each parameterized event, its instance count and its non-idempotent
+  instances, and the regime summary names the events with parameters.
+- **Parameters under `Abstract` (the comparison route with m > 0).** With `Abstract`, a parameter
+  that is only compared and copied is checked at representative values, with the result holding
+  for every value of every parameter, however wide its range: the cutoff is N = n + 2m for m the
+  most parameters one event declares, and every assignment of representatives to an event's
+  parameters is checked. The event runs with its range test conjoined to its guard and each
+  parameter's bounds among the constants, so the registry checked is in normalization-confluence's
+  model with m integer parameters (`AbstractionGsm.v`: `cc1_valid_abs`, `gsm_abs_exact`,
+  `gsm_abs_sound`, `gsm_abs_sound_all`, `idem_valid_abs`, `idem_runtime_abs`, all stated for general
+  m), and a failure always has its parameter values in range. `AbstractionReduction` gains `Params`
+  (m), and its `Cutoff` is n + 2m. `NotIdempotent` lists a parameterized event by its signature
+  (`push(v)`) with a representative witness in `Report.Families`. Refused, with an
+  `*AbstractionError` naming the rule: arithmetic on a parameter (the difference route is stated
+  for events without parameters), a parameter copied into a narrower variable, a closure event
+  with parameters, and an `Independent` declaration naming one instance.
+- **Invariant coverage with event parameters** ([docs/invariant-coverage.md](docs/invariant-coverage.md)).
+  The 17 invariants event parameters alone would move (owner and last-writer-wins registers,
+  deadlines fixed at creation, versions, snapshots) are reclassified as verified at production
+  scale, by abstraction: 64 of 116 (55%, from 41%). The ranked extensions are recomputed with
+  parameters implemented: the linear route and an aggregate reduction come next (13 each alone,
+  26 together). Four new runnable samples (V7 to V10) validate the reclassification, the
+  free-cancellation and catalog-price samples move or change accordingly, and the
+  example-machine gate lists their machines.
+- Tests: the naive guarded wallet fails with a witness naming the instances, and the
+  fact-recording wallet, inventory and booking models pass; a parameterized event against the
+  same instances declared by hand (reports, witnesses and step tables equal, over random
+  registries with arithmetic on the parameters); the abstraction check with parameters against
+  enumeration of every instance over random comparison-fragment registries; collections,
+  federations, migration, export, closure families, `Independent` on families, the size limits,
+  and the refusals.
+
 - **Invariant coverage benchmark** ([docs/invariant-coverage.md](docs/invariant-coverage.md)). A
   catalog of 116 business invariants across ten domains (inventory, orders, payments, hotel
   bookings, loyalty, subscriptions, approvals, access control, scheduling, multi-service

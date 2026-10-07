@@ -570,6 +570,7 @@ func (r *Registry) checkComponents(p *compPlan, before registryShape) (*Machine,
 			report.NotIdempotent = append(report.NotIdempotent, r.events[ei].name)
 		}
 	}
+	report.Families = r.reportFamilies(report.NotIdempotent)
 
 	// The oracle gate: the verified table oracle must certify every component's tables,
 	// or there is no machine.
@@ -600,6 +601,7 @@ func (r *Registry) checkComponents(p *compPlan, before registryShape) (*Machine,
 		eventDefs:  r.events,
 
 		repairBound: repairBound,
+		families:    familiesOf(r),
 	}
 	for i, ev := range r.events {
 		m.events[ev.name] = i

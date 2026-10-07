@@ -1129,7 +1129,10 @@ conditions it checks without `Abstract`, over the representatives:
 
 - **Variables**: every variable must be an `Int`; its value is the integer. (Bool and Enum
   variables are refused: the model has integer variables only.)
-- **Events have no parameters**: m = 0, so N = n + 2m = n for every condition.
+- **Event parameters**: an event declared with parameters (`OnBuilder.Param`) is an event kind
+  with m parameters, read through `Arg` as the model reads `Vr (n + j)`; an event without
+  parameters is a kind that ignores them, and m is the most parameters one event declares. Build
+  takes N = n + 2m for every condition, at least each condition's cutoff (§11.12).
 - **An event** (a guard and a sequence of assignments, each seeing the previous ones) is the
   program's per-variable new values: each variable's new value is its assignment composed by
   substitution, under an if-then-else on the guard. **The repair** (the first violated
@@ -1147,7 +1150,7 @@ conditions it checks without `Abstract`, over the representatives:
 
 **What Build checks, and the theorem per condition.**
 
-| Build checks, over the representative states (N = n) | Conclusion for every integer state | Theorem |
+| Build checks, over the representative states (N = n + 2m) | Conclusion for every integer state | Theorem |
 |---|---|---|
 | WFC: repair reaches a valid state from every representative state, within K steps (K the deepest chain, `Report.MaxRepairLen`) | Repair reaches a valid state within K steps from every integer state (`TermK`); a decreasing potential exists | `term_abs`, `wfc_abs` |
 | CC1 for every checked pair at every valid representative state (gsm's CC1, §6.5: valid states only) | CC1 for that pair at every valid integer state; with WFC, every reordering of independent events from a valid state reaches the same state | `cc1_valid_abs`, `gsm_abs_exact` |
@@ -1162,7 +1165,7 @@ all representative states, with N ≥ n + 2m; its CC1 quantifies over every stat
 every event including a no-op one, while gsm checks CC1 at valid states only (§6.5). The registry whose events first repair to validity stays in the fragment (`derived_ordinv`), and its CC1 at every state is gsm's CC1 at the valid states (`cc1_derived_valid`), so `cc1_abs` applies to it (`cc1_valid_derived_abs`). The failure direction needs no theorem: a
 witness is a concrete integer state where two orders differ.
 
-**Idempotence.** Idempotence transfers too: an event is idempotent at every valid integer state iff at every valid representative state (`idem_valid_abs`; for the runtime step from every integer state, `idem_runtime_abs`). So `NotIdempotent` is computed from the representatives and is exact for every value: deduplicate exactly the listed events. The cutoff is N ≥ n + m, so N = n here as well. The at-least-once
+**Idempotence.** Idempotence transfers too: an event is idempotent at every valid integer state iff at every valid representative state (`idem_valid_abs`; for the runtime step from every integer state, `idem_runtime_abs`). So `NotIdempotent` is computed from the representatives and is exact for every value: deduplicate exactly the listed events. The cutoff is N ≥ n + m, which N = n + 2m meets. The at-least-once
 rules of §7.8 apply unchanged, including declared pairs: deduplicating exactly the listed events is
 enough when the transport keeps undeclared pairs ordered for retries too (`fl_retry_order_needed`
 otherwise).
@@ -1180,9 +1183,9 @@ from CC1 and CC2 together (`un_abs`, `abs_check_exact`, `build_sound`). gsm does
   is not declared, naming the rule and the literal.
 - **Arithmetic.** `triangle_passes`, `triangle_diverges`: the guard x < y < z < x + y passes the
   check over 0, 1, 2 and diverges at (2, 3, 4); `triangle_refused`. gsm refuses `Add` and `Sub`
-  anywhere in a rule.
+  anywhere in a rule, on variables and parameters alike.
 - **The cutoff cannot drop below n.** `copy_tight`: x := y and y := x pass over one
-  representative and diverge at (0, 1). gsm uses N = n.
+  representative and diverge at (0, 1). gsm uses N = n + 2m.
 
 **Representatives outside the ranges.** The theorems are over all integers, so a representative
 may lie outside a variable's declared range (one below the least constant, for a range starting at
@@ -1479,6 +1482,85 @@ witness in an independent model of `Apply`.
   cyclic deployments of that kind.
 
 ---
+
+### 11.12 Event Parameters
+
+**Implemented**: an event may declare integer parameters, each over a range
+(`r.On("withdraw").Param("amount", 1, 5)`), read in its guard and effect with `Arg`
+([Getting started](getting-started.md#events-with-parameters)). Two routes check it.
+
+**Instances (Build without Abstract).** A parameterized event is the family of its instances,
+one event per assignment of values to its parameters, named `withdraw(25)`. Declaration
+substitutes each instance's values for `Arg` and registers the instances as ordinary combinator
+(or closure) events, so the registry `Build` checks is a registry with a finite set of events, the
+model of §4 and of the oracles. No new theorem is needed; the existing ones apply to the instances:
+
+| Guarantee | Theorem | Why it applies |
+|---|---|---|
+| Every order of the same instances, each applied once, reaches one state | `check_tables_converges_all` (`check_tables_converges` for declared pairs), and `checkBuild_converges` when the rules oracle runs | The instances are the events of the tables and rules the oracles check |
+| Declared pairs (`Independent` on two parameterized events, or one with itself) | `run_tequiv`, `causal_tequiv` | An `Independent` declaration of a family declares each pair of instances; the undeclared ones are checked and listed as before |
+| `NotIdempotent` per instance; at-least-once delivery | `alo_exact`, `dalo_unlisted_converge` | Each instance is an event |
+| Collections, federations, migration, per-component checking | The theorems of §11.8, §11.4, §11.11, §11.10 | Instances are events of the registry each path takes |
+
+A test declares the same instances by hand and checks that the reports, witnesses and step tables
+are identical, over random registries.
+
+**Representatives (Build with Abstract).** The model of §11.9 (`AbstractionCutoff.v`,
+`AbstractionGsm.v`) has events with m integer parameters: an event is a kind and m values, and its
+rules read the parameters as variables `n` to `n + m - 1` of the environment (`sap`). Every
+statement of `AbstractionGsm.v` is for general m. gsm's parameterized event is one kind; a
+parameter is compared and copied, never added or subtracted (`ord_frag` over the parameters too),
+and every literal is a declared constant. Build takes N = n + 2m and checks over states in
+`tup (reps N C) n`, with each event at every assignment of `reps N C` to its parameters:
+
+| Build checks, over the representatives | Conclusion for every integer state and parameter value | Theorem |
+|---|---|---|
+| WFC; repair within K steps (K the deepest chain) | Repair within K steps from every integer state | `term_abs`, `wfc_abs` (N ≥ n) |
+| CC1 at every valid representative state, for every pair of representative instances of the checked kinds | CC1 at every valid integer state, for every pair of parameter values; with repair within K steps, every reordering of independent events from a valid state reaches one state | `cc1_valid_abs`, `gsm_abs_exact` (N ≥ n + 2m) |
+| The runtime: `Apply` normalizes first | Runs from every integer state, the zero state included, converge | `gsm_abs_sound`, `gsm_abs_sound_all` |
+| Idempotence of each kind at every valid representative state and representative parameters | Idempotence at every valid integer state, for every parameter value | `idem_valid_abs`, `idem_runtime_abs` (N ≥ n + m) |
+| The finite checks gsm runs are the ones the theorems quantify over | | `cc1v_check_spec`, `idemv_check_spec` |
+| The representative tables | Certified by the verified table oracle | `check_tables_converges` |
+
+`AbstractionGsm.v` instantiates every statement at m = 1 (`capped_term`, `capped_cc1v_check`,
+`capped_idemv_check`, `capped_cc1_valid`, `capped_idem`, `capped_runtime`): Restock(level) raises
+stock to the level, with cap 5, over the 7 representatives of `reps 3 [5]`. gsm's test
+`TestParamsAbstract_Capped` builds the same registry with a declared range for the level, so its
+constants are the cap and the level's bounds (cutoff 3).
+
+**How gsm maps onto the model, and what it reports.**
+
+- **Ranges.** The theorems quantify over every integer parameter value; gsm's parameters have
+  declared ranges. gsm checks the registry whose event conjoins the range test
+  `min <= p <= max` to its guard, with every parameter's bounds added to C (the test compares
+  against them, so it stays in `ord_frag`). That registry is in the model, and on the values in
+  range its events are gsm's; outside the ranges an event does nothing. So a pass covers every
+  value in range, and a failure has its parameter values in range. Every assignment outside the
+  ranges is the same event (the identity before repair), so gsm checks it once per parameterized
+  event instead of once per representative assignment: checking one function once instead of
+  several times. A copy of a parameter into a variable must keep its value in range (the
+  parameter's range inside the variable's), so no write saturates, as for variable copies. As in
+  §11.9, a representative state may lie outside the variables' ranges, and a failure there is
+  reported with `CCFailure.Abstract.InRange` false and not certified.
+- **Pairs.** The independence relation of `AbstractionGsm.v` is on kinds (`CC1VZ K I`, `evI`). In
+  the default mode every pair of representative instances is checked, two values of one event
+  included. `Independent` names a parameterized event as a whole; an `Independent` declaration
+  that names one instance is refused under abstraction.
+- **NotIdempotent** is per kind, as `idem_valid_abs` states it: a parameterized event is listed
+  by its signature (`push(v)`), with a representative witness in `Report.Families`, and every
+  value of it needs deduplication.
+- **CausalOrderRequired** in declared-only mode lists one witness per pair of kinds.
+
+**Refused.** Arithmetic on a parameter (`Sub(V(balance), Arg("amount"))`, `Add(V(held),
+Arg("n"))` in a guard) is outside `ord_frag`, and an order-pattern check can be fooled by it
+(`triangle_diverges`). The difference-constraint route (`DifferenceAbstraction.v`) is for events
+without parameters (m = 0), so gsm does not use it here; such an event is checked by Build without
+Abstract, over ranges small enough to expand. A closure family is refused (gsm cannot inspect it),
+as is a literal that is not declared (`exact13_diverges`).
+
+**Not covered.** `CheckMigration` refuses a registry declared with Abstract, so an event map over
+families that were not expanded is not available. Federations refuse a component declared with
+Abstract, whatever its events.
 
 ## 12. Relationship to the Paper
 

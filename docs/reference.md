@@ -8,6 +8,7 @@ this page is the map. Field descriptions here are summaries of the godoc.
 ## Contents
 
 - [Build entry points and options](#build-entry-points-and-options)
+- [Events with parameters](#events-with-parameters)
 - [Report](#report)
 - [FedReport](#fedreport)
 - [Synthesis](#synthesis)
@@ -45,10 +46,39 @@ Opt-ins belong to the federation they are called on: an embedded sub's `AllowMon
 `RequireProjectionSafe` does not apply to the parent.
 
 A `CollectionMachine[K]` has `NewState()`, `Apply(s, key, event)` (updates the `*CollectionState[K]`
-in place and returns the key's new item `State`), `Over()` and `Item()` (the template's `Machine`).
+in place and returns the key's new item `State`), `ApplyWith(s, key, event, args...)` for an event
+with parameters, `Over()` and `Item()` (the template's `Machine`).
 A `CollectionState[K]` has `Item(key)` (the template's `NewState` for a key no event has reached),
 `Keys()`, `Len()` and `Clone()`. `Apply` panics on an unknown event, a nil state, or a state of
 another collection machine.
+
+---
+
+## Events with parameters
+
+| Declaration or call | What it does |
+|---|---|
+| `r.On(name).Param(p, min, max)` | Declares an integer parameter of a combinator event, values `min..max`; each call adds one, in order. The guard and effect read it with `Arg(p)`, and the sugar `IncByArg(v, p)`, `DecByArg(v, p)` and `SetToArg(v, p)` writes with it |
+| `r.Event(name).Param(p, min, max)` with `GuardArgs(func(State, Args) bool)` and `ApplyArgs(func(State, Args) State)` | The same for a closure event; `Args` maps each parameter's name to the instance's value |
+| `Instance(name, values...)` | The name of one instance, `name(v1,v2)`, as every API that takes an event name accepts it |
+| `Machine.ApplyWith(s, name, values...)` | `Apply(s, Instance(name, values...))`; panics on a value outside its range or a wrong number of values |
+| `Machine.Params(name)`, `Machine.Families()` | An event's parameters; the names of the events with parameters |
+| `CheckMigration(from, to, migrate, events)` | An entry mapping an event with parameters to one of the other registry maps each instance to the instance with the same values (the same number of parameters, and the target's ranges containing the source's); an instance may be mapped on its own |
+
+Declaration expands the event into its instances, one ordinary event per assignment of values,
+each checked by `Build` as its own event. An event may have at most 1024 instances; `Build`
+refuses a wider one (suggesting `Abstract`), and refuses a registry whose instances would make the
+step tables or the pair check too large (2²⁶ table entries, 2³² pair-states). Under `Abstract`
+the parameters are checked over representative values and may be as wide as an `Int` allows,
+when the rules only compare and copy them. `Independent` takes an event with parameters as a
+whole, or (without `Abstract`) one instance. Declaring a rule that reads an undeclared parameter,
+or an invariant that reads one, panics.
+
+What carries over: collections, federations (`FedMachine.ApplyNamed(fs, registry,
+Instance(name, values...))`), `CheckMigration` (without `Abstract`), certificates, the oracle tables
+and `Export` all see the instances as events. `Synthesize` and `BuildCompositional` do too. See
+[Getting started](getting-started.md#events-with-parameters) and
+[Theory §11.12](theory.md#1112-event-parameters).
 
 ---
 
@@ -63,7 +93,8 @@ another collection machine.
 | `WFC`, `MaxRepairLen` | Whether repair terminates from every state; the longest compensation chain (on the per-component path, the sum of the components' deepest chains, which is the machine's repair bound) |
 | `CC`, `PairsTotal`, `PairsDisjoint`, `PairsBrute`, `CCFailure` | Whether every checked pair commutes; how many pairs needed no check because their events lie in different footprint components (per-component path only; 0 when the whole state space was enumerated) or were checked exhaustively; the counterexample (`*CCFailure`) when CC failed |
 | `PairsUndeclared`, `CausalOrderRequired` | In declared-only mode: how many undeclared pairs were also checked, and the ones that do not commute (each a `CCFailure` with a witness), which must be delivered in causal order ([Deployment](deployment.md#causal-order-for-undeclared-pairs)) |
-| `NotIdempotent` | Events whose second application changes the state: deduplicate their redeliveries ([Deployment](deployment.md#duplicates-and-redelivery)) |
+| `NotIdempotent` | Events whose second application changes the state: deduplicate their redeliveries ([Deployment](deployment.md#duplicates-and-redelivery)). Instances of an event with parameters are listed by instance name; under abstraction an event with parameters is listed by its signature, `push(v)`, for every value |
+| `Families` | The events with parameters (`[]EventFamily{Name, Params, Instances, Representative, NotIdempotent}`): their parameters, how many instances were checked (under abstraction, the representative ones), and which are not idempotent (under abstraction, one representative witness). The report prints their instances grouped, as `withdraw(amount) (every value)` |
 | `Saturations` | Rules whose write was clamped into a variable's range on some state `Build` ran them on (`Saturation{Rule, Var, States}`). Clamping is verified semantics, but an invariant meant to catch the overflow never sees it |
 | `Coordinated` | On a federation component built with `BuildCoordinated`: the removed edges into it, whose shared variables are external inputs. gsm does not check that coordination |
 | `Components`, `MaxComponentStates`, `FootprintChecked`, `FootprintViolation` | Per-component path (`Build` on a large combinator registry, or `BuildCompositional`): the number of footprint components, the largest subspace enumerated, whether footprint conformance held, and the violation that rejected the machine (WFC and CC were then not evaluated) |
@@ -73,7 +104,7 @@ another collection machine.
 | `Assurance` | What certified the machine ([Assurance levels](verification.md#assurance-levels)); `AssuranceNone` unless a machine was returned |
 | `OracleDisagreement` | gsm's verification passed but the table oracle did not certify the tables; there is no machine |
 | `RulesOracleSkipped` | Why the rules oracle did not run (no combinator rules, above `RulesOracleMaxWork`, outside its fragment, or checked per component) |
-| `Abstraction` | `Build` by abstraction (`Registry.Abstract`): `*AbstractionReduction{Over, Constants, Cutoff, Representatives, States}`, printed as `Verified by abstraction over stock (rules compare values only; constants {5}; 7 representatives)`. `StateCount` is then the number of representative states, and `Assurance` is `AssuranceOracleRepresentatives`. Also set on a WFC or CC failure found that way ([Verification](verification.md#abstraction-check-relationships-not-values)) |
+| `Abstraction` | `Build` by abstraction (`Registry.Abstract`): `*AbstractionReduction{Over, Constants, Cutoff, Params, Representatives, States}` (`Cutoff` is n + 2m, `Params` is m; `Constants` include every event parameter's bounds), printed as `Verified by abstraction over stock (rules compare values only; constants {5}; 7 representatives)`. `StateCount` is then the number of representative states, and `Assurance` is `AssuranceOracleRepresentatives`. Also set on a WFC or CC failure found that way ([Verification](verification.md#abstraction-check-relationships-not-values)) |
 | `AbstractionRefused` | The registry declared `Abstract` but is outside the fragment; holds the `*AbstractionError` text, and nothing was checked |
 | `Symmetry` | On a collection's report: `*SymmetryReduction{Over, Cutoff}`, printed as `Verified by symmetry over <Over> (items independent; cutoff 1)`. The template was checked as one item and the result holds at every key; `NotIdempotent` and `CausalOrderRequired` then apply per key ([Getting started](getting-started.md#collections-one-template-every-key)) |
 | `Regime` | The regime summary (`*RegimeSummary`, below), set by `Build`, `BuildCompositional` and `Collection.Build` when they return a machine; nil otherwise, and on a federation component's report. Printed last ([Regime summary](verification.md#regime-summary)) |
@@ -198,7 +229,8 @@ machine.Export("order.gsm.json")
 
 The exported JSON contains:
 - Variable definitions (types, domains)
-- Event names (ordered)
+- Event names (ordered). An event with parameters appears as its instances, named
+  `name(v1,v2)` (`Instance`); the format is unchanged
 - Normal form table: `nf[stateID] → normalized stateID`
 - Step table: `step[eventID][stateID] → normalized result stateID`
 - Verification metadata, including (format version 2) the event pairs CC was checked for
