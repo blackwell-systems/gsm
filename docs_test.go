@@ -41,7 +41,7 @@ var docFiles = []string{
 	"README.md",
 	"docs/getting-started.md", "docs/concepts.md", "docs/federation.md",
 	"docs/deployment.md", "docs/verification.md", "docs/reference.md",
-	"docs/theory.md",
+	"docs/theory.md", "docs/invariant-coverage.md",
 	"docs/design/ARCHITECTURE.md", "docs/design/CERTIFICATE-DESIGN.md",
 	"CHANGELOG.md",
 }
