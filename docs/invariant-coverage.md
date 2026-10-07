@@ -9,7 +9,9 @@ production scale today. It then ranks the extensions that would move the most in
 
 It describes gsm v0.15.0 plus the unreleased changes on `main` (the regime report,
 `CheckMigration` and events with parameters). Nineteen of the classifications are demonstrated by
-programs on this page that the doc test runs.
+programs on this page that the doc test runs. The page is generated from a data file
+([`docs/coverage/`](coverage/README.md)): edit the catalog or the template there and rerun the
+generator, never this page by hand.
 
 ## Contents
 
