@@ -401,8 +401,8 @@ func TestRegime_ProjectionNotSafe(t *testing.T) {
 
 	// RequireProjectionSafe: no machine, so no regime.
 	f2, _, _, _, _ := flipFederation()
-	if _, rep2, err := f2.RequireProjectionSafe().Build(); err == nil || rep2.Regime != nil {
-		t.Fatalf("RequireProjectionSafe on flips: err %v, regime %v", err, rep2.Regime)
+	if _, rep2, err2 := f2.RequireProjectionSafe().Build(); err2 == nil || rep2.Regime != nil {
+		t.Fatalf("RequireProjectionSafe on flips: err %v, regime %v", err2, rep2.Regime)
 	}
 	// RequireProjectionSafe on a safe federation: named in the regime.
 	_, rep3, err := chainFed("chainreq").RequireProjectionSafe().Build()
