@@ -143,6 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   model to each side's built machine.
 
 ### Changed
+- Theory §11.12: the single out-of-range check per parameterized event now cites `EventCollapse.v` (`range_out_gov`, `range_cc1v`, `range_idemv`, `range_cc1_exact`, `range_gsm_exact`, `range_idem_exact`), so every guarantee of event parameters cites a gated theorem.
 
 - **`CheckMigration`: an exhausted closure search certifies the barrier.** When the change is
   not safe online, the new registry converges from every migrated reachable state (`PermB-every`),
