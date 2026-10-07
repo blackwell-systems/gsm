@@ -1482,10 +1482,10 @@ registries' `Independent` declarations, and reports the class in `MigrationRepor
 |---|---|---|---|
 | Free delivery, each event once (the default, no `Independent` pairs) | As above | Online and barrier outcomes exact | `det_live_exact`, `det_barrier_closure_exact` (recovered by `free_live_exact`, `free_barrier_closure_exact`) |
 | Declared independence, each event once (a registry declares `Independent` pairs) | `PermB-start` for the declared pairs of the combined alphabet: A's pairs translated, B's pairs, and an in-flight A-event a with a B-event b when B declares (τ a, b) or `MigrationInFlightIndependent` declares (a, b); `DS1` unchanged | Safe online, exact both ways | `live_declared_exact` |
-| | `PermB-every` for B's declared pairs; `PermA` and the `AmodM` closure seeded with A's declared pairs only | Safe behind a barrier, exact both ways; an exhausted search is a certificate | `barrier_declared_exact`, `closureI_swap_exact`, `closureI_witness_exact` |
+| | `PermB-every` for B's declared pairs; `PermA` and the `AmodM` closure seeded with A's declared pairs only | Safe behind a barrier, exact both ways; an exhausted search is a certificate | `barrier_declared_exact`, `closureI_swap_exact`, `closureI_witness_exact`; with gsm's pruning `barrier_declared_pruned_exact`, `closureIg_witness_exact` |
 | | The three outcomes | Decided on finite instances, no unknown case | `classify_declared_complete` |
-| At-least-once, any order (`MigrationAtLeastOnce`, no `Independent` pairs) | `PermB-start`, `Idem-start` (every B-event idempotent at every state B reaches from M s₀), `DS1` | Safe online, exact both ways | `live_free_alo_exact` |
-| | `PermB-every`, `Idem-every`, `AbsorbS` (for every state t reached by a run that applied a, and every z B reaches from M t, Apply_B(z, τ a) = z), `AmodA` (runs with the same set of A-events migrate to one state) | Safe behind a barrier, exact both ways; an exhausted `AmodA` search is a certificate | `barrier_free_alo_exact` |
+| At-least-once, any order (`MigrationAtLeastOnce`, no `Independent` pairs) | `PermB-start`, `Idem-start` (every B-event idempotent at every state B reaches from M s₀), `DS1` | Safe online, exact both ways | `live_free_alo_exact`; in gsm's submission model `gsm_alo_live_exact` |
+| | `PermB-every`, `Idem-every`, `AbsorbS` (for every state t reached by a run that applied a, and every z B reaches from M t, Apply_B(z, τ a) = z), `AmodA` (runs with the same set of A-events migrate to one state) | Safe behind a barrier, exact both ways; an exhausted `AmodA` search is a certificate | `barrier_free_alo_exact`; in gsm's submission model `gsm_alo_barrier_exact`, `amodfree_search_exact`, decided by `classify_submissions_complete` |
 | Causal delivery | Not supported: gsm has no happens-before declaration | | `live_causal_exact`, `barrier_causal_exact` would back it |
 
 Online implies barrier in every class (`live_implies_barrier_d`). Every witness names the failing
@@ -1501,23 +1501,31 @@ are reordered iff B reorders τ a and b; `MigrationInFlightIndependent` declares
 the condition depends only on the B-steps. The closure search keeps gsm's pruning (one orientation
 per declared pair, equal pairs skipped): the declared relation is symmetric, so a pair and its
 mirror are both in `ClosureI`'s closure and are separated together, and equal states stay equal.
-That pruning argument is gsm's; `gsm_closure_exact` mechanizes it for the full seed set.
+`barrier_declared_pruned_exact` (`ReconfigurationGsm.v`) states the barrier outcome with that pruned
+closure: for a symmetric declared relation and an orientation covering every pair, the pruned
+closure condition is `ClosureI` (`closureIg_exact`), and on finite instances the pruned search
+finds a witness iff `ClosureI` fails (`closureIg_witness_exact`), so an exhausted search is a
+certificate. The relation gsm builds is symmetric (`declaredPairs` keeps an unordered pair when
+either orientation is declared, which `closureIg_sym_exact` covers for any declarations); without
+symmetry the pruning can miss a witness (`pruning_needs_symmetry`).
 
-*At-least-once: the message reading.* The theorems' alphabet is the messages delivered, and a
-repeated message is a redelivery. In gsm an event may be submitted any number of times, each
-submission one message, so gsm instantiates the free at-least-once theorems at the alphabet of
-pairs (event, submission). Fresh submissions make every state a sequence of events reaches also
-reachable by a duplicate-free sequence of messages, so the theorems' commutation and idempotence
-after duplicate-free prefixes (`CommND`, `IdemND`) are exactly `PermB-start`, `PermB-every`,
-`Idem-start` and `Idem-every` at every reachable state; `AbsorbFree` is `AbsorbS` at every state
-reached by a run containing the event; and `AmodFree` (runs with the same set of messages) is runs
-with the same set of events, each any number of times. That last condition depends on which events
-were applied, not only on the state, so `AmodA` searches pairs of a state and the set of events
-applied: a witness refutes it, an exhausted search certifies it, and only a search stopped at the
-size limit leaves the outcome unknown. This reduction from messages to events is gsm's argument (a
-few lines, stated here), not a mechanized theorem. `classify_alo_complete` decides the class on a
-finite alphabet in which each event is one message, which is not gsm's reading: there, a second
-delivery of an event is always a redelivery, never a second submission.
+*At-least-once: repeated submissions.* In gsm an event may be submitted any number of times, each
+submission one message. `ReconfigurationGsm.v` states this model: messages are pairs (event,
+submission), every message is delivered at least once in any order, and two runs are compared as
+gsm compares them, by the set of events (`RelG`). Fresh submissions reach every state without
+repeating a message (`SubFresh`, which gsm's model satisfies, `subfresh_tagX`), so commutation and
+idempotence after duplicate-free prefixes are the checks at every reachable state
+(`commnd_fresh`, `idemnd_fresh`). `gsm_alo_live_exact`: safe online iff `PermB-start`,
+`Idem-start` and `DS1`. `gsm_alo_barrier_exact`: safe behind a barrier iff `PermB-every`,
+`Idem-every`, `AbsorbS` (at every state reached by a run that applied the event) and `AmodA` (runs
+with the same set of events, each any number of times). `AmodA` depends on which events were
+applied, so its search runs over pairs of a state and the set of events applied;
+`amodfree_search_exact` states that this search is exact, so a witness refutes it, an exhausted
+search certifies it, and only a search stopped at the size limit leaves the outcome unknown. The
+submission model and the one-message model of `ReconfigurationDelivery.v` have the same outcomes
+(`submissions_one_message_live`, `submissions_one_message_barrier`), and
+`classify_submissions_complete` decides the class in gsm's reading on finite instances, with no
+unknown case.
 
 *The instances of `ReconfigurationDelivery.v`, in gsm's model.*
 

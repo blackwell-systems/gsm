@@ -178,6 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     updated.
 
 ### Changed
+- Theory §11.11: CheckMigration's two own-argument steps now cite normalization-confluence `ReconfigurationGsm.v`: the pruned declared closure (`barrier_declared_pruned_exact`, `closureIg_exact`, `closureIg_witness_exact`, `closureIg_sym_exact`; symmetry needed, `pruning_needs_symmetry`) and at-least-once with repeated submissions (`gsm_alo_live_exact`, `gsm_alo_barrier_exact`, `amodfree_search_exact`, `classify_submissions_complete`; the one-message classification applies too, `submissions_one_message_live`, `submissions_one_message_barrier`). Every CheckMigration guarantee now cites a gated theorem.
 - Deployment guide: versioned projection channels are proved at any depth on single-source acyclic federations (normalization-confluence `ProjectionChains.v`, `vchan_single_exact`); the open residue is restated (multi-source shapes, `vchan_skip_counterexample`; cycles; loss without redelivery).
 - Theory §11.12: the single out-of-range check per parameterized event now cites `EventCollapse.v` (`range_out_gov`, `range_cc1v`, `range_idemv`, `range_cc1_exact`, `range_gsm_exact`, `range_idem_exact`), so every guarantee of event parameters cites a gated theorem.
 
