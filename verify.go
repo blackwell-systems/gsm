@@ -632,8 +632,8 @@ func (r *Registry) build(runCC bool) (_ *Machine, rep *Report, err error) {
 	}
 
 	packedCount := 1 << r.totalBits
-	if err := r.paramBudget(packedCount, stateCount); err != nil {
-		return nil, nil, err
+	if berr := r.paramBudget(packedCount, stateCount); berr != nil {
+		return nil, nil, berr
 	}
 
 	report := &Report{

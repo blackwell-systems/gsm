@@ -203,7 +203,7 @@ func TestParams_Errors(t *testing.T) {
 		!strings.Contains(err.Error(), "declare Abstract") {
 		t.Fatalf("wide family: %v", err)
 	}
-	if _, err := r.Synthesize(); err == nil {
+	if _, serr := r.Synthesize(); serr == nil {
 		t.Error("Synthesize accepted a wide family")
 	}
 	// Reading an undeclared parameter, or a parameter in an invariant.
@@ -226,8 +226,8 @@ func TestParams_Errors(t *testing.T) {
 	z := r3.Int("z", 0, 3)
 	r3.On("e").Does(Inc(z)).Add()
 	r3.On("e").Param("a", 0, 1).Does(SetToArg(z, "a")).Add()
-	if _, _, err := r3.Build(); err == nil || !strings.Contains(err.Error(), "duplicate event name") {
-		t.Errorf("duplicate: %v", err)
+	if _, _, derr := r3.Build(); derr == nil || !strings.Contains(derr.Error(), "duplicate event name") {
+		t.Errorf("duplicate: %v", derr)
 	}
 	// ApplyWith misuse.
 	f, _, _, _ := factWallet(6)
@@ -390,7 +390,7 @@ func TestParams_ExportNamesInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "m.json")
-	if err := m.Export(path); err != nil {
+	if err = m.Export(path); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -492,7 +492,7 @@ func TestParamsAbstract_NotIdempotentWitness(t *testing.T) {
 	x, y := r.Int("x", 0, 100), r.Int("y", 0, 100)
 	r.On("push").Param("v", 0, 100).Does(Do(Set(y, V(x)), Set(x, Arg("v")))).Add()
 	r.Independent("push", "push").OnlyDeclaredPairs()
-	_, rep, err := r.Abstract().Build()
+	_, _, err := r.Abstract().Build()
 	if err == nil {
 		t.Fatal("pushes of different values do not commute")
 	}
@@ -502,7 +502,7 @@ func TestParamsAbstract_NotIdempotentWitness(t *testing.T) {
 	r2.On("push").Param("v", 0, 100).Does(Do(Set(y2, V(x2)), Set(x2, Arg("v")))).Add()
 	r2.On("noop").Does(Do()).Add()
 	r2.Independent("push", "noop")
-	_, rep, err = r2.Abstract().Build()
+	_, rep, err := r2.Abstract().Build()
 	if err != nil {
 		t.Fatalf("Build: %v\n%s", err, rep)
 	}

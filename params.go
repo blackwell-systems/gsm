@@ -590,7 +590,10 @@ func groupEvents(names []string, fams []EventFamily) string {
 			parts = append(parts, o)
 			continue
 		}
-		fi, _ := strconv.Atoi(o[1:])
+		fi, err := strconv.Atoi(o[1:])
+		if err != nil {
+			continue // not reached: the marker is written above
+		}
 		f, inst := fams[fi], byFam[fi]
 		if !f.Representative && len(inst) == f.Instances {
 			parts = append(parts, f.Signature()+" (every value)")
