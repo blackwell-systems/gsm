@@ -130,6 +130,10 @@ With both rules, `ProjectionSafe` (XU) plus `Build`'s C2 make every deployment c
 channels drain, despite late, reordered and duplicated projections, with no outside flush
 (`vsettle_xu_c2`); the drained state is what the current-value model reaches with the same events
 followed by a flush (`vsettle_cv`), and the condition is exact (`vsettle_exact_cond`).
+The guarantee holds at any depth, not only on two-level networks: on an acyclic federation whose
+targets each have one source, the condition over versioned channels from a given start is exactly
+the current-value model's (`vchan_single_exact` in `ProjectionChains.v`), so chains of projections
+of any length are covered.
 Plain `MergeProjection` over a channel that can reorder or redeliver converges only after an
 outside flush (`chan_exact`): a stale projection delivered after a fresh one can leave the
 deployment wrong at drain even under XU (`plain_stale_counterexample`). Per-edge FIFO channels
@@ -137,7 +141,9 @@ without redelivery avoid that. Multi-source targets and cyclic networks are not 
 before: on a monotone cycle the ghost survives versioned channels (`vchan_cyc_ghost`; see
 [Cycles](#cycles-ghosts-and-reset-epochs)), and what remains open is normalization-confluence
 [`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
-gap 21's residue (longer chains, channels on cycles, loss without redelivery).
+gap 21's residue: multi-source shapes, where versioned channels can reach a combination of
+projections the current-value model never produces (`vchan_skip_counterexample`, four registries),
+channels on cycles, and loss without redelivery.
 
 ---
 
