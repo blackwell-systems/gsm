@@ -191,7 +191,8 @@ the change before you ship it:
   switch. The report carries a witness: two runs, one switching with an event in flight, that end
   in different states.
 - **Unsafe**: even a drained switch diverges. The witness is two such runs.
-- **Unknown**: not certified either way (below).
+- **Unknown**: only when the check's search stops at its size limit before it is exhaustive
+  (below). Otherwise one of the three outcomes above is always decided.
 
 <!-- gocheck: run -->
 ```go
@@ -265,17 +266,23 @@ migrates a state between an event and its repair. In that model (normalization-c
   old registry reaches, migrating after the event is applying its translation after migrating).
   The old registry's own convergence is not needed: a migration that forgets where the old rules
   diverge is still safe online (`forgetful_migration`).
-- Safe behind a barrier is sound always and exact when the migration is injective on the states the
-  old registry reaches (`det_barrier_faithful`; without injectivity, `det_barrier_exact` makes it
-  sufficient): the new registry converges from every migrated reachable state, and the old one
-  converges from the start.
+- Safe behind a barrier is exact: the new registry converges from every migrated reachable state,
+  and two orders of the same old events never migrate to different states. When the old registry
+  converges from the start, that second part holds outright (`det_barrier_exact`, and
+  `det_barrier_faithful` when the migration is injective on the reachable states). When it
+  diverges on its own and the migration is not injective, gsm searches the pair closure: the
+  pairs of states reached by applying two old events in both orders at a reachable state, then
+  the same events to both. The barrier is safe iff the migration sends both states of every pair
+  to one state (`det_barrier_closure_exact`, `amodm_closure_exact`, `gsm_closure_exact`), so a
+  search exhausted with no witness certifies it (`amodm_witness_exact`): the migration absorbs the
+  old rules' divergence.
 - Unsafe is certified by its witness, two barrier runs that diverge, replayed before the report is
   returned.
-- Unknown: the old registry diverges on its own, the migration is not injective, and gsm's search
-  found no two orders of the same events that migrate apart. The barrier outcome then turns on
-  whether the migration absorbs every divergence of the old rules, a condition with no mechanized
-  finite form ([`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
-  gap 20, residue (c)), so gsm claims neither outcome.
+- Unknown means only that the closure search stopped at its size limit (2²⁰ pairs of states)
+  before it was exhaustive (`SearchStopped` says so); gsm then claims neither outcome. On finite
+  instances the outcome is otherwise always decided (`det_classify_complete`,
+  [`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
+  gap 20, residue (c), closed in this model).
 
 The registries need not pass `Build`: `CheckMigration` checks the states runs reach from the start
 (the old registry's zero state, or the states you pass with `MigrationFrom`, such as a running

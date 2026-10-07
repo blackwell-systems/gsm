@@ -7,7 +7,7 @@ import (
 
 // Internal tests for CheckMigration's limits (migration.go): an instance too large to
 // enumerate fails clearly, on either side, and a search for an AmodM witness that reaches
-// the limit is reported as stopped, with the outcome Unknown.
+// the limit is reported as stopped, with the outcome Unknown: the only case that is Unknown.
 
 func migCounter(name string, max int) (*Registry, Var) {
 	r := NewRegistry(name)
@@ -43,7 +43,8 @@ func TestCheckMigration_TooLargeTo(t *testing.T) {
 // A: z in Z_16 with p (doubling) and q (successor), which do not commute anywhere; the
 // migration forgets z, so it is not injective and absorbs every divergence; B's one event
 // flips a bit, so DS1 fails. The pairs the AmodM search explores outnumber A's states, so a
-// limit just above A's states stops it: Unknown, with the search reported as stopped.
+// limit just above A's states stops it: Unknown, with the search reported as stopped. With
+// room for the whole search it is exhausted with no witness, which certifies the barrier.
 func TestCheckMigration_AmodMSearchStops(t *testing.T) {
 	a := NewRegistry("ring")
 	z := a.Int("z", 0, 15)
@@ -65,12 +66,20 @@ func TestCheckMigration_AmodMSearchStops(t *testing.T) {
 	if c, _ := rep.Condition(MigrationAmodM); c.Decided || !strings.Contains(c.Detail, "stopped") {
 		t.Fatalf("AmodM: %+v", c)
 	}
-	// With room for the whole search, it is exhaustive and finds no witness: still Unknown.
+	if rep.Failed != MigrationAmodM || !strings.Contains(rep.Reason, "size limit") ||
+		!strings.Contains(rep.String(), "[AmodM]: NOT DECIDED") {
+		t.Fatalf("failed %q, reason %q\n%s", rep.Failed, rep.Reason, rep)
+	}
+	// With room for the whole search, it is exhausted with no witness: a certificate
+	// (amodm_witness_exact), so the change is safe behind a barrier.
 	rep, err = CheckMigration(a, b, mig, events)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Outcome != MigrationUnknown || rep.SearchStopped != "" {
-		t.Fatalf("outcome %v, search %q, want UNKNOWN with an exhaustive search", rep.Outcome, rep.SearchStopped)
+	if rep.Outcome != MigrationSafeBehindBarrier || rep.SearchStopped != "" {
+		t.Fatalf("outcome %v, search %q, want SAFE BEHIND A BARRIER with an exhaustive search", rep.Outcome, rep.SearchStopped)
+	}
+	if c, _ := rep.Condition(MigrationAmodM); !c.Decided || !c.Holds {
+		t.Fatalf("AmodM: %+v", c)
 	}
 }

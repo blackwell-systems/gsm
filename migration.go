@@ -18,20 +18,19 @@ type Migration func(old, blank State) State
 type MigrationOutcome int
 
 const (
-	// MigrationUnknown: not certified either way. The change is not safe online (a witness
-	// shows it), the new configuration converges after a barrier, but the old one does not
-	// converge on its own and the migration is not injective on the states it reaches, so
-	// the barrier outcome depends on whether the migration absorbs the old configuration's
-	// divergence, which gsm searched for a witness of and did not find. That case has no
-	// finite exact condition mechanized (normalization-confluence REGIME-AUDIT.md gap 20,
-	// residue (c)), so gsm does not claim either outcome.
+	// MigrationUnknown: not certified either way, because the search for a MigrationAmodM
+	// witness stopped at the size limit before it was exhaustive (MigrationReport.SearchStopped).
+	// An exhausted search decides the outcome (normalization-confluence det_classify_complete:
+	// on finite instances every change is safe online, safe behind a barrier or unsafe), so
+	// Unknown means only that the limit was hit.
 	MigrationUnknown MigrationOutcome = iota
 	// MigrationSafeOnline: the switch may happen at any time, with events of the old
 	// configuration still in flight; every run converges.
 	MigrationSafeOnline
 	// MigrationSafeBehindBarrier: every run that drains the old configuration's events
 	// before switching converges, and some run that switches with an event in flight does
-	// not (MigrationReport.LiveWitness).
+	// not (MigrationReport.LiveWitness). When the old configuration does not converge on its
+	// own, this is certified by an exhausted MigrationAmodM search with no witness.
 	MigrationSafeBehindBarrier
 	// MigrationUnsafe: two runs that both switch at a barrier diverge
 	// (MigrationReport.BarrierWitness).
@@ -73,8 +72,10 @@ const (
 	MigrationFaithful = "Faithful"
 	// MigrationAmodM (barrier): two orders of the same old events never reach states the
 	// migration tells apart. Evaluated only when the change is not safe online, PermB-every
-	// holds and PermA fails, by a search for a witness (under Faithful, a failure of PermA is
-	// one); a search that finds none decides nothing.
+	// holds and PermA fails, by an exhaustive search of the pair closure for a witness (under
+	// Faithful, a failure of PermA is one). Exact both ways: a witness refutes it, and an
+	// exhausted search with none certifies it (amodm_closure_exact, gsm_closure_exact,
+	// amodm_witness_exact). Not decided only when the search stops at the size limit.
 	MigrationAmodM = "AmodM"
 )
 
@@ -84,7 +85,7 @@ type MigrationCondition struct {
 	Mode      string // "online" or "barrier"
 	Desc      string // what it says, in words
 	Evaluated bool   // false when it was not needed (MigrationAmodM only)
-	Decided   bool   // false when evaluated without a result (MigrationAmodM with no witness found)
+	Decided   bool   // false when evaluated without a result (MigrationAmodM with the search stopped at the limit)
 	Holds     bool   // meaningful when Decided
 	Detail    string // the scope checked, or where it fails
 }
@@ -161,11 +162,12 @@ type MigrationReport struct {
 	BarrierWitness *MigrationWitness
 
 	// Theorems cites the normalization-confluence theorems behind the outcome (in
-	// coq/Reconfiguration.v and coq/Trace.v); docs/theory.md §11.11 maps each to its use.
+	// coq/Reconfiguration.v, coq/ReconfigurationClosure.v and coq/Trace.v); docs/theory.md
+	// §11.11 maps each to its use.
 	Theorems []string
 
 	// SearchStopped is non-empty when the search for a MigrationAmodM witness stopped at the
-	// state limit before it was exhaustive.
+	// state limit before it was exhaustive; the outcome is then MigrationUnknown.
 	SearchStopped string
 }
 
@@ -223,7 +225,8 @@ func (r *MigrationReport) String() string {
 	if r.SearchStopped != "" {
 		fmt.Fprintf(&b, "  Search: %s\n", r.SearchStopped)
 	}
-	fmt.Fprintf(&b, "  Theorems: %s (normalization-confluence coq/Reconfiguration.v, coq/Trace.v)\n",
+	fmt.Fprintf(&b, "  Theorems: %s (normalization-confluence coq/Reconfiguration.v, coq/ReconfigurationClosure.v, "+
+		"coq/Trace.v)\n",
 		strings.Join(r.Theorems, ", "))
 	b.WriteString("  Not covered: a switch between an event and its repair (not gsm's runtime); declared " +
 		"Independent pairs, causal or at-least-once delivery across the switch; federations, collections and " +
@@ -286,10 +289,17 @@ func migrationLimit(n int) MigrationOption {
 //     (PermB-every) and from converges from the start (PermA): det_barrier_exact, sufficient
 //     always, and exact when the migration is injective on the reachable states
 //     (det_barrier_faithful).
+//   - When PermB-every holds and PermA fails, the barrier outcome turns on whether the
+//     migration absorbs from's divergence (AmodM). CheckMigration searches the pair closure:
+//     the pairs of states reached by applying two events in both orders at a reachable state,
+//     closed under applying the same event to both. Safe behind a barrier iff the migration
+//     sends both states of every pair to one state: det_barrier_closure_exact,
+//     amodm_closure_exact, gsm_closure_exact (the pruned search computes that closure) and
+//     amodm_witness_exact (an exhausted search with no witness is a certificate).
 //   - Unsafe when two barrier runs diverge, with that witness: PermB-every fails, or PermA
 //     fails and two orders of the same events reach states the migration tells apart.
-//   - Unknown when PermA fails, the migration is not injective, and no such pair is found:
-//     the barrier outcome then depends on a condition with no mechanized finite form.
+//   - Unknown only when that search stops at the size limit before it is exhaustive. On
+//     finite instances the outcome is otherwise always decided (det_classify_complete).
 //
 // Every witness is replayed before the report is returned. The registries need not pass
 // Build: CheckMigration checks the states runs reach, not every state, so a from that
@@ -665,6 +675,7 @@ type startResult struct {
 	collision                *MigrationCollision
 	live, bar                *MigrationWitness
 	amodMEvaluated           bool
+	closure                  bool // safe behind a barrier, certified by the exhausted AmodM search
 	stopped                  string
 	nA, nB, nBStart          int
 	aStates, bStates         []uint64
@@ -835,9 +846,14 @@ ds1:
 	case res.permA.ok:
 		res.outcome = MigrationSafeBehindBarrier
 	default:
-		// PermA fails. Search for two orders of the same events whose images differ: pairs
-		// (x, y) reached by swapping two adjacent events at a reachable state, then applying
-		// the same events to both.
+		// PermB-every holds (the case above) and PermA fails. By det_barrier_closure_exact the
+		// barrier outcome is then exactly the closure condition: M x = M y for every pair
+		// (x, y) of the pair closure, seeded with (e2(e1 t), e1(e2 t)) at every reachable t
+		// and closed under applying the same event to both (amodm_closure_exact). The search
+		// below is gsm_closure_exact's pruned form of that closure: one ordering per pair of
+		// distinct events, seeds and successors with equal states skipped (equal states stay
+		// equal and have equal images). By amodm_witness_exact it finds a witness iff one
+		// exists, so an exhausted search with none certifies the barrier.
 		res.amodMEvaluated = true
 		type pairNode struct {
 			x, y uint64
@@ -914,14 +930,15 @@ ds1:
 				"the migration sends to %s and %s", from, c.a.state(nodes[found].x), c.a.state(nodes[found].y),
 				w.Result1, w.Result2)}
 			res.outcome = MigrationUnsafe
-		} else {
-			res.amodM = condResult{detail: fmt.Sprintf("no witness among the %s reached by swapping two "+
-				"adjacent events and continuing alike; not a certificate: no finite exact form of this "+
-				"condition is mechanized", count(len(nodes), "pair of states"))}
-			if res.stopped != "" {
-				res.amodM.detail = res.stopped
-			}
+		} else if res.stopped != "" {
+			res.amodM = condResult{detail: res.stopped}
 			res.outcome = MigrationUnknown
+		} else {
+			res.amodM = condResult{ok: true, detail: fmt.Sprintf("the closure is exhausted with no witness: in each "+
+				"of the %s reached by applying two %s events in both orders at a reachable state and continuing "+
+				"alike, both states migrate to one state", count(len(nodes), "pair of states"), from)}
+			res.closure = true
+			res.outcome = MigrationSafeBehindBarrier
 		}
 	}
 	return res, nil
@@ -1010,9 +1027,8 @@ func (c *migCheck) check() (*MigrationReport, error) {
 			Evaluated: true, Decided: true, Holds: pa.ok, Detail: pa.detail},
 		{Key: MigrationFaithful, Mode: "barrier", Desc: "the migration is injective on the reachable states",
 			Evaluated: true, Decided: true, Holds: rep.Faithful, Detail: faithDetail},
-		{Key: MigrationAmodM, Mode: "barrier", Desc: "two orders of the same " + from.name + " events never migrate apart",
-			Evaluated: worst.amodMEvaluated, Decided: worst.outcome == MigrationUnsafe, Holds: false,
-			Detail: worst.amodM.detail},
+		amodMCondition(results, func(s0 uint64) string { return c.a.state(s0).String() },
+			"two orders of the same "+from.name+" events never migrate apart"),
 	}
 	rep.SearchStopped = worst.stopped
 
@@ -1035,10 +1051,22 @@ func (c *migCheck) check() (*MigrationReport, error) {
 			rep.Reason = fmt.Sprintf("%s diverges from the migrated start; drain, then switch", to.name)
 		}
 		rep.Theorems = []string{"det_live_exact"}
-		if rep.Faithful {
+		closure, permA := false, false
+		for _, r := range results {
+			closure = closure || r.closure
+			permA = permA || (r.outcome == MigrationSafeBehindBarrier && !r.closure)
+		}
+		switch {
+		case rep.Faithful:
 			rep.Theorems = append(rep.Theorems, "det_barrier_faithful")
-		} else {
+		case permA:
 			rep.Theorems = append(rep.Theorems, "det_barrier_exact")
+		}
+		if closure {
+			// The migration absorbs from's own divergence: the exhausted closure search
+			// certifies it.
+			rep.Theorems = append(rep.Theorems, "det_barrier_closure_exact", "amodm_closure_exact",
+				"gsm_closure_exact", "amodm_witness_exact")
 		}
 		rep.Theorems = append(rep.Theorems, "run_tequiv", "perm_tequiv_total")
 	case MigrationUnsafe:
@@ -1054,9 +1082,57 @@ func (c *migCheck) check() (*MigrationReport, error) {
 		}
 	default:
 		rep.Failed = MigrationAmodM
-		rep.Reason = fmt.Sprintf("not certified: not safe online, %s diverges on its own, and the migration is not "+
-			"injective, so the barrier outcome is not decided", from.name)
-		rep.Theorems = []string{"det_live_exact", "det_barrier_exact"}
+		rep.Reason = fmt.Sprintf("not certified: not safe online, and the search for two orders of the same %s "+
+			"events that migrate apart stopped at the size limit before it was exhaustive", from.name)
+		rep.Theorems = []string{"det_live_exact", "det_barrier_closure_exact"}
 	}
 	return rep, nil
+}
+
+// amodMCondition combines the AmodM search over the starts: evaluated if it was searched from
+// some start; failing, with the first witness, if any search found one; not decided if none
+// did and some search stopped at the limit; holding if every search was exhausted with none.
+func amodMCondition(results []*startResult, state func(uint64) string, desc string) MigrationCondition {
+	out := MigrationCondition{Key: MigrationAmodM, Mode: "barrier", Desc: desc}
+	var fail, stop, hold *startResult
+	n := 0
+	for _, r := range results {
+		if !r.amodMEvaluated {
+			continue
+		}
+		n++
+		switch {
+		case r.stopped != "":
+			if stop == nil {
+				stop = r
+			}
+		case !r.amodM.ok:
+			if fail == nil {
+				fail = r
+			}
+		case hold == nil:
+			hold = r
+		}
+	}
+	pick := fail
+	switch {
+	case fail != nil:
+		out.Decided = true
+	case stop != nil:
+		pick = stop
+	case hold != nil:
+		pick, out.Decided, out.Holds = hold, true, true
+	default:
+		return out
+	}
+	out.Evaluated = true
+	out.Detail = pick.amodM.detail
+	if len(results) > 1 {
+		if out.Holds && n > 1 {
+			out.Detail = fmt.Sprintf("from each of the %d starts it was searched from: %s", n, out.Detail)
+		} else {
+			out.Detail = fmt.Sprintf("from %s: %s", state(pick.s0), out.Detail)
+		}
+	}
+	return out
 }

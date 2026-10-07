@@ -1321,9 +1321,12 @@ wider ranges.
 ### 11.11 Changing a Running System (Migration)
 
 **Implemented**: `CheckMigration` classifies a change from one registry to another as safe online,
-safe behind a barrier, unsafe with a witness, or unknown
-([Deployment](deployment.md#changing-a-running-system)). The theory is normalization-confluence
+safe behind a barrier, or unsafe with a witness, and reports unknown only when its search stops at
+the size limit ([Deployment](deployment.md#changing-a-running-system)). The theory is
+normalization-confluence
 [`Reconfiguration.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/Reconfiguration.v)
+and
+[`ReconfigurationClosure.v`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/ReconfigurationClosure.v)
 (axiom-free; the notes are its `coq/docs/reconfiguration.md`), gap 20 of the
 [regime audit](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md).
 
@@ -1348,6 +1351,19 @@ B-events through a translation τ. The theory states the result for two models:
   modulo M (two permutations of the same A-events reach states with equal images).
   `det_barrier_faithful`: when M reflects and preserves the equivalences, the second part is A's
   own permutation convergence, PermA(s₀). `det_live_implies_barrier`.
+- **The closure** (`ReconfigurationClosure.v`, for the deterministic model): the A part of
+  `det_barrier_exact` without injectivity, as a finite condition. The pair closure PC s₀ is
+  seeded with (b(a t), a(b t)) for every reachable t and events a, b, and closed under applying
+  the same event to both components. `amodm_swap_exact`: A converges modulo M iff
+  M(runA w (b(a(runA u s₀)))) ~ M(runA w (a(b(runA u s₀)))) for all words u, w and events a, b.
+  `amodm_closure_exact`: iff M x ~ M y for every pair (x, y) in PC s₀.
+  `det_barrier_closure_exact`: barrier convergence iff PermB at M t for every reachable t and
+  that closure condition. `amodm_witness_exact` (finite instances): A fails to converge modulo M
+  iff some pair in PC s₀ has M x not ~ M y, so a search of the closure that is exhausted with no
+  such pair is a certificate. `gsm_closure_exact`: the pruned closure gsm searches (one ordering
+  per pair of distinct events, equal pairs skipped, decidable state equality) gives the same
+  condition. `det_classify_complete`: on finite instances every change is online, barrier only
+  or unsafe, with no unknown.
 
 **gsm's runtime is the deterministic model.** `Machine.Apply` repairs before it returns (eager
 compensation, §6.5), so a switch happens between two `Apply` calls and never migrates a raw state.
@@ -1373,23 +1389,40 @@ the start (at most 2²⁰ on each side), not every state.
 | Every pair of A's events commutes at every reachable state (`PermA`) | PermA(s₀) | Exact | `run_tequiv`, `perm_tequiv_total` |
 | `PermB-every` and `PermA` | Safe behind a barrier | Sufficient (equal A results have equal images, so the A part of `det_barrier_exact` holds); exact when `Faithful` holds | `det_barrier_exact`; `det_barrier_faithful` |
 | M injective on the reachable states (`Faithful`) | The hypothesis of `det_barrier_faithful` | Decided by enumeration | |
-| Two orders of the same A-events that migrate apart (`AmodM`, searched when `PermA` fails; under `Faithful` the first failure of `PermA` is one) | The A part of `det_barrier_exact` | A witness refutes barrier convergence; no witness decides nothing | `det_barrier_exact` |
+| Every pair of the pair closure migrates to one state (`AmodM`, searched when `PermB-every` holds and `PermA` fails; under `Faithful` the first failure of `PermA` is a witness) | The A part of `det_barrier_exact`, as the closure condition | Exact, both ways: a witness refutes barrier convergence, and an exhausted search with none certifies it | `det_barrier_closure_exact`, `amodm_closure_exact`, `gsm_closure_exact`, `amodm_witness_exact` |
 
 The outcomes:
 
 - **Safe online**: `PermB-start` and `DS1` hold. Exact (`det_live_exact`).
-- **Safe behind a barrier**: not safe online, shown by a witness, and `PermB-every` and `PermA` hold.
-  Sufficient always, exact under `Faithful` (`det_barrier_exact`, `det_barrier_faithful`).
+- **Safe behind a barrier**: not safe online, shown by a witness, `PermB-every` holds, and either
+  `PermA` holds (sufficient always, exact under `Faithful`: `det_barrier_exact`,
+  `det_barrier_faithful`) or `PermA` fails and the `AmodM` search exhausts the pair closure with no
+  witness (exact: `det_barrier_closure_exact`, `amodm_closure_exact`, `gsm_closure_exact`,
+  `amodm_witness_exact`). The second case is a non-injective migration that absorbs A's
+  divergence.
 - **Unsafe**: a witness of two barrier runs that diverge, from a failure of `PermB-every`, or of
   `PermA` under `Faithful` (whose two orders reach different states, which an injective M keeps
   apart), or from the `AmodM` search. The witness certifies the outcome by itself.
-- **Unknown**: `PermA` fails, M is not injective, and the search found no witness. The A part of
-  `det_barrier_exact` quantifies over every pair of permutations, with no finite form mechanized
-  (gap 20, residue (c)), so gsm claims neither outcome. The search explores the pairs of states
-  reached by swapping two adjacent events at a reachable state and then applying the same events
-  to both; any two permutations are connected by adjacent swaps, so if every such pair has equal
-  images, A converges modulo M. That argument would make the search exact; it is not mechanized,
-  so gsm does not rely on it, and the differential test only checks it empirically.
+- **Unknown**: only when the `AmodM` search stops at the size limit (2²⁰ pairs of states) before
+  it is exhausted; `SearchStopped` says so. Otherwise the outcome is always decided, as
+  `det_classify_complete` states for finite instances.
+
+**The closure search is exact (gap 20, residue (c), closed in the deterministic model).** The
+search seeds, at every reachable t and for each pair of distinct A-events e₁ < e₂ whose two orders
+differ, the pair (Apply(Apply(t, e₁), e₂), Apply(Apply(t, e₂), e₁)), then applies every A-event to
+both states of each pair, skipping a successor whose two states are equal (equal states stay equal
+and have equal images). It stops at the first pair with different images, the witness. This is
+the pruned closure of `gsm_closure_exact`: one ordering per pair of events suffices because the
+condition is symmetric, the pair of an event with itself is two equal states, and a pair of equal
+states has equal images. By `amodm_closure_exact` and `det_barrier_closure_exact`, with
+`PermB-every` (checked first; its failure is unsafe), every pair having equal images is barrier
+convergence, and by `amodm_witness_exact` an exhausted search with no witness certifies it.
+`TestCheckMigration_DifferentialRandom` checks every such certificate against a brute-force
+enumeration of barrier runs.
+
+The scope is the deterministic model, which is gsm's runtime. The rewriting model, where a switch
+can fall between an event and its repair, is not covered by these theorems, and gsm does not check
+it (see above).
 
 **Witnesses.** Each failure is turned into two runs from the start, replayed before the report is
 returned, the runs of the necessity proofs of `det_live_exact` and `det_barrier_exact`:
@@ -1413,10 +1446,20 @@ gsm outcomes follow from the `Det` theorems and are checked by the tests named.
 | `rescaled_cap` | Online from every start | Safe online from every start | `TestCheckMigration_RescaledCap` |
 | `lww_target` | Unsafe | Unsafe, a `PermB-every` witness | `TestCheckMigration_LWWTargetUnsafe` |
 
+The closure instances of `ReconfigurationClosure.v` are stated in the deterministic model, with A
+last-writer-wins on an optional bool (A diverges) and a non-injective migration:
+
+| Instance | Theory | gsm | Test |
+|---|---|---|---|
+| `merged_online` (B sets a flag, both writes merged) | Online | Safe online | `TestCheckMigration_ClosureMergedOnline` |
+| `merged_barrier` (B ignores the events, both writes merged) | Barrier only, by the closure | Safe behind a barrier, the `AmodM` search exhausted with no witness (unknown before the closure theorems) | `TestCheckMigration_ClosureMergedBarrier` |
+| `partial_merge` (the start merged with one write) | Unsafe, a closure pair at the start | Unsafe, an `AmodM` witness: set1, set2 against set2, set1 | `TestCheckMigration_ClosurePartialMerge` |
+
 `migrated_transient` is the case where the models differ: its divergence needs a switch between an
 event and its repair, which gsm's runtime does not have. Beyond the instances, the tests cover an
-A divergence a faithful migration keeps (unsafe), a non-injective migration that absorbs it
-(unknown, never unsafe) and one that does not (unsafe, with an `AmodM` witness), and
+A divergence a faithful migration keeps (unsafe), a non-injective migration that absorbs it (safe
+behind a barrier, by the closure search) and one that does not (unsafe, with an `AmodM` witness),
+a search stopped by the size limit (the one unknown case), and
 `TestCheckMigration_DifferentialRandom` compares the classification with a brute-force enumeration
 of live and barrier runs on random small registries, migrations and event maps, replaying every
 witness in an independent model of `Apply`.

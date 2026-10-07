@@ -204,19 +204,16 @@ reports one of the three outcomes with its witness.
 - **Implemented, for single registries.** `CheckMigration(from, to, migrate, events)` enumerates the
   states runs reach and returns a `MigrationReport`: `SAFE ONLINE`, `SAFE BEHIND A BARRIER` (with a
   witness that a switch with an event in flight diverges), `UNSAFE` (with a witness of two runs
-  that drain, switch and diverge), or `UNKNOWN`. It checks gsm's runtime, where `Apply` repairs
-  before it returns, which is the deterministic model of normalization-confluence
-  `coq/Reconfiguration.v` (section `Det`): safe online is exact (`det_live_exact`), safe behind a
-  barrier is sufficient and exact when the migration is injective on the reachable states
-  (`det_barrier_exact`, `det_barrier_faithful`), and every negative outcome carries a replayed
-  witness. See [Deployment](deployment.md#changing-a-running-system) and
+  that drain, switch and diverge), or `UNKNOWN` only when its search stops at the size limit. It
+  checks gsm's runtime, where `Apply` repairs before it returns, which is the deterministic model
+  of normalization-confluence `coq/Reconfiguration.v` (section `Det`): safe online is exact
+  (`det_live_exact`), safe behind a barrier is exact (`det_barrier_exact`, `det_barrier_faithful`,
+  and for a non-injective migration of diverging old rules the pair closure search of
+  `coq/ReconfigurationClosure.v`: `det_barrier_closure_exact`, `gsm_closure_exact`,
+  `amodm_witness_exact`), and every negative outcome carries a replayed witness. See
+  [Deployment](deployment.md#changing-a-running-system) and
   [Theory §11.11](theory.md#1111-changing-a-running-system-migration).
 - **Residue.**
-  - **Unknown**: when the old rules diverge on their own and the migration is not injective,
-    whether the migration absorbs the divergence has no mechanized finite condition (gap 20,
-    residue (c)). gsm searches for a witness and reports `UNKNOWN` when it finds none. Exploring
-    the pairs of states reached by one adjacent swap and continuing alike would decide it; that is
-    the candidate theorem.
   - **Federations**: exact in the theory under `FedMachine` semantics (`fed_live_exact`,
     `fed_barrier_exact`, `late_edge`), not implemented: the same check applies to
     `FedMachine.Apply`, but a migration needs a way to build a `FedState`.
