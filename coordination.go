@@ -157,6 +157,7 @@ func (f *Federation) BuildCoordinated(plan []CoordinationPoint) (*FedMachine, *F
 	}
 	m, rep, err := f.withoutEdges(remove).Build()
 	recordCoordinated(rep, f.edges, remove)
+	rep.setRegime(err == nil && m != nil)
 	return m, rep, err
 }
 

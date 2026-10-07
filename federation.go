@@ -269,6 +269,16 @@ type FedReport struct {
 	// case), or the closures, with the reason, for the targets that cannot run from tables.
 	// Empty when nothing was embedded on a certificate, or unless Build returned a machine.
 	Runtime []string
+
+	// Regime is the regime report for the federation (see RegimeSummary): its shape and
+	// deployment options, what the checks that ran guarantee (each line with its theorems),
+	// what the deployment must provide, and what is not covered. Set by Build and
+	// BuildCoordinated when they return a machine; nil otherwise. String prints it after the
+	// federation-level checks, before the component reports.
+	Regime *RegimeSummary
+
+	// shape is what Build saw that the fields above do not record, for Regime.
+	shape fedShape
 }
 
 // fedAssurance is FedReport.Assurance for a federation Build accepted.
@@ -287,6 +297,9 @@ func (r *FedReport) String() string {
 		}
 		for _, l := range r.Runtime {
 			fmt.Fprintf(&b, "    runtime: %s\n", l)
+		}
+		if r.Regime != nil {
+			b.WriteString(indentBlock(r.Regime.String(), "  "))
 		}
 	} else {
 		b.WriteString("  Federation assurance: not certified\n")
@@ -382,6 +395,7 @@ func (f *Federation) Build() (*FedMachine, *FedReport, error) {
 	if err != nil {
 		return nil, rep, err
 	}
+	rep.setRegime(true)
 	return m, rep, nil
 }
 
@@ -551,6 +565,8 @@ func (f *Federation) build() (*FedMachine, *FedReport, error) {
 	}
 
 	report.Runtime = f.certRuntime(m, certSnaps, subOf)
+	report.shape = fedShape{cyclic: m.cyclic, multiSource: f.multiSourceTargets(),
+		requireProjection: f.requireProjection, certified: len(f.certified)}
 	report.Assurance = fedAssurance
 	report.Checks = append(f.checksRun(m.cyclic), proj.line)
 	return m, report, nil
@@ -598,6 +614,22 @@ func (f *Federation) checksRun(cyclic bool) []string {
 		checks = append(checks, fmt.Sprintf("certificates: %d certified embed(s) match their digest, tables re-checked, seam writes only input ports", len(f.certified)))
 	}
 	return checks
+}
+
+// multiSourceTargets names the targets with more than one incoming morphism, in component
+// order.
+func (f *Federation) multiSourceTargets() []string {
+	inDeg := map[*Registry]int{}
+	for _, e := range f.edges {
+		inDeg[e.dst]++
+	}
+	var out []string
+	for _, r := range f.comps {
+		if inDeg[r] > 1 {
+			out = append(out, r.name)
+		}
+	}
+	return out
 }
 
 func containsInt(xs []int, x int) bool {

@@ -76,6 +76,7 @@ another collection machine.
 | `Abstraction` | `Build` by abstraction (`Registry.Abstract`): `*AbstractionReduction{Over, Constants, Cutoff, Representatives, States}`, printed as `Verified by abstraction over stock (rules compare values only; constants {5}; 7 representatives)`. `StateCount` is then the number of representative states, and `Assurance` is `AssuranceOracleRepresentatives`. Also set on a WFC or CC failure found that way ([Verification](verification.md#abstraction-check-relationships-not-values)) |
 | `AbstractionRefused` | The registry declared `Abstract` but is outside the fragment; holds the `*AbstractionError` text, and nothing was checked |
 | `Symmetry` | On a collection's report: `*SymmetryReduction{Over, Cutoff}`, printed as `Verified by symmetry over <Over> (items independent; cutoff 1)`. The template was checked as one item and the result holds at every key; `NotIdempotent` and `CausalOrderRequired` then apply per key ([Getting started](getting-started.md#collections-one-template-every-key)) |
+| `Regime` | The regime summary (`*RegimeSummary`, below), set by `Build`, `BuildCompositional` and `Collection.Build` when they return a machine; nil otherwise, and on a federation component's report. Printed last ([Regime summary](verification.md#regime-summary)) |
 
 ---
 
@@ -91,6 +92,22 @@ federation-level lines above the component reports.
 | `Checks` | The federation-level checks that ran and passed, in order, ending with the projection line |
 | `ProjectionSafe`, `ProjectionLine`, `ProjectionWitnesses` | Whether distributed projection merging is certified (XU), the one-line result, and one `*ProjectionOrderError` per failing target ([Deployment](deployment.md#projection-deployments)) |
 | `Runtime` | For each `EmbedCertified` sub: whether its internal targets execute the certificate's tables, or which run closures and why |
+| `Regime` | The federation's regime summary (`*RegimeSummary`), set when `Build` or `BuildCoordinated` returns a machine; printed after the federation-level checks ([Regime summary](verification.md#regime-summary)) |
+
+**`RegimeSummary`** (in `Report.Regime`, `FedReport.Regime` and `MigrationReport.Regime`) has four
+parts, each printed under its label by `String()`:
+
+| Field or method | Meaning |
+|---|---|
+| `Regime` | The configuration, one item per aspect (`[]string`): one registry, a collection or a federation; how it was checked; declared pairs; cycles, coordinated edges and their authority roots; multi-source targets; the projection result |
+| `Guaranteed` | What the checks that ran certified (`[]RegimeLine`); every line cites at least one theorem |
+| `MustProvide` | What the guarantee assumes of the deployment: computed obligations and the regime's deployment rules, delivery rules stated conditionally |
+| `NotCovered` | What lies outside the mechanized model for this configuration, each line with a pointer |
+| `Theorems()` | Every theorem cited, sorted, without repeats |
+
+A `RegimeLine` has `Text`, `Theorems` (normalization-confluence theorem names, each gated in its
+`coq/verify.sh`) and `Ref` (a gsm docs section, or a gap in normalization-confluence
+`REGIME-AUDIT.md`); `String()` renders `Text (theorems; see Ref)`.
 
 `CycleDiagnostic` (from `DiagnoseCycle`) has `Cycle`, `Shared`, `Converges`, `Orbit`, `AllSeeds`,
 `Seeds`, `SectionExists`, `Section` and `Obstructed()`; [Federation](federation.md#this-is-exactly-what-diagnosecycle-computes)
@@ -131,6 +148,7 @@ occurrence becomes; an old event it does not name becomes the new event of the s
 | `BarrierWitness` | Why the change is unsafe: two runs that both switch at a barrier and diverge. Set only when `Outcome` is `MigrationUnsafe` |
 | `Theorems` | The normalization-confluence theorems behind the outcome ([Theory §11.11](theory.md#1111-changing-a-running-system-migration)) |
 | `SearchStopped` | Set when the search for a `MigrationAmodM` witness stopped at the state limit; the outcome is then `MigrationUnknown` |
+| `Regime` | The regime summary for the change (`*RegimeSummary`): the guarantee of a safe outcome with its theorems (none for unsafe or unknown), the deployment rules, and what `CheckMigration` does not cover. Printed last |
 
 `CheckMigration` returns an error, not a report, for a registry declared with `Abstract` or with
 `Independent` pairs, more than 64 bits of state, an invariant without a `Repair`, an event map

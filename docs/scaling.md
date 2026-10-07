@@ -85,6 +85,11 @@ what would go wrong.
 A model small enough for plain `Build` is checked whole even when it decomposes, because that gives
 the strongest assurance and the step tables `Export`, federations and certificates need.
 
+`Report.Regime` names the reduction that was used ("checked per footprint component (2)",
+"verified by abstraction over ...", "keyed collection over ...") and cites the theorem that carries
+the result to the real model, with what each reduction leaves uncovered
+([Regime summary](verification.md#regime-summary)).
+
 ## When nothing fits
 
 - **Arithmetic on wide ranges:** narrow the ranges until `Build` can enumerate them, or restructure

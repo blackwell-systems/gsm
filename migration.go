@@ -169,6 +169,11 @@ type MigrationReport struct {
 	// SearchStopped is non-empty when the search for a MigrationAmodM witness stopped at the
 	// state limit before it was exhaustive; the outcome is then MigrationUnknown.
 	SearchStopped string
+
+	// Regime is the regime report for the change (see RegimeSummary): what the outcome
+	// guarantees (each line with its theorems), what the deployment must provide, and what
+	// is not covered. Set by CheckMigration; String prints it last.
+	Regime *RegimeSummary
 }
 
 // Condition returns the condition with key k, and whether it was evaluated.
@@ -228,9 +233,9 @@ func (r *MigrationReport) String() string {
 	fmt.Fprintf(&b, "  Theorems: %s (normalization-confluence coq/Reconfiguration.v, coq/ReconfigurationClosure.v, "+
 		"coq/Trace.v)\n",
 		strings.Join(r.Theorems, ", "))
-	b.WriteString("  Not covered: a switch between an event and its repair (not gsm's runtime); declared " +
-		"Independent pairs, causal or at-least-once delivery across the switch; federations, collections and " +
-		"projection deployments (propagation in flight)\n")
+	if r.Regime != nil {
+		b.WriteString(indentBlock(r.Regime.String(), "  "))
+	}
 	return b.String()
 }
 
@@ -1086,6 +1091,7 @@ func (c *migCheck) check() (*MigrationReport, error) {
 			"events that migrate apart stopped at the size limit before it was exhaustive", from.name)
 		rep.Theorems = []string{"det_live_exact", "det_barrier_closure_exact"}
 	}
+	rep.Regime = rep.regimeSummary()
 	return rep, nil
 }
 

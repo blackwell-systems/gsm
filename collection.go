@@ -67,6 +67,7 @@ func (c *Collection[K]) Build() (*CollectionMachine[K], *Report, error) {
 		return nil, rep, fmt.Errorf("gsm: collection over %s: template %q did not build: %w", c.over, c.template.name, err)
 	}
 	rep.Symmetry = &SymmetryReduction{Over: c.over, Cutoff: 1}
+	rep.setRegime(true)
 	return &CollectionMachine[K]{over: c.over, item: item}, rep, nil
 }
 
