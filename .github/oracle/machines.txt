@@ -27,9 +27,10 @@
 
 README.md#1                      order_fulfillment  certified-tables
 docs/getting-started.md#1        product            certified-tables
-docs/verification.md#1           store/component1   certified-tables
-docs/verification.md#1           store/component2   certified-tables
-docs/verification.md#2           inventory          certified-tables
+docs/verification.md#1           wallet             certified
+docs/verification.md#2           store/component1   certified-tables
+docs/verification.md#2           store/component2   certified-tables
+docs/verification.md#3           inventory          certified-tables
 @none docs/deployment.md#1 CheckMigration classifies a change from the rules; it builds no machine
 
 Example                          counter            certified-tables

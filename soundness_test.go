@@ -167,7 +167,19 @@ func TestCompositionalReport_Pass(t *testing.T) {
 		"  Delivery: exactly once for inc0, inc1, inc2 (applying one twice differs from once); deduplicate redelivered events\n" +
 		"  Saturation: event \"inc0\" clamps \"c0\" into its range on 1 state(s) (silently; an invariant testing the bound never sees the overflow)\n" +
 		"  Saturation: event \"inc1\" clamps \"c1\" into its range on 1 state(s) (silently; an invariant testing the bound never sees the overflow)\n" +
-		"  Saturation: event \"inc2\" clamps \"c2\" into its range on 1 state(s) (silently; an invariant testing the bound never sees the overflow)\n"
+		"  Saturation: event \"inc2\" clamps \"c2\" into its range on 1 state(s) (silently; an invariant testing the bound never sees the overflow)\n" +
+		"\n" +
+		"  Regime: single registry; checked per footprint component (3), closure footprints tested; every event pair independent\n" +
+		"  Guaranteed:\n" +
+		"    within each footprint component, on the tables the oracle certified: every order of the same events, each applied " +
+		"once, reaches one state (check_tables_converges)\n" +
+		"  You must provide:\n" +
+		"    if your transport can redeliver: deduplicate inc0, inc1, inc2 before Apply (an event id and a dedupe set)\n" +
+		"    every closure reads and writes only its declared footprint (an event's Writes, an invariant's Watches) and is " +
+		"deterministic, as TrustClosureFootprints acknowledges\n" +
+		"  Not covered:\n" +
+		"    the step from the components to the whole machine: closure footprints are tested by perturbation, not proved, " +
+		"and a joint dependence on three or more outside variables escapes the test (see docs/verification.md#buildcompositional)\n"
 	if got := rep.String(); got != want {
 		t.Fatalf("report text:\n%s\nwant:\n%s", got, want)
 	}

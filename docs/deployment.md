@@ -11,6 +11,10 @@ obligation, what the report says about it, and what to do.
 - [Cycles: ghosts and reset epochs](#cycles-ghosts-and-reset-epochs): why projection deployments on a cycle are not certified, and what would certify them.
 - [Changing a running system](#changing-a-running-system): check a change of rules or schema before you deploy it: safe online, safe behind a barrier, or unsafe with a witness.
 
+Each report's regime summary (`Report.Regime`, `FedReport.Regime`, `MigrationReport.Regime`) lists
+the rules below that apply to what you built, under "You must provide", and what is not covered,
+with a pointer back here ([Regime summary](verification.md#regime-summary)).
+
 To run a built machine outside Go, see the [export format](reference.md#multi-language-runtime).
 
 ---

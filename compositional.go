@@ -307,6 +307,7 @@ func (r *Registry) BuildCompositional(opts ...CompositionalOption) (*Machine, *R
 		}
 	}
 	m, rep, err := r.buildCompositional(o)
+	rep.setRegime(err == nil && m != nil)
 	if err == nil && machineObserver != nil {
 		machineObserver("compositional", r, m)
 	}

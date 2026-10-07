@@ -9,6 +9,7 @@ for the formal algorithm and its soundness, [Theory §9](theory.md#9-verificatio
 - [The proof behind the check](#the-proof-behind-the-check)
 - [How Build verifies](#how-build-verifies)
 - [Verification report](#verification-report)
+- [Regime summary](#regime-summary)
 - [What the extracted oracles check](#what-the-extracted-oracles-check)
   - [The oracle gate](#the-oracle-gate)
   - [Assurance levels](#assurance-levels)
@@ -140,6 +141,74 @@ is its template's report with one more line under the convergence line:
 holds for any number of keys (`Report.Symmetry`; the theorems are in [Theory §11.8](theory.md#118-keyed-collections-symmetry)).
 The delivery lines then apply per key: `Delivery: exactly once per ProductID for ...`, and a
 convergence line under causal delivery ends `on the same ProductID`.
+
+---
+
+## Regime summary
+
+What gsm guarantees depends on what you built and how you deploy it. Every report that comes with
+a machine ends with a **regime summary** (`Report.Regime`, `FedReport.Regime`,
+`MigrationReport.Regime`, a `*RegimeSummary`) that puts it in one place, in four parts:
+
+<!-- gocheck: run -->
+```go
+r := gsm.NewRegistry("wallet")
+balance := r.Int("balance", 0, 5)
+frozen := r.Bool("frozen")
+r.On("deposit").OnlyIf(gsm.Below(balance, 5)).Does(gsm.Inc(balance)).Add()
+r.On("freeze").Does(gsm.Raise(frozen)).Add()
+
+_, report, err := r.Build()
+if err != nil {
+    panic(fmt.Sprintf("convergence not guaranteed: %v\n%s", err, report))
+}
+fmt.Print(report.Regime)
+if len(report.Regime.Guaranteed) == 0 || len(report.Regime.MustProvide) != 1 {
+    panic("expected a guarantee, and deduplication of deposit")
+}
+```
+
+```
+Regime: single registry; checked globally; every event pair independent
+Guaranteed:
+  every order of the same events, each applied once, reaches one state, from a valid state or NewState (check_tables_converges_all, checkBuild_converges)
+You must provide:
+  if your transport can redeliver: deduplicate deposit before Apply (an event id and a dedupe set); the other events absorb duplicates (alo_exact)
+Not covered: none
+```
+
+`Report.String()` prints the same block last, indented. A federation's summary, here a ledger
+driving a branch's `open` flag, where the branch's only event writes a local:
+
+```
+Regime: acyclic federation; 2 component(s), 1 morphism(s); projection merging certified (XU)
+Guaranteed:
+  the FedMachine (the network's repair after every event): every interleaving of independent events, each applied once, from a FedMachine state, reaches one federated state (fed_events_commute, static_c1_c2_gc)
+  projection deployment (each node runs its component and merges its sources' projections): every interleaving of local events and merges reaches the FedMachine run of its events once propagation completes (dist_interleavings_converge)
+  projection deployment over channels that delay, reorder or duplicate projections, merged with MergeProjectionAfter under the projection rules below: every run converges once the channels drain (vsettle_xu_c2)
+You must provide:
+  run the FedMachine itself (for example over a shared, totally ordered log), or a projection deployment that follows the projection rules below
+  projection rules: a send after every source change (no_final_send_counterexample)
+  projection rules, over channels that can reorder or redeliver projections: merge with MergeProjectionAfter and stamp versions in send order on the snapshot sent (a retry resends the same snapshot and version); plain MergeProjection needs per-edge FIFO channels without redelivery (version_order_counterexample, plain_stale_counterexample)
+  if your transport can redeliver events: deduplicate every event, unless you have checked that its federated step (the event, then the network's repair) is idempotent; per-registry NotIdempotent does not check that (dist_alo_exact)
+Not covered:
+  changing the federation's rules or topology while events are in flight: CheckMigration takes single registries; the theory covers a FedMachine switch, which gsm does not implement, and a switch with projections in flight is open (see docs/deployment.md#changing-a-running-system; normalization-confluence REGIME-AUDIT.md gap 20, residue (a))
+```
+
+How each part is derived:
+
+| Part | Derived from |
+|---|---|
+| **Regime** | What was built and declared: one registry, a collection or a federation; how it was checked (globally, per footprint component, with tested closure footprints, by abstraction); declared `Independent` pairs; acyclic or monotone cycles; coordinated edges (`BuildCoordinated`) and their authority roots; multi-source targets; certified embeds; the projection result and `RequireProjectionSafe` |
+| **Guaranteed** | Only the checks that passed, each line with the normalization-confluence theorems it rests on (`RegimeLine.Theorems`, every name gated in that repository's `coq/verify.sh`): the convergence theorem of the path that certified the machine; at-least-once absorption only when no event is listed `NotIdempotent` and every pair commutes; for a federation, the `FedMachine` theorems for its topology, and the projection theorems only when `ProjectionSafe` holds, the network has no multi-source target and no edge is coordinated |
+| **You must provide** | The obligations the report computes (`NotIdempotent`, `CausalOrderRequired`, per key for a collection, `Coordinated` inputs) and the deployment rules of the regime ([Deployment](deployment.md)). gsm cannot see your transport, so delivery rules are conditional: "if your transport can redeliver: ..." |
+| **Not covered** | What lies outside the mechanized model for this configuration, each with a pointer (`RegimeLine.Ref`) to the doc section or the open gap in normalization-confluence [`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md): a projection deployment on a cycle or with a multi-source target, changing the rules in flight beyond `CheckMigration`'s single-registry scope, the whole-machine step for closure footprints tested under `TrustClosureFootprints`, and abstraction's arithmetic route |
+
+The summary is a reporting layer: it adds no check and changes no result. It is set only when the
+call returned a machine (or, for `CheckMigration`, always: an unsafe change guarantees nothing), and
+a federation component's own report carries none, since the federation's covers it. A claim gsm
+cannot back for the configuration is never listed under Guaranteed; it is omitted, or named under
+Not covered. As with the rest of a report, parse the fields, not the text.
 
 ---
 

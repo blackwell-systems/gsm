@@ -134,6 +134,14 @@ type Report struct {
 	// the fragment abstraction covers (Build's error, an *AbstractionError, names the
 	// rule and the reason). Nothing was checked: WFC and CC are false for that reason.
 	AbstractionRefused string
+
+	// Regime is the regime report (see RegimeSummary): the configuration this report
+	// describes, what its checks guarantee (each line with its theorems), what the
+	// deployment must provide, and what is not covered. Set by Build, BuildCompositional
+	// and Collection.Build when they return a machine; nil otherwise, and nil on a
+	// federation component's report (FedReport.Regime covers the federation). String
+	// prints it last.
+	Regime *RegimeSummary
 }
 
 // compensationError is Build's error when the compensation as written is missing or does
@@ -305,6 +313,9 @@ func (r *Report) String() string {
 		s += fmt.Sprintf("  Assurance: %s\n", r.Assurance)
 	}
 	s += r.obligations()
+	if r.Regime != nil {
+		s += "\n" + indentBlock(r.Regime.String(), "  ")
+	}
 
 	return s
 }
@@ -395,7 +406,9 @@ func (r *Report) obligations() string {
 // with TrustClosureFootprints accepts a tested footprint). A registry neither path can
 // check returns an error that gives both reasons.
 func (r *Registry) Build() (*Machine, *Report, error) {
-	return r.buildWith(buildOpts{})
+	m, rep, err := r.buildWith(buildOpts{})
+	rep.setRegime(err == nil && m != nil)
+	return m, rep, err
 }
 
 // buildOpts selects Build's path. Its zero value is Build's default.

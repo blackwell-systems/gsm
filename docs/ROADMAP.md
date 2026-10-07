@@ -4,8 +4,8 @@ What gsm plans next, and why. Each item is backed by a theory item in normalizat
 [`docs/ROADMAP.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/docs/ROADMAP.md).
 gsm ships a feature only when its guarantee is mechanized there, so the theory item lands first.
 Items 1a (symmetry), 1b (abstraction, the comparison route), 1c (compositional checking by
-default) and 2 (checking a change before you deploy it, for single registries) are implemented;
-nothing else here is implemented yet.
+default), 2 (checking a change before you deploy it, for single registries) and 3 (the regime
+report) are implemented; nothing else here is implemented yet.
 
 ## 1. Verify realistic domains
 
@@ -226,6 +226,21 @@ reports one of the three outcomes with its witness.
 **Theory item.** normalization-confluence roadmap item 9 (`REGIME-AUDIT.md` gap 20).
 
 ## 3. A regime report: one paragraph that says what you have
+
+- **Implemented.** `Report.Regime`, `FedReport.Regime` and `MigrationReport.Regime` (a
+  `*RegimeSummary`) hold the summary, and each report's `String()` prints it. `Build`,
+  `BuildCompositional`, `Collection.Build`, `Federation.Build`, `BuildCoordinated` and
+  `CheckMigration` set it. Every Guaranteed line cites its theorems, and
+  `TestRegime_GuaranteesOnlyWhatPassed` checks, across random and shaped configurations, that no
+  report lists a guarantee whose check did not pass. See
+  [Verification](verification.md#regime-summary).
+- **Deferred.** The delivery model is not declared: gsm cannot see the transport, so delivery
+  rules are stated conditionally ("if your transport can redeliver: ..."), and the Regime part
+  does not name a delivery class. gsm does not check a federated step's idempotence (the event,
+  then the network's repair), so a federation's summary asks for deduplication of every event
+  unless the user has checked it. Projection guarantees are not claimed for a federation built
+  with `BuildCoordinated`, where a coordinated write is not one of the network's events.
+  `SynthesizeWith`, `BuildOrSynthesize` and certificates carry no summary.
 
 **Why.** The guarantees gsm gives depend on what you built and how you deploy it: one registry or a
 federation, declared independent pairs or not, cycles, projection deployments, at-least-once or

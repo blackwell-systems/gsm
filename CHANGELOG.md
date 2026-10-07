@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The regime report (roadmap item 3).** `Report.Regime`, `FedReport.Regime` and
+  `MigrationReport.Regime` hold a `*RegimeSummary`: one summary that names the configuration and
+  states its contract in four parts, printed by each report's `String()`. **Regime** is derived from
+  what was built and declared (one registry, a collection or a federation; global, per-component or
+  abstraction checking; declared `Independent` pairs; acyclic or monotone cycles; coordinated edges
+  and their authority roots; multi-source targets; `ProjectionSafe` and `RequireProjectionSafe`).
+  **Guaranteed** lists only what the checks that ran certified, each line (`RegimeLine`) citing the
+  normalization-confluence theorems it rests on, every name gated in its `coq/verify.sh`. **You must
+  provide** collects the obligations the report computes (`NotIdempotent`, `CausalOrderRequired`,
+  per key for a collection, coordinated inputs) and the regime's deployment rules: projection
+  versions in send order on the snapshot sent and a send after every source change, deduplication
+  of every event in a federation unless its federated step is checked idempotent, the authority
+  roots of a coordination plan, and for a migration the switch rules. Delivery rules are stated
+  conditionally, since gsm cannot see the transport. **Not covered** names what lies outside the
+  mechanized model, each with a pointer to the doc section or the open gap in normalization-confluence
+  `REGIME-AUDIT.md`: a cyclic projection deployment, a multi-source target, changing rules in
+  flight beyond `CheckMigration`'s single-registry scope, closure footprints tested under
+  `TrustClosureFootprints`, and abstraction's arithmetic route. `Build`, `BuildCompositional`,
+  `Collection.Build`, `Federation.Build` and `BuildCoordinated` set it when they return a machine
+  (a federation component's report carries none); `CheckMigration` always sets it, and its former
+  `Not covered` line is now part of the block. A reporting layer only: no check or result changes.
+  `TestRegime_GuaranteesOnlyWhatPassed` checks, over random and shaped configurations, passing and
+  failing, that no report lists a guarantee whose check did not pass, and every cited name is in an
+  allowlist checked against `verify.sh`. See [Verification](docs/verification.md#regime-summary).
+
 - **Check a change before you deploy it (roadmap item 2).** `CheckMigration(from, to, migrate,
   events, opts...)` classifies a change from one registry to another, made while events are in
   flight, as `MigrationSafeOnline` (switch at any time), `MigrationSafeBehindBarrier` (drain, then

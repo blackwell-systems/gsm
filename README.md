@@ -109,6 +109,8 @@ WFC: repair terminates from every state. CC: every pair of events reaches the sa
 
 Every row assumes each event is delivered once and, if you declared only some pairs `Independent`, that each undeclared pair that does not commute arrives in causal order. `Build` names the events and pairs this applies to ([Deployment](docs/deployment.md#delivery)).
 
+Each report ends with a regime summary (`Report.Regime`, `FedReport.Regime`) that picks your row: it names the configuration you built, lists what is guaranteed with the theorem behind each line, what your deployment must provide, and what is not covered ([Verification](docs/verification.md#regime-summary)).
+
 ## When to Use gsm
 
 **Use gsm when:**
@@ -143,10 +145,10 @@ Verification is Go-only; a built machine exports to JSON and runs in any languag
 | [Federation](docs/federation.md) | Many registries: morphisms, resolvers, C1 and C2, cycles, coordination, certificates |
 | [Deployment](docs/deployment.md) | What your runtime must provide: delivery, causal order, shared logs, projection deployments, reset epochs; checking a change before you deploy it |
 | [Scaling your model](docs/scaling.md) | Which reduction to use for a large model: collections, abstraction, or per-component checking, what combines, and what each refuses |
-| [Verification](docs/verification.md) | The report, the extracted oracles, assurance levels, compositional verification, abstraction, synthesis, performance, limitations |
-| [Reference](docs/reference.md) | `Report` and `FedReport` fields, errors, build options, the export format, the test suite |
+| [Verification](docs/verification.md) | The report, the regime summary, the extracted oracles, assurance levels, compositional verification, abstraction, synthesis, performance, limitations |
+| [Reference](docs/reference.md) | `Report`, `FedReport` and `RegimeSummary` fields, errors, build options, the export format, the test suite |
 | [Theory](docs/theory.md) | Formal definitions and proofs, the paper's sections mapped to the code |
-| [Roadmap](docs/ROADMAP.md) | What is planned next: verifying realistic domains further, the residue of the migration check, a regime report |
+| [Roadmap](docs/ROADMAP.md) | What is planned next: verifying realistic domains further, the residue of the migration check |
 | [Design notes](docs/design/) | [Architecture](docs/design/ARCHITECTURE.md), [certificates](docs/design/CERTIFICATE-DESIGN.md), [holonomy-minimal coordination](docs/design/HOLONOMY-COORDINATION-DESIGN.md) |
 | [CHANGELOG](CHANGELOG.md) | What changed in each release |
 
