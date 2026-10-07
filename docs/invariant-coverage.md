@@ -126,7 +126,9 @@ within the limits. They are estimates of reach, not implementations.
 
 **Validation.** Sixteen programs below build the models behind representative rows (six that
 verify at scale, seven that verify only as toys, three that cannot be expressed) and fail if gsm's
-behavior changes. Each is a `run` block the doc test executes.
+behavior changes. Each is a `run` block the doc test executes, and the oracle job's
+example-machine gate checks every machine they make with the extracted checkers
+(`.github/oracle/machines.txt`).
 
 ## What the classification rests on
 
@@ -704,7 +706,7 @@ fmt.Println(fm.Of(fs, crm).GetBool(crmErased), fm.Of(fs, mkt).GetBool(mktErased)
 // fact ("drop the queued campaign once erased") is refused by M1, which requires the
 // overwrite alone to keep the target valid. Such a rule goes in one registry that holds both
 // facts, or is evaluated when the campaign is sent (queued and not erased).
-mkt2, mkt2Erased, queued2 := target("marketing", "campaign_queued")
+mkt2, mkt2Erased, queued2 := target("marketing_reacting", "campaign_queued")
 mkt2.Invariant("no_campaign_once_erased").Watches(mkt2Erased, queued2).
     Holds(func(s gsm.State) bool { return !(s.GetBool(mkt2Erased) && s.GetBool(queued2)) }).
     Repair(func(s gsm.State) gsm.State { return s.SetBool(queued2, false) }).Add()
@@ -726,24 +728,24 @@ _ = queued
 <!-- gocheck: run -->
 ```go
 // ACL-04: requests per API key per month stay within 1,000,000; requests beyond are throttled.
-// The counter alone is 20 bits; the throttled flag makes 21, one past Build's limit. The rules
-// form one component, so per-component checking has nothing to split, and Abstract refuses
-// both the Bool and the increment.
-mk := func(max int) (*gsm.Registry, gsm.Var) {
-    r := gsm.NewRegistry("api_quota")
+// The counter alone is 20 bits; the throttled flag makes 21, one past Build's limit. The rule
+// ties the two, so per-component checking has nothing to split, and Abstract refuses both the
+// Bool and the increment.
+mk := func(name string, max int) *gsm.Registry {
+    r := gsm.NewRegistry(name)
     used := r.Int("used", 0, max)
     throttled := r.Bool("throttled")
-    r.Rule("throttle_at_quota").Require(gsm.Or(gsm.Is(throttled, 1), gsm.Below(used, max))).
-        RepairWith(gsm.Raise(throttled)).Add()
-    r.On("request").Does(gsm.Inc(used)).Add()
-    return r, used
+    r.Invariant("throttle_at_quota").Watches(used, throttled).
+        Holds(func(s gsm.State) bool { return s.GetBool(throttled) == (s.GetInt(used) >= max) }).
+        Repair(func(s gsm.State) gsm.State { return s.SetBool(throttled, s.GetInt(used) >= max) }).Add()
+    r.Event("request").Writes(used).
+        Apply(func(s gsm.State) gsm.State { return s.SetInt(used, s.GetInt(used)+1) }).Add()
+    return r
 }
-r, _ := mk(1_000_000)
-_, _, errBuild := r.Build()
-_, _, errAbs := r.Abstract(1_000_000).Build()
-small, _ := mk(1_000)
-_, _, errSmall := small.Build() // the toy model: a quota of 1,000
-if errBuild == nil || errAbs == nil || errSmall != nil {
+_, _, errBuild := mk("api_quota", 1_000_000).Build()
+_, _, errAbs := mk("api_quota", 1_000_000).Abstract(1_000_000).Build()
+_, _, errToy := mk("api_quota_toy", 1_000).Build() // the toy model: a quota of 1,000
+if errBuild == nil || errAbs == nil || errToy != nil {
     panic("expected the production quota refused and the toy quota verified")
 }
 fmt.Println(errBuild)
@@ -758,8 +760,8 @@ fmt.Println(errAbs)
 // PAY-01: a wallet balance never goes below zero; withdrawals beyond the available funds stay
 // pending until a deposit covers them. Amounts are cents up to $10M (30 bits per counter).
 // gsm events carry no amount, so even the toy model uses one fixed amount per event.
-mk := func(max int) *gsm.Registry {
-    w := gsm.NewRegistry("wallet")
+mk := func(name string, max int) *gsm.Registry {
+    w := gsm.NewRegistry(name)
     deposited := w.Int("deposited", 0, max) // counters that only rise, so the events commute
     withdrawn := w.Int("withdrawn", 0, max)
     pending := w.Int("withdrawal_pending", 0, 1) // an Int, so Abstract names the arithmetic
@@ -770,13 +772,13 @@ mk := func(max int) *gsm.Registry {
     w.On("withdraw_100").Does(gsm.IncBy(withdrawn, 100)).Add()
     return w
 }
-_, _, errBuild := mk(1_000_000_000).Build()
-_, _, errAbs := mk(1_000_000_000).Abstract(0, 1, 100).Build()
-_, _, errToy := mk(500).Build() // $5.00 of headroom: 9 + 9 + 1 = 19 bits
-if errBuild == nil || errAbs == nil || errToy != nil {
+// At production size the model needs 30 + 30 + 1 = 61 bits, far past Build's 20, and its one
+// rule ties the counters, so per-component checking has nothing to split. Abstract refuses it.
+_, _, errAbs := mk("wallet_cents", 1_000_000_000).Abstract(0, 1, 100).Build()
+_, _, errToy := mk("wallet_toy", 255).Build() // $2.55 of headroom: 8 + 8 + 1 = 17 bits
+if errAbs == nil || errToy != nil {
     panic("expected the production wallet refused and the toy wallet verified")
 }
-fmt.Println(errBuild)
 fmt.Println(errAbs)
 ```
 
@@ -934,14 +936,17 @@ if err == nil || rep.CCFailure == nil {
 fmt.Println(rep.CCFailure.State) // {open=-1000, payouts_frozen=false}
 
 // Two counters that only rise commute. They must count disputes over the merchant's
-// lifetime, and with the flag only 511 of them fit: a toy for a large merchant.
+// lifetime, and with the flag only 511 of them fit in 20 bits: a toy for a large merchant.
 mono := gsm.NewRegistry("disputes")
 opened, closed := mono.Int("opened", 0, 511), mono.Int("closed", 0, 511)
 fr := mono.Bool("payouts_frozen")
-mono.Rule("freeze").Require(gsm.Or(gsm.Is(fr, 1), gsm.AtMostVar(opened, closed))).RepairWith(gsm.Raise(fr)).Add()
-mono.Rule("unfreeze").Require(gsm.Or(gsm.Is(fr, 0), gsm.AboveVar(opened, closed))).RepairWith(gsm.Lower(fr)).Add()
-mono.On("dispute_opened").OnlyIf(gsm.Below(opened, 511)).Does(gsm.Inc(opened)).Add()
-mono.On("dispute_closed").OnlyIf(gsm.Below(closed, 511)).Does(gsm.Inc(closed)).Add()
+mono.Invariant("frozen_iff_open").Watches(opened, closed, fr).
+    Holds(func(s gsm.State) bool { return s.GetBool(fr) == (s.GetInt(opened) > s.GetInt(closed)) }).
+    Repair(func(s gsm.State) gsm.State { return s.SetBool(fr, s.GetInt(opened) > s.GetInt(closed)) }).Add()
+for name, v := range map[string]gsm.Var{"dispute_opened": opened, "dispute_closed": closed} {
+    v := v
+    mono.Event(name).Writes(v).Apply(func(s gsm.State) gsm.State { return s.SetInt(v, s.GetInt(v)+1) }).Add()
+}
 if _, rep, err := mono.Build(); err != nil {
     panic(fmt.Sprintf("monotone counters should verify: %v\n%s", err, rep))
 }

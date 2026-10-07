@@ -32,6 +32,30 @@ docs/verification.md#2           store/component1   certified-tables
 docs/verification.md#2           store/component2   certified-tables
 docs/verification.md#3           inventory          certified-tables
 @none docs/deployment.md#1 CheckMigration classifies a change from the rules; it builds no machine
+docs/invariant-coverage.md#1     order              certified-tables
+docs/invariant-coverage.md#2     roomtype_night     certified-tables
+docs/invariant-coverage.md#3     purchase_request   certified-tables
+docs/invariant-coverage.md#4     payment            certified
+docs/invariant-coverage.md#5     order_credit       certified-tables
+docs/invariant-coverage.md#6     identity           certified-tables
+docs/invariant-coverage.md#6     crm                certified-tables
+docs/invariant-coverage.md#6     marketing          certified-tables
+docs/invariant-coverage.md#6     marketing_reacting certified-tables
+docs/invariant-coverage.md#7     api_quota          not-built
+docs/invariant-coverage.md#7     api_quota_toy      certified-tables
+docs/invariant-coverage.md#8     wallet_cents       not-built
+docs/invariant-coverage.md#8     wallet_toy         certified
+docs/invariant-coverage.md#9     room_night         certified-tables
+docs/invariant-coverage.md#9     hotel_year         not-built
+docs/invariant-coverage.md#10    cancellation_naive rejected
+docs/invariant-coverage.md#10    cancellation_timed certified-tables
+docs/invariant-coverage.md#11    warehouse_day      certified-tables
+docs/invariant-coverage.md#12    disputes_net       rejected
+docs/invariant-coverage.md#12    disputes           certified-tables
+docs/invariant-coverage.md#13    order_line         certified-tables
+docs/invariant-coverage.md#14    last_room          certified-tables
+docs/invariant-coverage.md#15    outbox             certified
+docs/invariant-coverage.md#16    hold               certified-tables
 
 Example                          counter            certified-tables
 ExampleRegistry_Build            counter            certified-tables

@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   production scale; no balance, amount or cross-item rule verifies at scale. Candidate
   extensions are ranked by the invariants each would move, with their theory difficulty and
   precedent: event parameters first (17 alone), then the linear route (30 with parameters) and an
-  aggregate reduction (43 with both). Sixteen runnable programs validate representative rows, and
-  the doc test runs them (`docs/invariant-coverage.md` added to its file list). The roadmap gains a
+  aggregate reduction (43 with both). Sixteen runnable programs validate representative rows: the doc
+  test runs them (`docs/invariant-coverage.md` added to its file list), and the example-machine gate
+  checks the 24 machines they make (listed in `.github/oracle/machines.txt`). The roadmap gains a
   Coverage note tying item 1's priorities to the ranking. Documentation and doc tests only.
 
 - **The regime report (roadmap item 3).** `Report.Regime`, `FedReport.Regime` and
