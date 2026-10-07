@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Invariant coverage benchmark** ([docs/invariant-coverage.md](docs/invariant-coverage.md)). A
+  catalog of 116 business invariants across ten domains (inventory, orders, payments, hotel
+  bookings, loyalty, subscriptions, approvals, access control, scheduling, multi-service
+  consistency), each classified by whether gsm can express it today (combinator, closure,
+  encoding, or not at all) and whether it verifies at production-like domain sizes (and by which
+  path), with the blocking reason otherwise. Headline: 95% expressible, 41% verifiable at
+  production scale; no balance, amount or cross-item rule verifies at scale. Candidate
+  extensions are ranked by the invariants each would move, with their theory difficulty and
+  precedent: event parameters first (17 alone), then the linear route (30 with parameters) and an
+  aggregate reduction (43 with both). Sixteen runnable programs validate representative rows: the doc
+  test runs them (`docs/invariant-coverage.md` added to its file list), and the example-machine gate
+  checks the 24 machines they make (listed in `.github/oracle/machines.txt`). The roadmap gains a
+  Coverage note tying item 1's priorities to the ranking. Documentation and doc tests only.
+
 - **The regime report (roadmap item 3).** `Report.Regime`, `FedReport.Regime` and
   `MigrationReport.Regime` hold a `*RegimeSummary`: one summary that names the configuration and
   states its contract in four parts, printed by each report's `String()`. **Regime** is derived from

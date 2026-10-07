@@ -7,6 +7,25 @@ Items 1a (symmetry), 1b (abstraction, the comparison route), 1c (compositional c
 default), 2 (checking a change before you deploy it, for single registries) and 3 (the regime
 report) are implemented; nothing else here is implemented yet.
 
+## Coverage
+
+[Invariant coverage](invariant-coverage.md) measures what these items buy. Of 116 business
+invariants across ten domains, gsm expresses 95% today and verifies 41% at production scale:
+rules about one entity at a time, through collections or one machine per entity, and projections
+across services. No balance, amount or cross-item rule verifies at scale, and only 4 of 16 totals
+and counts do. Ranked by the invariants each would move to verified at scale, the open parts of
+item 1 come in this order:
+
+1. **Event parameters** (1b, deferred): 17 invariants alone, and on a route for 51. The theory
+   already has them (the cutoff n + 2m).
+2. **The linear route** (1b, deferred): with event parameters, 30 in all.
+3. **Aggregates** (1a, not covered): with both, 43, taking gsm from 41% to 78%. This one needs a
+   new theorem.
+
+Cross-item relational rules (pairs of items, not on this roadmap) come fourth. Composing the
+reductions (1c, deferred) moves one catalogued invariant, and partial-order reduction (1d) moves
+none: it lowers the cost of checks over reachable states, not the domain sizes a rule needs.
+
 ## 1. Verify realistic domains
 
 **Why.** `Build` proves convergence by checking every combination of state values, and that count
