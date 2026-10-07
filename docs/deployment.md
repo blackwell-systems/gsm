@@ -9,6 +9,7 @@ obligation, what the report says about it, and what to do.
 - [Running a federation as one machine](#running-a-federation-as-one-machine): the `FedMachine`, for example over a shared log.
 - [Projection deployments](#projection-deployments): one node per registry, merging projections.
 - [Cycles: ghosts and reset epochs](#cycles-ghosts-and-reset-epochs): why projection deployments on a cycle are not certified, and what would certify them.
+- [Changing a running system](#changing-a-running-system): check a change of rules or schema before you deploy it: safe online, safe behind a barrier, or unsafe with a witness.
 
 To run a built machine outside Go, see the [export format](reference.md#multi-language-runtime).
 
@@ -175,3 +176,119 @@ Two deployments are certified on a cycle, and gsm does not implement either as a
   A clear event on an unpinned feedback loop, the flag loop above (the shape of the `alarms` federation in gsm's cycle tests), cannot be certified without resets at all (`ghost_exact`): "clear the alarm" is a step down with a feedback loop to remember the old value. It needs epochs. If only every run agreeing with every other run matters, and not agreement with the `FedMachine`, that is also exact: runs may all settle on the same ghost, and the condition is that each reachable state flushes to one quiescent state, events and flushes commute up to a common flush, and flush-then-apply is order-independent (normalization-confluence `conv_quiet_exact`, which closed [`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md) gap 14). gsm certifies agreement with the `FedMachine`, which is that convergence plus no ghost (`agree_conv_noghost`). The full statements, with the necessity instance for each condition, are in normalization-confluence's [`coq/docs/distributed.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/coq/docs/distributed.md#the-no-reset-model-on-monotone-cycles-exactly-distributedcyclesexactv).
 
 A deployment that runs the `FedMachine` itself (for example one `FedMachine` over a shared, totally ordered log) is unaffected: it performs the reset on every normalization. The formal model and the full statements are in [Theory §11.4](theory.md#114-multi-registry-systems).
+
+---
+
+## Changing a running system
+
+`Build` checks one configuration. A deploy changes it while events are in flight: a limit goes
+from 5 to 10, a variable is added or rescaled, an event is renamed. `CheckMigration` takes the old
+registry, the new one, a migration of the state and a translation of the events, and classifies
+the change before you ship it:
+
+- **Safe online**: switch whenever you like, with events of the old configuration still in flight.
+- **Safe behind a barrier**: drain first (apply every event submitted under the old rules), then
+  switch. The report carries a witness: two runs, one switching with an event in flight, that end
+  in different states.
+- **Unsafe**: even a drained switch diverges. The witness is two such runs.
+- **Unknown**: not certified either way (below).
+
+<!-- gocheck: run -->
+```go
+cart := func(name string, limit int) (*gsm.Registry, gsm.Var) {
+    r := gsm.NewRegistry(name)
+    items := r.Int("items", 0, limit+1)
+    r.Invariant("cap").Watches(items).
+        Holds(func(s gsm.State) bool { return s.GetInt(items) <= limit }).
+        Repair(func(s gsm.State) gsm.State { return s.SetInt(items, limit) }).Add()
+    r.Event("add").Writes(items).
+        Apply(func(s gsm.State) gsm.State { return s.SetInt(items, s.GetInt(items)+1) }).Add()
+    return r, items
+}
+v1, items1 := cart("cart v1", 5)
+v2, items2 := cart("cart v2", 10)
+
+// The migration builds a state of v2 (blank is its zero state) from a state of v1. Events of
+// v1 still in flight become the v2 event of the same name (pass a map to rename them).
+migrate := func(old, blank gsm.State) gsm.State { return blank.SetInt(items2, old.GetInt(items1)) }
+report, err := gsm.CheckMigration(v1, v2, migrate, nil)
+if err != nil {
+    panic(err)
+}
+fmt.Print(report)
+if report.Outcome != gsm.MigrationSafeBehindBarrier {
+    panic("raising the cap with an add in flight should need a barrier")
+}
+```
+
+The report:
+
+```
+Migration cart v1 -> cart v2: SAFE BEHIND A BARRIER (an event in flight at the switch does not commute with it; drain, then switch)
+  ...
+  Online (switch at any time, events in flight):
+    cart v2 converges from the migrated start [PermB-start]: PASS (0 pairs of cart v2 events at the 11 states cart v2 reaches from the migrated start)
+    in-flight events commute with the switch [DS1]: FAIL (at {items=5}, add applied under cart v1 then the switch gives {items=5}; the switch then add under cart v2 gives {items=6})
+  Behind a barrier (drain, then switch):
+    cart v2 converges from every migrated reachable state [PermB-every]: PASS (...)
+    cart v1 converges from the start [PermA]: PASS (...)
+    the migration is injective on the reachable states [Faithful]: yes (on the reachable states of cart v1)
+  Why not online (DS1), from {items=0}:
+    run 1: add, add, add, add, add, add under cart v1, switch, nothing under cart v2: {items=5}
+    run 2: add, add, add, add, add under cart v1, switch with add in flight, add under cart v2: {items=6}
+  Theorems: det_live_exact, det_barrier_faithful, run_tequiv, perm_tequiv_total (...)
+```
+
+Six adds are submitted. A replica that applies all six under v1 clamps the sixth at 5 and keeps 5
+after the switch; a replica that switches with the sixth still in flight applies it under v2 and
+reaches 6. Drain first and every replica agrees.
+
+**What your deployment must do.** The outcome is about this model of the switch, which is gsm's
+runtime with one change of configuration in each replica's life:
+
+1. **Migrate every replica's state with the same migration, then `Normalize` it under the new
+   machine** (`newMachine.Normalize(migrate(old, newMachine.NewState()))`). The migration may
+   produce a state the new invariants reject; the normalization is part of the switch.
+2. **Apply an old event that arrives after the switch as its translation**, the event of the same
+   name in the new registry or the one the map names.
+3. **Apply each event once, by one configuration.** Events may arrive in any order (free delivery).
+4. **For a barrier, drain before switching**: every replica applies every event submitted under the
+   old configuration, then switches.
+
+**What each outcome rests on.** `Machine.Apply` repairs before it returns, so a switch never
+migrates a state between an event and its repair. In that model (normalization-confluence
+`coq/Reconfiguration.v`, section `Det`, with each step being `Apply`):
+
+- Safe online is exact, both ways (`det_live_exact`): the new registry converges from the migrated
+  start (every pair of its events commutes at every state it reaches from there: `run_tequiv`,
+  `perm_tequiv_total`), and every in-flight event commutes with the switch (DS1: at every state the
+  old registry reaches, migrating after the event is applying its translation after migrating).
+  The old registry's own convergence is not needed: a migration that forgets where the old rules
+  diverge is still safe online (`forgetful_migration`).
+- Safe behind a barrier is sound always and exact when the migration is injective on the states the
+  old registry reaches (`det_barrier_faithful`; without injectivity, `det_barrier_exact` makes it
+  sufficient): the new registry converges from every migrated reachable state, and the old one
+  converges from the start.
+- Unsafe is certified by its witness, two barrier runs that diverge, replayed before the report is
+  returned.
+- Unknown: the old registry diverges on its own, the migration is not injective, and gsm's search
+  found no two orders of the same events that migrate apart. The barrier outcome then turns on
+  whether the migration absorbs every divergence of the old rules, a condition with no mechanized
+  finite form ([`REGIME-AUDIT.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/REGIME-AUDIT.md)
+  gap 20, residue (c)), so gsm claims neither outcome.
+
+The registries need not pass `Build`: `CheckMigration` checks the states runs reach from the start
+(the old registry's zero state, or the states you pass with `MigrationFrom`, such as a running
+system's current state), not every state. Its cost is those states, at most 2²⁰ on each side; a
+larger instance is an error.
+
+**Not covered.** `CheckMigration` refuses a registry declared with `Abstract` or with `Independent`
+pairs (declared independence and causal or at-least-once delivery across the switch are open:
+gap 20, residue (b)). It takes single registries: a topology change of a federation is covered
+by the theory under `FedMachine` semantics (`fed_live_exact`, `fed_barrier_exact`; adding an edge
+an in-flight event reads is unsafe online, `late_edge`) but not implemented, and a collection
+migrated through its template and a projection deployment, where propagation is itself in flight
+(gap 20, residue (a)), are not covered. A runtime that can switch between an event and its repair
+is not gsm's, and is the theory's rewriting model (`live_exact`), where the change above fails
+condition (S2) at the raw 6 instead (`cap_raise`). The formal account is
+[Theory §11.11](theory.md#1111-changing-a-running-system-migration).

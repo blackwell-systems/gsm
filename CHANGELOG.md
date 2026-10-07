@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Check a change before you deploy it (roadmap item 2).** `CheckMigration(from, to, migrate,
+  events, opts...)` classifies a change from one registry to another, made while events are in
+  flight, as `MigrationSafeOnline` (switch at any time), `MigrationSafeBehindBarrier` (drain, then
+  switch), `MigrationUnsafe` (even a drained switch diverges) or `MigrationUnknown` (not certified
+  either way). `migrate` is a `Migration`, `func(old, blank State) State`, building a state of the
+  new registry from one of the old; `events` translates an old event still in flight at the switch
+  into a new one (default: the event of the same name); `MigrationFrom(states...)` checks from given
+  states instead of the zero state. It checks gsm's runtime, where `Apply` repairs before it
+  returns and the switch migrates the state and normalizes it under the new registry: the
+  deterministic model of normalization-confluence `coq/Reconfiguration.v` (section `Det`). Safe
+  online is exact, both ways (`det_live_exact`): the new registry converges from the migrated start
+  (every pair of its events commutes at every state it reaches there: `run_tequiv`,
+  `perm_tequiv_total`), and every in-flight event commutes with the switch (DS1); the old registry's
+  own convergence is not needed. Safe behind a barrier is sufficient (`det_barrier_exact`) and
+  exact when the migration is injective on the reachable states (`det_barrier_faithful`). Every
+  negative outcome carries a witness, two runs of the same events from one start that end in
+  different states, replayed before the report is returned. `MigrationUnknown` is reported when the
+  old registry diverges on its own, the migration is not injective, and no two orders of the same
+  events migrate apart: that case has no mechanized finite condition (`REGIME-AUDIT.md` gap 20,
+  residue (c)), so gsm claims neither outcome. The registries need not pass `Build`: the check
+  enumerates the states runs reach (at most 2²⁰ on each side; more is an error). A registry declared
+  with `Abstract` or with `Independent` pairs is refused (delivery classes across the switch are
+  open). Federations, collections and projection deployments are not covered. The report is
+  `MigrationReport{From, To, Outcome, Reason, Starts, StatesFrom, StatesTo, Conditions, Failed,
+  Faithful, Collision, LiveWitness, BarrierWitness, Theorems, SearchStopped}`, with
+  `MigrationCondition`, `MigrationWitness`, `MigrationRun` and `MigrationCollision`, and prints as
+  `Migration cart v1 -> cart v2: SAFE BEHIND A BARRIER (an event in flight at the switch does not
+  commute with it; drain, then switch)` followed by each condition and the witness runs. New
+  "Changing a running system" section in `docs/deployment.md` (with a run-checked snippet), the API
+  in `docs/reference.md`, and `docs/theory.md` §11.11, which maps each outcome to its theorem and
+  each of the theory's instances to gsm's model. `ExampleCheckMigration` shows it.
+- **Tests: the migration check.** Mirrors of the theory's instances: `cap_raise` (safe behind a
+  barrier; the in-flight add gives 5 versus 6), `doubling_migration` (DS1 fails at 0),
+  `migrated_transient` (safe online in gsm's model, since `Apply` never leaves the transient state
+  the rewriting model migrates; the test confirms that divergence exists for the raw state),
+  `forgetful_migration` (safe online though the old registry diverges), `rescaled_cap` (safe online
+  from every start) and `lww_target` (unsafe, with its barrier witness); an old divergence a
+  faithful migration keeps (unsafe), a non-injective migration that absorbs it (unknown, never
+  unsafe) and one that does not (unsafe, with the replayed witness); refusals, a repair cycle, and
+  the state limits. `TestCheckMigration_DifferentialRandom` compares the classification on random
+  small registries, migrations and event maps with a brute-force enumeration of live and barrier
+  runs, replays every witness in a model of `Apply` written from the rule tables, and anchors that
+  model to each side's built machine.
+
 ## [0.15.0] - 2026-10-06
 
 A scaling release. gsm can now verify models far larger than its 2²⁰-state enumeration, each through

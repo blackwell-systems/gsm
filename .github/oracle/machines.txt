@@ -30,6 +30,7 @@ docs/getting-started.md#1        product            certified-tables
 docs/verification.md#1           store/component1   certified-tables
 docs/verification.md#1           store/component2   certified-tables
 docs/verification.md#2           inventory          certified-tables
+@none docs/deployment.md#1 CheckMigration classifies a change from the rules; it builds no machine
 
 Example                          counter            certified-tables
 ExampleRegistry_Build            counter            certified-tables
@@ -45,3 +46,4 @@ ExampleNewCollection             product            certified-tables
 ExampleRegistry_Build_compositional  store/component1  certified-tables
 ExampleRegistry_Build_compositional  store/component2  certified-tables
 ExampleRegistry_Abstract         inventory          certified-tables
+@none ExampleCheckMigration CheckMigration classifies a change from the rules; it builds no machine

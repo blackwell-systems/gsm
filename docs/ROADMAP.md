@@ -3,8 +3,9 @@
 What gsm plans next, and why. Each item is backed by a theory item in normalization-confluence's
 [`docs/ROADMAP.md`](https://github.com/blackwell-systems/normalization-confluence/blob/main/docs/ROADMAP.md).
 gsm ships a feature only when its guarantee is mechanized there, so the theory item lands first.
-Items 1a (symmetry), 1b (abstraction, the comparison route) and 1c (compositional checking by
-default) are implemented; nothing else here is implemented yet.
+Items 1a (symmetry), 1b (abstraction, the comparison route), 1c (compositional checking by
+default) and 2 (checking a change before you deploy it, for single registries) are implemented;
+nothing else here is implemented yet.
 
 ## 1. Verify realistic domains
 
@@ -111,8 +112,8 @@ the at-least-once conditions), so the guarantee means exactly what it means toda
 
 - **When it applies.** The checks that explore reachable states by running event sequences: the
   exact conditions on cycles (GC), the reachable-state forms of the federation and projection
-  conditions, and the planned migration check. Single-registry CC already checks pairs and needs
-  no reduction.
+  conditions, and the migration check (`CheckMigration`). Single-registry CC already checks pairs
+  and needs no reduction.
 - **The idea.** When two events commute at a state, the two orders reach the same state, so the
   explorer needs to follow only one of them. Standard partial-order reduction (persistent or ample
   sets, sleep sets) prunes the orders a commutation proof makes redundant.
@@ -199,6 +200,31 @@ the change:
 
 **Done when.** The exact conditions for a live change are mechanized, and the migration check
 reports one of the three outcomes with its witness.
+
+- **Implemented, for single registries.** `CheckMigration(from, to, migrate, events)` enumerates the
+  states runs reach and returns a `MigrationReport`: `SAFE ONLINE`, `SAFE BEHIND A BARRIER` (with a
+  witness that a switch with an event in flight diverges), `UNSAFE` (with a witness of two runs
+  that drain, switch and diverge), or `UNKNOWN`. It checks gsm's runtime, where `Apply` repairs
+  before it returns, which is the deterministic model of normalization-confluence
+  `coq/Reconfiguration.v` (section `Det`): safe online is exact (`det_live_exact`), safe behind a
+  barrier is sufficient and exact when the migration is injective on the reachable states
+  (`det_barrier_exact`, `det_barrier_faithful`), and every negative outcome carries a replayed
+  witness. See [Deployment](deployment.md#changing-a-running-system) and
+  [Theory §11.11](theory.md#1111-changing-a-running-system-migration).
+- **Residue.**
+  - **Unknown**: when the old rules diverge on their own and the migration is not injective,
+    whether the migration absorbs the divergence has no mechanized finite condition (gap 20,
+    residue (c)). gsm searches for a witness and reports `UNKNOWN` when it finds none. Exploring
+    the pairs of states reached by one adjacent swap and continuing alike would decide it; that is
+    the candidate theorem.
+  - **Federations**: exact in the theory under `FedMachine` semantics (`fed_live_exact`,
+    `fed_barrier_exact`, `late_edge`), not implemented: the same check applies to
+    `FedMachine.Apply`, but a migration needs a way to build a `FedState`.
+  - **Delivery across the switch**: declared `Independent` pairs, causal and at-least-once delivery
+    (gap 20, residue (b)); such registries are refused.
+  - **Projection deployments**, where propagation is in flight at the switch (gap 20, residue (a)),
+    and collections migrated through their template (no combined theorem with symmetry).
+  - **Partial-order reduction** (item 1d) would cut the cost, which is the reachable states.
 
 **Theory item.** normalization-confluence roadmap item 9 (`REGIME-AUDIT.md` gap 20).
 
