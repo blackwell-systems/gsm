@@ -35,6 +35,10 @@ var regimeTheorems = map[string]bool{
 	// Migration (Reconfiguration.v, ReconfigurationClosure.v).
 	"det_live_exact": true, "det_live_implies_barrier": true, "det_barrier_exact": true, "det_barrier_faithful": true,
 	"det_barrier_closure_exact": true, "amodm_closure_exact": true, "gsm_closure_exact": true, "amodm_witness_exact": true,
+	// Migration under a delivery class (ReconfigurationDelivery.v, gated as NC.ReconfigurationDelivery.*).
+	"live_declared_exact": true, "barrier_declared_exact": true, "closureI_swap_exact": true,
+	"closureI_witness_exact": true, "classify_declared_complete": true, "live_implies_barrier_d": true,
+	"live_free_alo_exact": true, "barrier_free_alo_exact": true, "live_causal_exact": true, "barrier_causal_exact": true,
 }
 
 // snakeToken matches an identifier with an underscore: how a theorem name looks in the text.
@@ -216,7 +220,7 @@ func TestRegime_DeclaredPairs(t *testing.T) {
 	if !cites(dd, "dalo_unlisted_converge") {
 		t.Errorf("declared-mode dedupe line cites %v", dd.Theorems)
 	}
-	mustLine(t, "Not covered", s.NotCovered, "CheckMigration refuses a registry with Independent pairs")
+	mustLine(t, "Not covered", s.NotCovered, "CheckMigration checks declared independence across the switch exactly once")
 
 	// Declared pairs whose undeclared partners all commute: any order converges.
 	r2 := regimeFlags()

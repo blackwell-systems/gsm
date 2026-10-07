@@ -34,6 +34,8 @@ docs/verification.md#2           store/component1   certified-tables
 docs/verification.md#2           store/component2   certified-tables
 docs/verification.md#3           inventory          certified-tables
 @none docs/deployment.md#1 CheckMigration classifies a change from the rules; it builds no machine
+@none docs/deployment.md#2 CheckMigration under declared independence; it builds no machine
+@none docs/deployment.md#3 CheckMigration under at-least-once delivery; it builds no machine
 docs/invariant-coverage.md#1     order              certified-tables
 docs/invariant-coverage.md#2     roomtype_night     certified-tables
 docs/invariant-coverage.md#3     purchase_request   certified-tables

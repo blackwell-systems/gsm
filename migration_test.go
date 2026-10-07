@@ -511,11 +511,17 @@ func TestCheckMigration_Refusals(t *testing.T) {
 		t.Errorf("foreign migration result: %v", err)
 	}
 
+	// Declared pairs are checked under exactly-once delivery (declared independence across
+	// the switch) and refused under at-least-once delivery, where the combination is not
+	// covered.
 	ind, _ := capRegistry("ind", 5, 6, map[string]int{"add": 1, "add2": 2})
 	ind.Independent("add", "add2")
-	if _, err := gsm.CheckMigration(ind, b, mig, map[string]string{"add2": "add"}); err == nil ||
-		!strings.Contains(err.Error(), "Independent") {
-		t.Errorf("declared pairs: %v", err)
+	if _, err := gsm.CheckMigration(ind, b, mig, map[string]string{"add2": "add"}); err != nil {
+		t.Errorf("declared pairs under exactly-once delivery: %v", err)
+	}
+	if _, err := gsm.CheckMigration(ind, b, mig, map[string]string{"add2": "add"},
+		gsm.MigrationDeliveryClass(gsm.MigrationAtLeastOnce)); err == nil || !strings.Contains(err.Error(), "Independent") {
+		t.Errorf("declared pairs under at-least-once delivery: %v", err)
 	}
 	abs := gsm.NewRegistry("abs")
 	v := abs.Int("v", 0, 9)
