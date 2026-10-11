@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- README: plainer wording for the regime-map sentence ("a proof that no efficient one exists, or an open problem listed in the audit").
+
 ## [0.16.0] - 2026-10-10
 
 ### Added
